@@ -190,20 +190,6 @@
 </script>
 
 <div class="inbox-workspace">
-  {#if viewing}
-    <div class="inbox-detail">
-      <DocDetail
-        backLabel="Inbox"
-        onBack={closeDetail}
-        onDeleted={(id) => {
-          inboxItems = inboxItems.filter((i) => i.id !== id);
-          selectedIds.delete(id);
-          selectedIds = new Set(selectedIds);
-          viewing = null;
-        }}
-      />
-    </div>
-  {:else}
   <div class="inbox-header">
     <div class="header-left">
       {#if inboxItems.length > 0}
@@ -224,7 +210,7 @@
     </button>
   </div>
 
-  {#if selectedIds.size > 0}
+  {#if selectedIds.size > 0 && !viewing}
     <div class="bulk-bar">
       <span class="bulk-count">{selectedIds.size} selected</span>
       <select bind:value={bulkTarget} title="Move target workspace" aria-label="Move target workspace">
@@ -244,6 +230,7 @@
     </div>
   {/if}
 
+  {#if !viewing}
   <div class="quick-capture">
     {#if $settings.sttEnabled}
       <MicButton onTranscribe={(text) => {
@@ -273,6 +260,7 @@
       +
     </button>
   </div>
+  {/if}
 
   <div class="inbox-list">
     {#if loading}
@@ -320,6 +308,19 @@
       {/each}
     {/if}
   </div>
+  {#if viewing}
+    <div class="inbox-dock">
+      <DocDetail
+        backLabel="Inbox"
+        onBack={closeDetail}
+        onDeleted={(id) => {
+          inboxItems = inboxItems.filter((i) => i.id !== id);
+          selectedIds.delete(id);
+          selectedIds = new Set(selectedIds);
+          viewing = null;
+        }}
+      />
+    </div>
   {/if}
 </div>
 
@@ -332,10 +333,15 @@
     color: var(--text-primary);
   }
 
-  .inbox-detail {
-    flex: 1;
-    min-height: 0;
+  /* Docked editor: list stays visible above, writing fills below. */
+  .inbox-dock {
+    flex: 0 0 54%;
+    min-height: 220px;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-base);
   }
 
   .inbox-header {
@@ -453,6 +459,7 @@
 
   .inbox-list {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: var(--space-2);
   }

@@ -197,19 +197,7 @@
   </div>
 
   <div class="projects-content">
-    {#if editingDoc}
-      <div class="project-detail">
-        <DocDetail
-          backLabel="Project"
-          onBack={closeDetail}
-          onDeleted={(id) => {
-            dropEditingIfGone(id);
-            if (selectedProject?.id === id) selectedProject = null;
-            projects = projects.filter((p) => p.id !== id);
-          }}
-        />
-      </div>
-    {:else if !selectedProject}
+    {#if !selectedProject}
       <div class="empty-state">
         <div class="empty-icon"><Icon name="folder" size={44} /></div>
         <div class="empty-title">Projects</div>
@@ -317,6 +305,19 @@
               {/if}
             </div>
           {/each}
+        </div>
+      {/if}
+      {#if editingDoc}
+        <div class="project-dock">
+          <DocDetail
+            backLabel="Project"
+            onBack={closeDetail}
+            onDeleted={(id) => {
+              dropEditingIfGone(id);
+              if (selectedProject?.id === id) selectedProject = null;
+              projects = projects.filter((p) => p.id !== id);
+            }}
+          />
         </div>
       {/if}
     {/if}
@@ -433,12 +434,15 @@
     min-height: 0;
   }
 
-  .project-detail {
-    flex: 1;
-    min-height: 0;
+  /* Docked editor: dashboard/board stay visible above, writing fills below. */
+  .project-dock {
+    flex: 0 0 54%;
+    min-height: 220px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-base);
   }
 
   .open-btn {

@@ -1066,10 +1066,29 @@ impl Database {
 
     pub fn set_book_rating(&self, doc_id: &str, rating: Option<i64>) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let fm = rating.map(|r| serde_json::json!({"rating": r}).to_string());
+        // Merge into existing frontmatter — never clobber sibling keys
+        // (margin notes, custom properties).
+        let current: Option<String> = conn
+            .query_row("SELECT frontmatter_json FROM docs WHERE id = ?1", params![doc_id], |row| {
+                row.get(0)
+            })
+            .map_err(|e| e.to_string())?;
+        let mut fm: serde_json::Map<String, serde_json::Value> = current
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+        match rating {
+            Some(r) => {
+                fm.insert("rating".to_string(), serde_json::json!(r));
+            }
+            None => {
+                fm.remove("rating");
+            }
+        }
+        let fm_json = if fm.is_empty() { None } else { Some(serde_json::Value::Object(fm).to_string()) };
         conn.execute(
             "UPDATE docs SET frontmatter_json = ?1 WHERE id = ?2",
-            params![fm, doc_id],
+            params![fm_json, doc_id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }

@@ -341,19 +341,7 @@
     </div>
   </div>
 
-  {#if selectedBeat}
-    <div class="beat-detail">
-      <DocDetail
-        backLabel="Beat board"
-        onBack={() => { selectedBeat = null; }}
-        onDeleted={() => {
-          selectedBeat = null;
-          loadProject();
-          loadProjects();
-        }}
-      />
-    </div>
-  {:else if !projectId}
+  {#if !projectId}
     <div class="project-select">
       {#if projects.length === 0}
         <p>No novel projects yet. Create one to start your beat board.</p>
@@ -385,8 +373,10 @@
     </div>
   {:else if loading}
     <div class="project-select">Loading...</div>
-  {:else if viewMode === 'board'}
-    <div class="beat-board">
+  {:else}
+    <div class="novel-main">
+      {#if viewMode === 'board'}
+      <div class="beat-board">
       {#each board.acts as act}
         <div
           class="act-column"
@@ -467,7 +457,8 @@
         <button class="add-beat-btn act-add" onclick={() => addBeat('act')}>+ Act</button>
       </div>
     </div>
-  {:else}
+      {/if}
+      {#if viewMode === 'bible'}
     <div class="bible-view">
       <h2>Story Bible</h2>
       {#each ['world_rules', 'world_timeline', 'world_characters', 'world_settings'] as kind}
@@ -507,6 +498,21 @@
           </div>
         </div>
       {/each}
+    </div>
+      {/if}
+      {#if selectedBeat}
+        <div class="beat-dock">
+          <DocDetail
+            backLabel="Beat board"
+            onBack={() => { selectedBeat = null; }}
+            onDeleted={() => {
+              selectedBeat = null;
+              loadProject();
+              loadProjects();
+            }}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -593,12 +599,23 @@
     color: var(--text-muted);
   }
 
-  .beat-detail {
+  .novel-main {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Docked editor: board stays visible above, writing fills below. */
+  .beat-dock {
+    flex: 0 0 54%;
+    min-height: 220px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-base);
   }
 
   .project-row {
@@ -685,6 +702,7 @@
     padding: var(--space-4);
     overflow-x: auto;
     flex: 1;
+    min-height: 0;
   }
 
   .act-column {
@@ -797,6 +815,7 @@
     padding: var(--space-4);
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
   }
 
   .bible-view h2 {

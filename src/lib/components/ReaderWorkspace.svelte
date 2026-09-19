@@ -17,6 +17,98 @@
   let loading = $state(false);
   let readerContent = $state('');
   let readerPosition = $state(0);
+  let scrollEl = $state<HTMLElement | null>(null);
+  let posSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  interface MarginNote {
+    id: string;
+    text: string;
+    quote: string;
+    /** Scroll ratio (0..1) captured when noted — jump target. */
+    pos: number;
+    created_at: string;
+  }
+
+  let marginNotes = $state<MarginNote[]>([]);
+  let showNotes = $state(false);
+  let noteDraft = $state('');
+  let noteQuote = $state('');
+
+  function readMarginNotes(fmJson: string | null): MarginNote[] {
+    if (!fmJson) return [];
+    try {
+      const fm = JSON.parse(fmJson) as Record<string, unknown>;
+      const notes = fm["marginNotes"];
+      if (!Array.isArray(notes)) return [];
+      return notes.filter(
+        (n): n is MarginNote =>
+          !!n && typeof n === "object" && typeof (n as MarginNote).text === "string"
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async function persistMarginNotes(notes: MarginNote[]) {
+    if (!selectedBook) return;
+    let fm: Record<string, unknown> = {};
+    try {
+      fm = JSON.parse(selectedBook.doc.frontmatter_json ?? "{}");
+    } catch {
+      fm = {};
+    }
+    fm["marginNotes"] = notes;
+    try {
+      const updated = await api.docSave(selectedBook.doc.id, undefined, undefined, undefined, JSON.stringify(fm));
+      selectedBook.doc = updated;
+      currentDoc.set(updated);
+      marginNotes = notes;
+    } catch (e) {
+      showToast(`Couldn't save note: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  function captureQuote() {
+    const selection = window.getSelection();
+    const text = selection && selection.rangeCount > 0 ? selection.toString().trim() : "";
+    noteQuote = text.slice(0, 280);
+    if (!text) showToast("Select a passage first, then quote it", "info");
+  }
+
+  async function addNote() {
+    if (!selectedBook || !noteDraft.trim()) return;
+    const el = scrollEl;
+    const pos = el ? el.scrollTop / (el.scrollHeight - el.clientHeight || 1) : readerPosition;
+    const note: MarginNote = {
+      id: `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      text: noteDraft.trim(),
+      quote: noteQuote,
+      pos: Math.max(0, Math.min(1, pos)),
+      created_at: new Date().toISOString(),
+    };
+    await persistMarginNotes([...marginNotes, note]);
+    noteDraft = "";
+    noteQuote = "";
+  }
+
+  async function deleteNote(id: string) {
+    await persistMarginNotes(marginNotes.filter((n) => n.id !== id));
+  }
+
+  function jumpToNote(note: MarginNote) {
+    const el = scrollEl;
+    if (!el) return;
+    el.scrollTo({ top: note.pos * (el.scrollHeight - el.clientHeight), behavior: "smooth" });
+  }
+
+  function noteTime(iso: string): string {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  }
 
   async function loadBooks() {
     loading = true;
@@ -40,6 +132,16 @@
     currentDoc.set(entry.doc);
     readerContent = await processTransclusions(entry.doc.content || '');
     readerPosition = entry.doc.reading_position || 0;
+    marginNotes = readMarginNotes(entry.doc.frontmatter_json);
+    noteDraft = "";
+    noteQuote = "";
+    // Restore the saved position once laid out; then keep tracking.
+    requestAnimationFrame(() => {
+      const el = scrollEl;
+      if (el && readerPosition > 0) {
+        el.scrollTop = readerPosition * (el.scrollHeight - el.clientHeight);
+      }
+    });
 
     if (entry.shelf_status === 'to-read') {
       await api.readerSetShelfStatus(entry.doc.id, 'reading');
@@ -48,8 +150,11 @@
   }
 
   function closeBook() {
+    void savePosition();
     selectedBook = null;
     readerContent = '';
+    marginNotes = [];
+    showNotes = false;
   }
 
   async function handleScroll(e: Event) {
@@ -57,6 +162,11 @@
     const el = e.target as HTMLElement;
     const pct = el.scrollTop / (el.scrollHeight - el.clientHeight || 1);
     readerPosition = pct;
+    // Debounced position sync (plain handle: event context only).
+    if (posSaveTimer) clearTimeout(posSaveTimer);
+    posSaveTimer = setTimeout(() => {
+      void savePosition();
+    }, 1500);
   }
 
   async function savePosition() {
@@ -67,6 +177,7 @@
 
   async function finishBook() {
     if (!selectedBook) return;
+    await savePosition();
     await api.readerSetShelfStatus(selectedBook.doc.id, 'finished');
     selectedBook.shelf_status = 'finished';
   }
@@ -261,6 +372,16 @@
           {/each}
         </div>
         <button class="finish-btn" onclick={finishBook}>Mark Finished</button>
+        <button
+          class="notes-btn"
+          class:active={showNotes}
+          onclick={() => (showNotes = !showNotes)}
+          title={showNotes ? "Hide margin notes" : "Show margin notes"}
+          aria-label={showNotes ? "Hide margin notes" : "Show margin notes"}
+          aria-pressed={showNotes}
+        >
+          Notes{#if marginNotes.length > 0} ({marginNotes.length}){/if}
+        </button>
         {#if $settings.ttsEnabled}
           <ReadAloudButton
             getText={() => readerContent}
@@ -271,10 +392,65 @@
           />
         {/if}
       </div>
-      <div class="reader-content" onscroll={handleScroll}>
-        <div class="reader-prose">
-          {@html readerContent}
+      <div class="reader-body">
+        <div class="reader-content" bind:this={scrollEl} onscroll={handleScroll}>
+          <div class="reader-prose">
+            {@html readerContent}
+          </div>
         </div>
+        {#if showNotes}
+          <aside class="notes-panel" aria-label="Margin notes">
+            <div class="notes-header">
+              <span class="notes-title">Margin notes</span>
+              <span class="notes-count">{marginNotes.length}</span>
+            </div>
+            <div class="note-composer">
+              {#if noteQuote}
+                <div class="note-quote">
+                  <span>{noteQuote}</span>
+                  <button onclick={() => (noteQuote = "")} title="Clear quote" aria-label="Clear quote">×</button>
+                </div>
+              {:else}
+                <button class="quote-btn" onclick={captureQuote} title="Quote the selected passage">
+                  Quote selection
+                </button>
+              {/if}
+              <textarea
+                class="note-input"
+                bind:value={noteDraft}
+                placeholder="Write in the margin…"
+                aria-label="New margin note"
+                rows={2}
+              ></textarea>
+              <button class="note-add" onclick={addNote} disabled={!noteDraft.trim()}>
+                Add note here
+              </button>
+            </div>
+            <div class="notes-list">
+              {#each [...marginNotes].reverse() as note}
+                <div class="note-card">
+                  {#if note.quote}
+                    <button class="note-card-quote" onclick={() => jumpToNote(note)} title="Jump to passage">
+                      “{note.quote}”
+                    </button>
+                  {/if}
+                  <div class="note-card-text">{note.text}</div>
+                  <div class="note-card-meta">
+                    <button onclick={() => jumpToNote(note)} title="Jump to position">{noteTime(note.created_at)}</button>
+                    <button
+                      class="note-delete"
+                      onclick={() => deleteNote(note.id)}
+                      title="Delete note"
+                      aria-label="Delete note"
+                    >×</button>
+                  </div>
+                </div>
+              {:else}
+                <div class="notes-empty">No margin notes yet — select a passage, quote it, write.</div>
+              {/each}
+            </div>
+          </aside>
+        {/if}
       </div>
     </div>
   {/if}
@@ -450,6 +626,218 @@
     border-color: var(--accent-primary);
   }
 
+  .notes-btn {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .notes-btn:hover {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+  }
+
+  .notes-btn.active {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+
+  .reader-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+
+  .notes-panel {
+    width: 300px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-subtle);
+    background: var(--surface-base);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .notes-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4) var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+
+  .notes-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+  }
+
+  .notes-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .note-composer {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
+  .quote-btn {
+    align-self: flex-start;
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .quote-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+  }
+
+  .note-quote {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11px;
+    font-style: italic;
+    color: var(--text-secondary);
+    border-left: 2px solid var(--accent-primary);
+    padding-left: var(--space-2);
+  }
+
+  .note-quote button {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .note-input {
+    min-height: 52px;
+    resize: vertical;
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: var(--font-body);
+  }
+
+  .note-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+  }
+
+  .note-add {
+    align-self: flex-end;
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--accent-primary);
+    background: transparent;
+    color: var(--accent-primary);
+    cursor: pointer;
+  }
+
+  .note-add:hover:not(:disabled) {
+    background: var(--surface-overlay);
+  }
+
+  .note-add:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .notes-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .note-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+  }
+
+  .note-card-quote {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 11px;
+    font-style: italic;
+    color: var(--text-secondary);
+    border-left: 2px solid var(--accent-primary);
+    padding-left: var(--space-2);
+    margin-bottom: var(--space-1);
+    cursor: pointer;
+  }
+
+  .note-card-quote:hover {
+    color: var(--accent-primary);
+  }
+
+  .note-card-text {
+    font-size: 13px;
+    line-height: var(--line-height-relaxed);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .note-card-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--space-1);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  .note-card-meta button {
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 10px;
+  }
+
+  .note-card-meta button:hover {
+    color: var(--text-primary);
+  }
+
+  .note-delete:hover {
+    color: var(--accent-semantic-red) !important;
+  }
+
+  .notes-empty {
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-4) 0;
+  }
+
   .reader-title {
     flex: 1;
     text-align: center;
@@ -484,6 +872,7 @@
 
   .reader-content {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     padding: var(--space-6);
   }

@@ -295,15 +295,7 @@
   </div>
 
   <div class="pv-content">
-    {#if openedDoc}
-      <div class="pv-detail">
-        <DocDetail
-          backLabel="All Documents"
-          onBack={closeDetail}
-          onDeleted={refreshAfterDelete}
-        />
-      </div>
-    {:else if loading}
+    {#if loading}
       <div class="empty-state">Loading...</div>
     {:else if filteredDocs.length === 0}
       <div class="empty-state">
@@ -415,6 +407,15 @@
             {/each}
           </div>
         {/each}
+      </div>
+    {/if}
+    {#if openedDoc}
+      <div class="pv-dock">
+        <DocDetail
+          backLabel="All Documents"
+          onBack={closeDetail}
+          onDeleted={refreshAfterDelete}
+        />
       </div>
     {/if}
   </div>
@@ -711,12 +712,15 @@
     flex-direction: column;
   }
 
-  .pv-detail {
-    flex: 1;
-    min-height: 0;
+  /* Docked editor: table/board stay visible above, writing fills below. */
+  .pv-dock {
+    flex: 0 0 54%;
+    min-height: 220px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-base);
   }
 
   .empty-state {
