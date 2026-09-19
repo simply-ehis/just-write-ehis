@@ -36,6 +36,8 @@ export interface AppSettings {
   ghostEnabled: boolean;
   /** "en" = English typo table; "off" = custom words only (for other languages). */
   dictionaryLanguage: "en" | "off";
+  /** Formatting toolbar open (Aa toggle) — shared by every editor. */
+  formatToolbarOpen: boolean;
 
   smallModelEndpoint: string;
   smallModelName: string;
@@ -117,6 +119,7 @@ const defaultSettings: AppSettings = {
   autocorrectEnabled: false,
   ghostEnabled: false,
   dictionaryLanguage: "en",
+  formatToolbarOpen: false,
 
   smallModelEndpoint: "http://127.0.0.1:8093/v1",
   smallModelName: "lfm2.5-350m",

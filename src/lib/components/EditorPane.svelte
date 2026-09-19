@@ -613,35 +613,13 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   <div class="editor-toolbar">
     <span class="doc-title">{$currentDoc?.title ?? ''}</span>
     <div class="toolbar-actions">
-      <button class="craft-toggle icon-btn" class:active={showCraft} onclick={() => showCraft = !showCraft} title="Craft metrics" aria-label="Toggle craft metrics">
-        <Icon name="chart" size={15} />
-      </button>
-      <button class="icon-btn" class:active={$aiPanelOpen} onclick={() => $aiPanelOpen = !$aiPanelOpen} title="AI panel (Ctrl+J)" aria-label="Toggle AI panel">
-        <Icon name="sparkle" size={15} />
-      </button>
-      <VersionHistory />
-      {#if $settings.sttEnabled}
-        <MicButton onTranscribe={(text) => {
-          if (editorView) {
-            const pos = editorView.state.selection.main.head;
-            editorView.dispatch({ changes: { from: pos, insert: text + ' ' } });
-            editorView.focus();
-          }
-        }} />
-      {/if}
-      {#if $settings.ttsEnabled}
-        <ReadAloudButton
-          getText={() => $currentDoc?.content ?? ''}
-          getSelection={() => {
-            if (!editorView) return '';
-            const sel = editorView.state.selection.main;
-            return sel.from !== sel.to
-              ? editorView.state.sliceDoc(sel.from, sel.to)
-              : '';
-          }}
-        />
-      {/if}
-      <div class="mode-toggle-group">
+      <div class="toolbar-group" role="group" aria-label="AI and history">
+        <button class="icon-btn" class:active={$aiPanelOpen} onclick={() => $aiPanelOpen = !$aiPanelOpen} title="AI panel (Ctrl+J)" aria-label="Toggle AI panel">
+          <Icon name="sparkle" size={15} />
+        </button>
+        <VersionHistory />
+      </div>
+      <div class="toolbar-group" role="group" aria-label="View modes">
         <button
           class="icon-btn"
           class:active={focusMode}
@@ -663,20 +641,50 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
           <Icon name="book-open" size={15} />
         </button>
       </div>
-      <div class="export-wrapper">
-        <button class="export-btn icon-btn" onclick={toggleExportMenu} title="Export document" aria-label="Export document">
-          <Icon name="download" size={15} />
+      {#if $settings.sttEnabled || $settings.ttsEnabled}
+        <div class="toolbar-group" role="group" aria-label="Voice">
+          {#if $settings.sttEnabled}
+            <MicButton onTranscribe={(text) => {
+              if (editorView) {
+                const pos = editorView.state.selection.main.head;
+                editorView.dispatch({ changes: { from: pos, insert: text + ' ' } });
+                editorView.focus();
+              }
+            }} />
+          {/if}
+          {#if $settings.ttsEnabled}
+            <ReadAloudButton
+              getText={() => $currentDoc?.content ?? ''}
+              getSelection={() => {
+                if (!editorView) return '';
+                const sel = editorView.state.selection.main;
+                return sel.from !== sel.to
+                  ? editorView.state.sliceDoc(sel.from, sel.to)
+                  : '';
+              }}
+            />
+          {/if}
+        </div>
+      {/if}
+      <div class="toolbar-group" role="group" aria-label="File">
+        <button class="craft-toggle icon-btn" class:active={showCraft} onclick={() => showCraft = !showCraft} title="Craft metrics" aria-label="Toggle craft metrics">
+          <Icon name="chart" size={15} />
         </button>
-        {#if showExportMenu}
-          <div class="export-menu" role="menu" aria-label="Export formats">
-            {#each exportFormats as fmt}
-              <button onclick={() => exportAs(fmt)} title="Export as {exportLabel(fmt)}">{exportLabel(fmt)}</button>
-            {/each}
-            {#if $currentDoc?.kind === 'fountain'}
-              <button onclick={() => exportAs('fountain')} title="Export raw Fountain source">Fountain (.fountain)</button>
-            {/if}
-          </div>
-        {/if}
+        <div class="export-wrapper">
+          <button class="export-btn icon-btn" onclick={toggleExportMenu} title="Export document" aria-label="Export document">
+            <Icon name="download" size={15} />
+          </button>
+          {#if showExportMenu}
+            <div class="export-menu" role="menu" aria-label="Export formats">
+              {#each exportFormats as fmt}
+                <button onclick={() => exportAs(fmt)} title="Export as {exportLabel(fmt)}">{exportLabel(fmt)}</button>
+              {/each}
+              {#if $currentDoc?.kind === 'fountain'}
+                <button onclick={() => exportAs('fountain')} title="Export raw Fountain source">Fountain (.fountain)</button>
+              {/if}
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </div>
@@ -757,24 +765,33 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
 
   .toolbar-actions {
     display: flex;
-    gap: 8px;
+    gap: 4px;
     align-items: center;
+  }
+
+  .toolbar-group {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    padding: 0 8px;
+  }
+
+  .toolbar-group:first-child {
+    padding-left: 0;
+  }
+
+  .toolbar-group + .toolbar-group {
+    border-left: 1px solid var(--border-subtle);
+  }
+
+  .toolbar-group .icon-btn.active {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+    border-color: var(--accent-primary);
   }
 
   .export-wrapper {
     position: relative;
-  }
-
-  .mode-toggle-group {
-    display: flex;
-    gap: 4px;
-    margin-left: 8px;
-  }
-
-  .mode-toggle-group .icon-btn.active {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-    border-color: var(--accent-primary);
   }
 
   .export-btn {

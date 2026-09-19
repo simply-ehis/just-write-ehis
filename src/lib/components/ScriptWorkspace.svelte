@@ -538,13 +538,15 @@
   .fountain-input {
     flex: 1;
     width: 100%;
-    padding: var(--space-4);
+    max-width: 760px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-4);
     border: none;
     background: transparent;
     color: var(--text-primary);
     font-family: var(--font-mono);
-    font-size: var(--font-size-sm);
-    line-height: var(--line-height-relaxed);
+    font-size: var(--font-size-base);
+    line-height: 1.8;
     resize: none;
     outline: none;
   }
@@ -552,7 +554,15 @@
   .screenplay-view {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-6);
+    padding: var(--space-6) var(--space-4);
+  }
+
+  /* Centered reading column that never overrides element-level widths
+     (:where keeps specificity at zero, so dialogue/parenthetical keep
+     their own narrower measures). */
+  .screenplay-view > :where(div) {
+    max-width: 700px;
+    margin-inline: auto;
   }
 
   .sp-title-page {

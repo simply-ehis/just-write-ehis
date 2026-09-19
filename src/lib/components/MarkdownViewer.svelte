@@ -228,4 +228,20 @@
     flex: 1;
     overflow: auto;
   }
+
+  /* Centered reading column: the viewer is a reading surface, so the
+     text sits in a measure-optimized column, not edge to edge.
+     :global because .cm-* nodes are rendered by CodeMirror, not Svelte. */
+  .viewer-content :global(.cm-content) {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 16px;
+    font-family: var(--font-body);
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-relaxed);
+  }
+
+  .viewer-content :global(.cm-gutters) {
+    border: none;
+  }
 </style>

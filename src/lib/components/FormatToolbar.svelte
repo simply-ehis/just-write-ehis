@@ -2,10 +2,15 @@
   import { onMount, onDestroy } from "svelte";
   import type { EditorView } from "@codemirror/view";
   import Icon from "$lib/components/Icon.svelte";
+  import { settings } from "$lib/stores/settings";
 
   let { view }: { view: EditorView | null } = $props();
 
-  let expanded = $state(false);
+  // Visibility lives in settings (persisted, shared by every editor) so
+  // the writing area stays dominant exactly how the writer left it.
+  function setOpen(next: boolean) {
+    $settings = { ...$settings, formatToolbarOpen: next };
+  }
 
   function insertMarkdown(syntax: string, wrap = false) {
     if (!view) return;
@@ -84,8 +89,8 @@
   ];
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape" && expanded) {
-      expanded = false;
+    if (e.key === "Escape" && $settings.formatToolbarOpen) {
+      setOpen(false);
       e.preventDefault();
     }
   }
@@ -94,12 +99,18 @@
   onDestroy(() => window.removeEventListener("keydown", handleKeydown));
 </script>
 
-<div class="format-toolbar" class:expanded>
-  <button class="toolbar-toggle" onclick={() => expanded = !expanded} title="Formatting">
-    <span class="toggle-icon">{expanded ? "✕" : "Aa"}</span>
+<div class="format-toolbar" class:expanded={$settings.formatToolbarOpen}>
+  <button
+    class="toolbar-toggle"
+    onclick={() => setOpen(!$settings.formatToolbarOpen)}
+    title={$settings.formatToolbarOpen ? "Hide formatting toolbar" : "Show formatting toolbar"}
+    aria-label={$settings.formatToolbarOpen ? "Hide formatting toolbar" : "Show formatting toolbar"}
+    aria-expanded={$settings.formatToolbarOpen}
+  >
+    <span class="toggle-icon">{$settings.formatToolbarOpen ? "✕" : "Aa"}</span>
   </button>
 
-  {#if expanded}
+  {#if $settings.formatToolbarOpen}
     <div class="toolbar-clusters">
       <div class="cluster">
         <span class="cluster-label">Text</span>
