@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "productName": "Just Write ehis",
+  "version": "0.2.0",
+  "identifier": "com.just-write-ehis.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Just Write ehis",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "decorations": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "resources": [
+      "sidecars/fetch_sidecars.py",
+      "sidecars/requirements.txt",
+      "sidecars/stt_server.py",
+      "sidecars/tts_server.py",
+      "sidecars/memory_server.py",
+      "sidecars/harness/*",
+      "sidecars/models/*"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDMkFDRDc4RTQ4RkRENjAKUldSZzNZL2tlTTBxSE1FNXAvdURFaFNhL1E5UGdqTnlsUFV3Y1hUcXAvdm5GNHJhTmM5cGZQWkoK",
+      "endpoints": [
+        "https://github.com/YOUR_USER/YOUR_REPO/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

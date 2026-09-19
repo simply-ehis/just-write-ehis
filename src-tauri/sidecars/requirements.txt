@@ -1,0 +1,10 @@
+# STT: Moonshine-base GGUF via in-process transcribe_cpp (torch-free).
+#   fetched with: python src-tauri/sidecars/fetch_sidecars.py --stt
+#   (transcribe-cpp-native pulls the transcribe_cpp bindings with it)
+transcribe-cpp-native
+
+# TTS: Kokoro v1.0 multi-lang via sherpa-onnx (torch-free, CPU wheels)
+sherpa-onnx
+
+# Shared
+numpy

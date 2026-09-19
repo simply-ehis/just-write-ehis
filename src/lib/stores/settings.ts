@@ -1,0 +1,224 @@
+import { writable } from "svelte/store";
+
+export type SettingsCategory =
+  | "general"
+  | "editor"
+  | "ai"
+  | "privacy"
+  | "vaults"
+  | "sync"
+  | "capture"
+  | "keybindings"
+  | "about";
+
+export interface SavedView {
+  name: string;
+  viewMode: "table" | "board" | "calendar";
+  filterWorkspace: string;
+  filterStatus: string;
+  searchQuery: string;
+  sortField: string;
+  sortDir: "asc" | "desc";
+  boardGroupBy: "workspace" | "status";
+}
+
+export interface AppSettings {
+  theme: "dark" | "light";
+  iconSet: "phosphor" | "tabler";
+  streakGoal: number;
+
+  fontSize: number;
+  lineHeight: number;
+  fontFamily: string;
+  typewriterDefault: boolean;
+  focusDimmingDefault: boolean;
+  autocorrectEnabled: boolean;
+  ghostEnabled: boolean;
+  /** "en" = English typo table; "off" = custom words only (for other languages). */
+  dictionaryLanguage: "en" | "off";
+
+  smallModelEndpoint: string;
+  smallModelName: string;
+  mainModelEndpoint: string;
+  mainModelName: string;
+  apiKey: string;
+  /** Working dir of the small-model harness server (sidecar toggle needs it). */
+  sidecarHarnessDir: string;
+  blankModeDefault: boolean;
+  logsLocalOnly: boolean;
+  /** Scrub secrets from outgoing AI prompts via the memory sidecar. */
+  scrubSecrets: boolean;
+  /** Learn cross-session facts + inject recall into chat context. */
+  aiMemoryEnabled: boolean;
+
+  appLockPin: string;
+  craftProfilingEnabled: boolean;
+
+  vaultPath: string;
+  backupFrequency: "daily" | "weekly" | "monthly" | "never";
+  snapshotRetentionDays: number;
+
+  fileWatcherEnabled: boolean;
+  conflictBehavior: "keep-remote" | "keep-local" | "ask";
+
+  androidCaptureMethod: "notification" | "widget" | "share-target";
+  weeklyTriageReminder: boolean;
+  streakReminder: boolean;
+  logsStampPlace: boolean;
+  lastTriageShown: string | null;
+  lastStreakShown: string | null;
+  lastAutoBackup: string | null;
+
+  keybindings: Record<string, string>;
+  featuresUsed: string[];
+  dismissedNudges: string[];
+  aiPersona: string;
+  templates: { name: string; content: string; workspace: string }[];
+
+  // Per-workspace AI privacy: workspaceId → true = local only, no API calls
+  workspacePrivacy: Record<string, boolean>;
+
+  // Saved Properties views: name + filter + sort + group + mode.
+  savedViews: SavedView[];
+
+  // App updates (Tauri shell only; browser preview is rebuilt, not updated)
+  autoCheckUpdates: boolean;
+
+  // Audio: STT (Moonshine-base GGUF via transcribe.cpp) + TTS (Kokoro v1.0 via sherpa-onnx)
+  sttEnabled: boolean;
+  /** Paste-to-swap STT model: local .gguf path or models/ filename; empty = bundled default. */
+  sttModel: string;
+  /** Paste-to-swap TTS bundle dir (model.onnx + voices.bin + tokens.txt); empty = vendored default. */
+  ttsModel: string;
+  ttsEnabled: boolean;
+  ttsVoice: string;
+  ttsLangCode: string;
+  ttsSpeed: number;
+  ttsChunkSize: number;
+  ttsSplitPattern: string;
+  pythonPath: string;
+
+  // LLM: llama.cpp server (LFM 2.5-350M) for ghost autocomplete
+  llmEnabled: boolean;
+  /** Paste-to-swap LLM model: local .gguf path or models/ filename; empty = bundled default. */
+  llmModel: string;
+}
+
+const defaultSettings: AppSettings = {
+  theme: "dark",
+  iconSet: "phosphor",
+  streakGoal: 500,
+
+  fontSize: 15,
+  lineHeight: 1.7,
+  fontFamily: "JetBrains Mono",
+  typewriterDefault: true,
+  focusDimmingDefault: true,
+  autocorrectEnabled: false,
+  ghostEnabled: false,
+  dictionaryLanguage: "en",
+
+  smallModelEndpoint: "http://127.0.0.1:8093/v1",
+  smallModelName: "lfm2.5-350m",
+  mainModelEndpoint: "http://localhost:11434/v1",
+  mainModelName: "llama3.2",
+  apiKey: "",
+  sidecarHarnessDir: "",
+  blankModeDefault: false,
+  logsLocalOnly: true,
+  scrubSecrets: false,
+  aiMemoryEnabled: true,
+
+  appLockPin: "",
+  craftProfilingEnabled: true,
+
+  vaultPath: "~/WritingVault",
+  backupFrequency: "daily",
+  snapshotRetentionDays: 30,
+
+  fileWatcherEnabled: true,
+  conflictBehavior: "ask",
+
+  androidCaptureMethod: "notification",
+  weeklyTriageReminder: true,
+  streakReminder: true,
+  logsStampPlace: false,
+  lastTriageShown: null,
+  lastStreakShown: null,
+  lastAutoBackup: null,
+
+  keybindings: {
+    "Ctrl+T": "Insert timestamp",
+    "Ctrl+K": "Command palette",
+    "Ctrl+J": "Toggle AI panel",
+    "Ctrl+Enter": "Insert at cursor (AI)",
+    "Ctrl+Shift+C": "Copy AI response",
+    "Ctrl+S": "Save document",
+    "Ctrl+N": "New document",
+    "Ctrl+W": "Close tab",
+    "Ctrl+Tab": "Next tab",
+    "Ctrl+Shift+Tab": "Previous tab",
+    "M": "Open Node Map",
+    "Esc": "Close panel / modal",
+  },
+  featuresUsed: [],
+  dismissedNudges: [],
+  aiPersona: "",
+  templates: [],
+  workspacePrivacy: { logs: true },
+  savedViews: [],
+
+  autoCheckUpdates: true,
+
+  sttEnabled: true,
+  sttModel: "",
+  ttsModel: "",
+  ttsEnabled: true,
+  ttsVoice: "af_heart",
+  ttsLangCode: "a",
+  ttsSpeed: 1.0,
+  ttsChunkSize: 150,
+  ttsSplitPattern: "\\n+",
+  pythonPath: "python",
+  llmEnabled: true,
+  llmModel: "",
+};
+
+function loadSettings(): AppSettings {
+  try {
+    const stored = localStorage.getItem("writing-app-settings");
+    if (stored) {
+      return { ...defaultSettings, ...JSON.parse(stored) };
+    }
+  } catch {}
+  return { ...defaultSettings };
+}
+
+function saveSettings(settings: AppSettings) {
+  try {
+    localStorage.setItem("writing-app-settings", JSON.stringify(settings));
+  } catch {}
+}
+
+export const settings = writable<AppSettings>(loadSettings());
+
+settings.subscribe((value) => {
+  saveSettings(value);
+});
+
+/**
+ * Check if a workspace is private (local-only AI, no API calls).
+ * Logs workspace is private by default per spec §8E.
+ */
+export function isWorkspacePrivate(workspaceId: string): boolean {
+  const s = loadSettings();
+  return s.workspacePrivacy[workspaceId] === true;
+}
+
+/** Toggle privacy for a specific workspace. */
+export function toggleWorkspacePrivacy(workspaceId: string) {
+  settings.update((s) => {
+    s.workspacePrivacy = { ...s.workspacePrivacy, [workspaceId]: !s.workspacePrivacy[workspaceId] };
+    return s;
+  });
+}

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="description" content="Just Write ehis — a personal writing super app." />
+    <title>Just Write ehis</title>
+    <link rel="icon" type="image/svg+xml" href="logo.svg" />
+    <link rel="alternate icon" type="image/png" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="service-worker" href="sw.js" />
+    <script>
+      try {
+        var s = JSON.parse(localStorage.getItem("writing-app-settings") || "{}");
+        if (s.theme === "light") document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    </script>
+    <script>
+      // Register service worker
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW registered:', reg.scope))
+            .catch(err => console.log('SW registration failed:', err));
+        });
+      }
+      // Handle share target
+      if (navigator.share) {
+        // App can receive shared content
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

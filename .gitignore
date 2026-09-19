@@ -1,0 +1,23 @@
+# Deps & build outputs
+node_modules/
+dist/
+src-tauri/target/
+
+# Fetched sidecar models/binaries (hundreds of MB, re-fetchable).
+# Keep the README so fresh clones know how to populate this dir.
+src-tauri/sidecars/models/*
+!src-tauri/sidecars/models/README.md
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local logs
+*.log
