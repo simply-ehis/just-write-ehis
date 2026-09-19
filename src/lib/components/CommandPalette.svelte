@@ -47,6 +47,7 @@
     { id: 'vault-rename', label: 'Vault-Wide Rename', icon: 'edit', action: () => { showRename = true; close(); } },
     { id: 'publish', label: 'Publish Static Site…', icon: 'send', action: () => { publishSite(); close(); } },
     { id: 'compile-tabs', label: 'Compile Open Tabs…', icon: 'download', action: () => { compileOpenTabs(); close(); } },
+    { id: 'export-tabs-zip', label: 'Export Open Tabs (.zip)…', icon: 'download', action: () => { exportTabsZip(); close(); } },
   ];
 
   /** Saved templates appear as first-class palette entries — no popups. */
@@ -250,6 +251,30 @@
       showToast(`Compiled ${out.filename}`, "success");
     } catch (e) {
       showToast(`Compile failed: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  /** Global bulk export: each open tab converted, bundled as one zip. */
+  async function exportTabsZip() {
+    const tabs = get(openTabs);
+    if (tabs.length === 0) {
+      showToast("No open tabs to export", "warning");
+      return;
+    }
+    try {
+      const { batchExport } = await import("$lib/import");
+      const out = await batchExport(tabs.map((t) => t.id), "zip");
+      const { downloadConvertOutput } = await import("$lib/download");
+      downloadConvertOutput({ filename: out.filename, mime: "application/zip", base64: out.base64 });
+      const attachRefs = tabs.reduce((n, t) => n + ((t.content || "").match(/\.attachments\//g) || []).length, 0);
+      showToast(
+        attachRefs > 0
+          ? `Exported ${out.filename} — ${attachRefs} attachment${attachRefs === 1 ? "" : "s"} referenced, copy .attachments/ alongside`
+          : `Exported ${out.filename}`,
+        "success"
+      );
+    } catch (e) {
+      showToast(`Export failed: ${e instanceof Error ? e.message : e}`, "error");
     }
   }
 

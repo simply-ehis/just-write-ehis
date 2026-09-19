@@ -217,10 +217,50 @@ export async function importFromJSON(jsonFile: File, options: ImportOptions = {}
   return result;
 }
 
-export async function batchExport(_docIds: string[], format: 'md' | 'txt' | 'html' | 'docx' | 'epub' | 'pdf' | 'zip', _options: { includeAttachments?: boolean; zipPassword?: string } = {}): Promise<{ filename: string; base64: string }> {
-  // This would be implemented in the Rust backend
-  // For now, return a placeholder
-  return { filename: `export.${format}`, base64: '' };
+export async function batchExport(docIds: string[], format: 'md' | 'txt' | 'html' | 'docx' | 'epub' | 'pdf' | 'zip', _options: { includeAttachments?: boolean; zipPassword?: string } = {}): Promise<{ filename: string; base64: string }> {
+  if (docIds.length === 0) throw new Error("No documents to export.");
+  if (_options.zipPassword) {
+    throw new Error("Password-protected zips aren't supported — export unencrypted.");
+  }
+  const { api } = await import("$lib/api");
+
+  // Convert every doc through the real backend (pandoc sidecar where needed).
+  const converted: { filename: string; base64: string }[] = [];
+  for (const id of docIds) {
+    const out = await api.convertRun(id, format === 'zip' ? 'md' : format);
+    converted.push({ filename: out.filename, base64: out.base64 });
+  }
+
+  // Single doc, single format: hand the backend output straight through.
+  if (converted.length === 1 && format !== 'zip') {
+    return converted[0];
+  }
+
+  // Otherwise bundle into a zip (unique-ified filenames, no silent overwrites).
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  const used = new Set<string>();
+  const stamp = new Date().toISOString().slice(0, 10);
+  for (const { filename, base64 } of converted) {
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    let name = filename;
+    for (let n = 2; used.has(name); n++) {
+      const dot = filename.lastIndexOf(".");
+      name = dot === -1 ? `${filename} (${n})` : `${filename.slice(0, dot)} (${n})${filename.slice(dot)}`;
+    }
+    used.add(name);
+    zip.file(name, bytes);
+  }
+  const blob: Blob = await zip.generateAsync({ type: "blob" });
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    bin += String.fromCharCode(...buf.subarray(i, i + CHUNK));
+  }
+  return { filename: `just-write-export-${stamp}.zip`, base64: btoa(bin) };
 }
 
 export function generateSyncManifest(documents: any[]): string {

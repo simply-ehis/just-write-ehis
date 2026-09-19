@@ -52,7 +52,7 @@
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFDMkFDRDc4RTQ4RkRENjAKUldSZzNZL2tlTTBxSE1FNXAvdURFaFNhL1E5UGdqTnlsUFV3Y1hUcXAvdm5GNHJhTmM5cGZQWkoK",
       "endpoints": [
-        "https://github.com/YOUR_USER/YOUR_REPO/releases/latest/download/latest.json"
+        "https://github.com/simply-ehis/just-write-ehis/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
