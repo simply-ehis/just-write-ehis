@@ -24,65 +24,18 @@
     return wsAccents[ws] || "var(--accent-primary)";
   }
 
-  // 8.2 Tab sorting: activity_score decays daily, bumps on open/edit/ai_call/read.
-  // Active tab + 2 adjacent tabs are positionally pinned until user leaves tab bar context.
-  // Shuffling happens only when user is not looking at tab bar.
+  // Tab order is stable insertion order (manual drag-reorder included).
+  // Opening, selecting, or re-visiting a doc NEVER reshuffles the strip:
+  // activity scores still feed Home suggestions + smart tabs, but the tab
+  // bar itself only changes when the user adds, closes, or drags a tab.
+  // (Deliberate deviation from §8.2's score-sorting: visible shuffling on
+  // open breaks spatial memory and was reported as a bug.)
   let draggedId = $state<string | null>(null);
   let dragOverId = $state<string | null>(null);
   let contextMenu = $state<{ doc: Doc; x: number; y: number } | null>(null);
   let pinnedIds = $state<Set<string>>(new Set());
   let tabContainer = $state<HTMLElement | null>(null);
   let showOverflow = $state(false);
-  let tabBarHovered = $state(false);
-  let lastShuffleTime = $state<number>(0);
-
-  // 8.2: Sort tabs by activity_score (decaying daily, bumps on open/edit/ai_call/read)
-  // Active tab + 2 adjacent tabs are positionally pinned
-  function getSortedTabs(): Doc[] {
-    const tabs = [...$openTabs];
-    const activeIdx = tabs.findIndex(t => t.id === $currentDoc?.id);
-    
-    // Compute pinned indices: active tab + adjacent (if they exist)
-    const pinnedIndices = new Set<number>();
-    if (activeIdx >= 0) {
-      pinnedIndices.add(activeIdx);
-      if (activeIdx > 0) pinnedIndices.add(activeIdx - 1);
-      if (activeIdx < tabs.length - 1) pinnedIndices.add(activeIdx + 1);
-    }
-
-    // Separate pinned and non-pinned
-    const pinned = tabs.filter((_, i) => pinnedIndices.has(i));
-    const unpinned = tabs.filter((_, i) => !pinnedIndices.has(i));
-
-    // Sort unpinned by activity_score (descending)
-    unpinned.sort((a, b) => (b.activity_score ?? 0) - (a.activity_score ?? 0));
-
-    // Reconstruct: pinned keep their relative order, unpinned sorted by score
-    const result: Doc[] = [];
-    let unpinnedIdx = 0;
-    for (let i = 0; i < tabs.length; i++) {
-      if (pinnedIndices.has(i)) {
-        result.push(pinned.shift()!);
-      } else {
-        result.push(unpinned[unpinnedIdx++]);
-      }
-    }
-    return result;
-  }
-
-  // Only shuffle when user is NOT looking at tab bar (not hovered, not dragging)
-  $effect(() => {
-    if (tabBarHovered || draggedId || dragOverId || contextMenu) return;
-    const now = Date.now();
-    // Shuffle at most once per 30 seconds when not looking
-    if (now - lastShuffleTime < 30000) return;
-    // The sorted tabs will be used via getSortedTabs() in the render
-    lastShuffleTime = now;
-  });
-
-  // Track tab bar hover state
-  function handleTabBarMouseEnter() { tabBarHovered = true; }
-  function handleTabBarMouseLeave() { tabBarHovered = false; }
 
   function selectTab(doc: Doc) {
     $currentDoc = doc;
@@ -257,9 +210,9 @@
 
 <svelte:window onclick={handleDocClick} onkeydown={(e) => { if (e.key === 'Escape') contextMenu = null; }} />
 
-<div class="tab-bar" role="toolbar" aria-label="Open documents" tabindex="-1" bind:this={tabContainer} onmouseenter={handleTabBarMouseEnter} onmouseleave={handleTabBarMouseLeave}>
+<div class="tab-bar" role="toolbar" aria-label="Open documents" tabindex="-1" bind:this={tabContainer}>
   <div class="loading-line" class:active={$globalLoading}></div>
-  {#each getSortedTabs() as doc (doc.id)}
+  {#each $openTabs as doc (doc.id)}
     {@const isPinned = pinnedIds.has(doc.id)}
     {@const isDraggedOver = dragOverId === doc.id && draggedId !== doc.id}
     <button

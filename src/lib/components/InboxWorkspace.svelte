@@ -8,12 +8,15 @@
   import { voiceSupported, startDictation, type VoiceHandle } from "$lib/voice";
   import Icon from "$lib/components/Icon.svelte";
   import MicButton from "$lib/components/MicButton.svelte";
+  import DocDetail from "$lib/components/DocDetail.svelte";
 
   let inboxItems = $state<Doc[]>([]);
   let loading = $state(false);
   let quickCapture = $state("");
   let selectedIds = $state<Set<string>>(new Set());
   let bulkTarget = $state("logs");
+  // Item open for reading/editing (master-detail); null = triage list.
+  let viewing = $state<Doc | null>(null);
   let captureInput = $state<HTMLInputElement | null>(null);
   // Last consumed focus request (monotonic counter from the capture store).
   let lastFocusSeen = $state(0);
@@ -58,10 +61,15 @@
 
   async function openItem(item: Doc) {
     $currentDoc = item;
+    viewing = item;
     if (!$openTabs.find(t => t.id === item.id)) {
       $openTabs = [item, ...$openTabs];
     }
     await api.usageRecord(item.id, "open");
+  }
+
+  function closeDetail() {
+    viewing = null;
   }
 
   async function moveItem(item: Doc, targetWorkspace: string) {
@@ -73,6 +81,7 @@
       inboxItems = inboxItems.filter(i => i.id !== item.id);
       selectedIds.delete(item.id);
       selectedIds = new Set(selectedIds);
+      if (viewing?.id === item.id) viewing = null;
     } catch (e) {
       console.error("Failed to move item:", e);
     }
@@ -84,6 +93,10 @@
       inboxItems = inboxItems.filter(i => i.id !== item.id);
       selectedIds.delete(item.id);
       selectedIds = new Set(selectedIds);
+      if (viewing?.id === item.id) {
+        viewing = null;
+        if ($currentDoc?.id === item.id) $currentDoc = $openTabs.find((t) => t.id !== item.id) ?? null;
+      }
     } catch (e) {
       console.error("Failed to delete item:", e);
     }
@@ -177,6 +190,20 @@
 </script>
 
 <div class="inbox-workspace">
+  {#if viewing}
+    <div class="inbox-detail">
+      <DocDetail
+        backLabel="Inbox"
+        onBack={closeDetail}
+        onDeleted={(id) => {
+          inboxItems = inboxItems.filter((i) => i.id !== id);
+          selectedIds.delete(id);
+          selectedIds = new Set(selectedIds);
+          viewing = null;
+        }}
+      />
+    </div>
+  {:else}
   <div class="inbox-header">
     <div class="header-left">
       {#if inboxItems.length > 0}
@@ -293,6 +320,7 @@
       {/each}
     {/if}
   </div>
+  {/if}
 </div>
 
 <style>
@@ -302,6 +330,12 @@
     height: 100%;
     background: var(--surface-base);
     color: var(--text-primary);
+  }
+
+  .inbox-detail {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .inbox-header {

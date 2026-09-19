@@ -7,7 +7,8 @@
   import { markdown } from "@codemirror/lang-markdown";
   import { aiPanelOpen, currentDoc, currentWorkspace } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
-  import { api } from "$lib/api";
+  import { api, type Doc } from "$lib/api";
+  import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
   import { showToast } from "$lib/stores/notifications";
@@ -39,6 +40,23 @@ import VersionHistory from "./VersionHistory.svelte";
   let ghostSuggestion = $state("");
   let ghostVisible = $state(false);
   let ghostDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // Story Bible vocabulary for autocorrect's custom dictionary (A8.8).
+  let bibleWords = $state<Set<string>>(new Set());
+
+  function refreshBibleWords(doc: Doc | null) {
+    if (!doc) {
+      bibleWords = new Set();
+      return;
+    }
+    loadBibleWords(doc, api)
+      .then((w) => {
+        bibleWords = w;
+      })
+      .catch(() => {
+        bibleWords = new Set();
+      });
+  }
 
   async function requestGhostSuggestion(content: string) {
     if (!$settings.ghostEnabled || !$currentDoc) return;
@@ -206,6 +224,10 @@ import VersionHistory from "./VersionHistory.svelte";
       opacity: "0.35",
       transition: "opacity 0.3s ease",
     },
+    ".cm-autocorrect-suggest": {
+      textDecoration: "underline wavy #d9a521 1px",
+      textUnderlineOffset: "3px",
+    },
   });
   }
 
@@ -279,8 +301,33 @@ import VersionHistory from "./VersionHistory.svelte";
             return false;
           },
         },
+        {
+          // Spec §4.1: Ctrl+T inserts a timestamp (desktop shell; browsers
+          // reserve Ctrl+T for new tabs).
+          key: "Ctrl-t",
+          run: (view) => {
+            const pos = view.state.selection.main.head;
+            const stamp = new Date().toLocaleTimeString("en-US", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            });
+            view.dispatch({ changes: { from: pos, insert: stamp } });
+            return true;
+          },
+        },
       ])
     );
+
+    if ($settings.autocorrectEnabled) {
+      extensions.push(
+        createAutocorrectPlugin({
+          enabled: () => $settings.autocorrectEnabled,
+          useEnglishTable: () => $settings.dictionaryLanguage !== "off",
+          getCustomWords: () => bibleWords,
+        })
+      );
+    }
 
     const state = EditorState.create({
       doc: content,
@@ -398,15 +445,18 @@ import VersionHistory from "./VersionHistory.svelte";
     const doc = $currentDoc;
     if (doc && editorContainer) {
       untrack(() => createEditor(doc));
+      refreshBibleWords(doc);
       sessionStartTime = Date.now();
       sessionWords = doc.word_count;
+    } else {
+      refreshBibleWords(null);
     }
   });
 
   // Rebuild the editor live on theme/type changes (without resetting the session).
   // Same untrack rule: the rebuild must not resubscribe to what it rewrites.
   $effect(() => {
-    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight];
+    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
     });
@@ -498,6 +548,17 @@ import VersionHistory from "./VersionHistory.svelte";
     <div class="toolbar-right">
       <span class="session-timer">{elapsed}</span>
       <span class="session-words">{sessionWords.toLocaleString()} words</span>
+      {#if $currentDoc?.goal_words}
+        {@const goalPct = Math.min(100, Math.round((sessionWords / $currentDoc.goal_words) * 100))}
+        <span
+          class="goal-progress"
+          class:done={goalPct >= 100}
+          title="Goal: {$currentDoc.goal_words.toLocaleString()} words{$currentDoc.deadline ? ` by ${$currentDoc.deadline.slice(0, 10)}` : ''}"
+        >
+          <span class="goal-bar"><span class="goal-fill" style="width: {goalPct}%"></span></span>
+          <span class="goal-text">{goalPct}%</span>
+        </span>
+      {/if}
     </div>
   </div>
 
@@ -591,6 +652,43 @@ import VersionHistory from "./VersionHistory.svelte";
   .session-words {
     font-size: 12px;
     color: var(--text-muted);
+  }
+
+  .goal-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .goal-bar {
+    width: 90px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-overlay);
+    overflow: hidden;
+  }
+
+  .goal-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .goal-progress.done .goal-fill {
+    background: var(--accent-semantic-green);
+  }
+
+  .goal-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .goal-progress.done .goal-text {
+    color: var(--accent-semantic-green);
+    font-weight: 600;
   }
 
   .editor-container {

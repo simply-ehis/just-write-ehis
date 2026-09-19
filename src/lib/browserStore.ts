@@ -291,11 +291,29 @@ class BrowserStore {
   }
 
   delete(id: string): void {
-    this.docs = this.docs.filter((d) => d.id !== id);
-    this.snaps = this.snaps.filter((s) => s.doc_id !== id);
-    this.bible = this.bible.filter((b) => b.doc_id !== id);
+    // Collect the doc + descendants (mirrors the desktop cascade).
+    const ids = [id];
+    for (let i = 0; i < ids.length; i++) {
+      for (const d of this.docs) {
+        if (d.parent_id === ids[i] && !ids.includes(d.id)) ids.push(d.id);
+      }
+    }
+    const gone = new Set(ids);
+    this.docs = this.docs.filter((d) => !gone.has(d.id));
+    this.snaps = this.snaps.filter((s) => !gone.has(s.doc_id));
+    this.bible = this.bible.filter((b) => !gone.has(b.doc_id));
+    this.conversations = this.conversations.filter((c) => !(c.doc_id && gone.has(c.doc_id)));
+    this.messages = this.messages.filter((m) =>
+      this.conversations.some((c) => c.id === m.conversation_id)
+    );
+    this.canvas.nodes = this.canvas.nodes.map((n) =>
+      n.doc_id && gone.has(n.doc_id) ? { ...n, doc_id: null } : n
+    );
     save(BIBLE_KEY, this.bible);
     save(SNAPS_KEY, this.snaps);
+    save(CONV_KEY, this.conversations);
+    save(MSG_KEY, this.messages);
+    save(CANVAS_KEY, this.canvas);
     this.persistDocs();
   }
 

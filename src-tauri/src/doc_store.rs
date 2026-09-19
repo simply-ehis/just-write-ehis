@@ -346,14 +346,67 @@ impl Database {
     }
 
     pub fn delete_doc(&self, id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM docs WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-        // Chunks cascade; vectors have no FK — sweep the orphans.
-        let _ = conn.execute(
-            "DELETE FROM rag_vec WHERE chunk_id NOT IN (SELECT id FROM rag_chunks)",
-            [],
-        );
+        // 1. Collect the doc + all descendants (a deleted project takes its
+        //    chapters/tasks; nothing orphans).
+        let mut ids = vec![id.to_string()];
+        let mut i = 0;
+        while i < ids.len() {
+            let parent = ids[i].clone();
+            i += 1;
+            let kids: Vec<String> = {
+                let conn = self.conn.lock().map_err(|e| e.to_string())?;
+                let mut stmt = conn
+                    .prepare("SELECT id FROM docs WHERE parent_id = ?1")
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(params![parent], |row| row.get(0))
+                    .map_err(|e| e.to_string())?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            for k in kids {
+                if !ids.contains(&k) {
+                    ids.push(k);
+                }
+            }
+        }
+
+        // 2. Remove files (best-effort; a missing file is already gone).
+        //    Files are the source of truth — a row-only delete would leave
+        //    ghosts visible in Files and re-importable clutter.
+        let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
+        for del_id in &ids {
+            if let Ok(doc) = self.get_doc(del_id) {
+                let p = std::path::PathBuf::from(&doc.path);
+                let full = if p.is_absolute() { p } else { vault.join(&p) };
+                let _ = std::fs::remove_file(&full);
+            }
+        }
+
+        // 3. Delete rows. FK cascades (foreign_keys=ON) clean snapshots,
+        //    usage, craft metrics, backlinks, links, rag chunks.
+        //    Tables WITHOUT an FK get explicit cleanup below.
+        {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            for del_id in &ids {
+                conn.execute("DELETE FROM docs WHERE id = ?1", params![del_id])
+                    .map_err(|e| e.to_string())?;
+            }
+            for del_id in &ids {
+                // bible_facts + conversations have no FK to docs.
+                conn.execute("DELETE FROM bible_facts WHERE doc_id = ?1", params![del_id])
+                    .map_err(|e| e.to_string())?;
+                conn.execute("DELETE FROM conversations WHERE doc_id = ?1", params![del_id])
+                    .map_err(|e| e.to_string())?;
+                // Canvas cards keep existing; just unlink the dead doc.
+                conn.execute("UPDATE canvas_nodes SET doc_id = NULL WHERE doc_id = ?1", params![del_id])
+                    .map_err(|e| e.to_string())?;
+            }
+            // Chunks cascade; vectors have no FK — sweep the orphans.
+            let _ = conn.execute(
+                "DELETE FROM rag_vec WHERE chunk_id NOT IN (SELECT id FROM rag_chunks)",
+                [],
+            );
+        }
         Ok(())
     }
 

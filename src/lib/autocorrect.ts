@@ -127,8 +127,15 @@ function damerauLevenshtein(a: string, b: string): number {
   return d[la][lb];
 }
 
-export function getAutocorrectSuggestions(
-  word: string,
+/** Layer 1 membership: exact hits of the curated typo table. */
+export function isKnownTypo(lower: string): boolean {
+  for (const [typo] of SUBSTITUTIONS) {
+    if (lower === typo) return true;
+  }
+  return false;
+}
+
+export function getAutocorrectSuggestions(  word: string,
   customDict: Set<string> = new Set(),
   useEnglishTable = true
 ): string | null {

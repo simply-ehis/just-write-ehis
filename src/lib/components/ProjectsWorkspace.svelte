@@ -6,6 +6,8 @@
   import { settings } from "$lib/stores/settings";
   import TrendlineChart from "./TrendlineChart.svelte";
   import Icon from "./Icon.svelte";
+  import DocDetail from "./DocDetail.svelte";
+  import DeleteButton from "./DeleteButton.svelte";
 
   let projects = $state<Doc[]>([]);
   let selectedProject = $state<Doc | null>(null);
@@ -15,6 +17,29 @@
   let loading = $state(false);
   let viewMode = $state<'dashboard' | 'board'>('dashboard');
   let boardColumns = $state<Record<string, Doc[]>>({});
+  // Task/project open for reading/editing (master-detail); null = boards.
+  let editingDoc = $state<Doc | null>(null);
+
+  function openForEdit(doc: Doc) {
+    editingDoc = doc;
+    $currentDoc = doc;
+    if (!$openTabs.find((t) => t.id === doc.id)) {
+      $openTabs = [doc, ...$openTabs];
+    }
+    api.usageRecord(doc.id, "open").catch(() => {});
+  }
+
+  function closeDetail() {
+    editingDoc = null;
+  }
+
+  function dropEditingIfGone(id: string) {
+    if (editingDoc?.id === id) editingDoc = null;
+    childDocs = childDocs.filter((d) => d.id !== id);
+    for (const key of Object.keys(boardColumns)) {
+      boardColumns[key] = (boardColumns[key] || []).filter((d) => d.id !== id);
+    }
+  }
 
   const statusOrder = ['idea', 'draft', 'revised', 'final', 'done'];
 
@@ -172,7 +197,19 @@
   </div>
 
   <div class="projects-content">
-    {#if !selectedProject}
+    {#if editingDoc}
+      <div class="project-detail">
+        <DocDetail
+          backLabel="Project"
+          onBack={closeDetail}
+          onDeleted={(id) => {
+            dropEditingIfGone(id);
+            if (selectedProject?.id === id) selectedProject = null;
+            projects = projects.filter((p) => p.id !== id);
+          }}
+        />
+      </div>
+    {:else if !selectedProject}
       <div class="empty-state">
         <div class="empty-icon"><Icon name="folder" size={44} /></div>
         <div class="empty-title">Projects</div>
@@ -188,6 +225,16 @@
           <button class:active={viewMode === 'dashboard'} onclick={() => viewMode = 'dashboard'}>Dashboard</button>
           <button class:active={viewMode === 'board'} onclick={() => viewMode = 'board'}>Board</button>
           <button class="ai-btn" onclick={askAiSuggestion}>AI Suggest</button>
+          <button class="open-btn" onclick={() => selectedProject && openForEdit(selectedProject)} title="Open project notes in editor" aria-label="Open project notes in editor">Open</button>
+          <DeleteButton
+            doc={selectedProject}
+            label="Delete project and its tasks"
+            onDeleted={(id) => {
+              dropEditingIfGone(id);
+              selectedProject = null;
+              projects = projects.filter((p) => p.id !== id);
+            }}
+          />
         </div>
       </div>
 
@@ -253,7 +300,7 @@
                 <span class="column-count">{(boardColumns[status] || []).length}</span>
               </div>
               {#each (boardColumns[status] || []) as doc}
-                <button class="task-card" onclick={() => { $currentDoc = doc; if (!$openTabs.find(t => t.id === doc.id)) $openTabs = [doc, ...$openTabs]; }}>
+                <button class="task-card" onclick={() => openForEdit(doc)} title="Open task in editor" aria-label="Open {doc.title} in editor">
                   <div class="task-title">{doc.title}</div>
                   <div class="task-meta">
                     <span class="word-count">{doc.word_count}w</span>
@@ -383,6 +430,31 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
+  }
+
+  .project-detail {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .open-btn {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .open-btn:hover {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
   }
 
   .empty-state {

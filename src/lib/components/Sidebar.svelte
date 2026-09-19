@@ -9,6 +9,7 @@
   } from "$lib/stores/app";
   import { api } from "$lib/api";
   import { settings } from "$lib/stores/settings";
+  import { onMount } from "svelte";
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
   import Icon from "$lib/components/Icon.svelte";
 
@@ -128,6 +129,46 @@
       console.error("Failed to create doc:", e);
     }
   }
+
+  // Streak + backup indicator (§A4.1): quiet proof-of-life in the footer.
+  let streakDays = $state<number | null>(null);
+
+  let backupState = $derived.by(() => {
+    if ($settings.backupFrequency === "never") {
+      return { label: "Backups off", stale: false, off: true };
+    }
+    if (!$settings.lastAutoBackup) {
+      return { label: "Never backed up", stale: true, off: false };
+    }
+    const every =
+      $settings.backupFrequency === "daily" ? 86400000
+      : $settings.backupFrequency === "weekly" ? 7 * 86400000
+      : 30 * 86400000;
+    const age = Date.now() - +new Date($settings.lastAutoBackup);
+    if (age > every * 1.5) {
+      const days = Math.max(1, Math.round(age / 86400000));
+      return { label: `Backup ${days}d overdue`, stale: true, off: false };
+    }
+    return { label: `Backed up ${timeAgoShort($settings.lastAutoBackup)}`, stale: false, off: false };
+  });
+
+  function timeAgoShort(iso: string): string {
+    const mins = Math.max(0, Math.floor((Date.now() - +new Date(iso)) / 60000));
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  onMount(async () => {
+    try {
+      const [current] = await api.memoryGetStreak();
+      streakDays = current;
+    } catch {
+      streakDays = null;
+    }
+  });
 </script>
 
 <aside class="sidebar {className}">
@@ -186,6 +227,20 @@
       <span class="nav-icon"><Icon name="settings" size={15} /></span>
       <span>Settings</span>
     </button>
+    <div
+      class="footer-stats"
+      class:stale={backupState.stale}
+      title={streakDays != null && streakDays > 0 ? `${streakDays}-day streak · ${backupState.label}` : backupState.label}
+      aria-label={streakDays != null && streakDays > 0 ? `${streakDays}-day streak. ${backupState.label}.` : backupState.label}
+    >
+      <span class="nav-icon"><Icon name="star" size={13} /></span>
+      <span class="streak-text">
+        {streakDays != null && streakDays > 0 ? `${streakDays}-day streak` : "No streak yet"}
+      </span>
+      {#if !backupState.off}
+        <span class="backup-dot" class:stale={backupState.stale} aria-hidden="true"></span>
+      {/if}
+    </div>
   </div>
 </aside>
 
@@ -237,5 +292,38 @@
   .name {
     font-weight: 600;
     font-size: 15px;
+  }
+
+  .footer-stats {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .footer-stats .streak-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .footer-stats.stale {
+    color: var(--accent-semantic-yellow, #d9a521);
+  }
+
+  .backup-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent-semantic-green);
+    flex-shrink: 0;
+  }
+
+  .backup-dot.stale {
+    background: var(--accent-semantic-yellow, #d9a521);
   }
 </style>

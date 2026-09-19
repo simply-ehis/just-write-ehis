@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Doc } from "$lib/api";
-  import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
+  import { currentDoc, openTabs } from "$lib/stores/app";
   import { settings, type SavedView } from "$lib/stores/settings";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
+  import DocDetail from "$lib/components/DocDetail.svelte";
 
   let allDocs = $state<Doc[]>([]);
   let filteredDocs = $state<Doc[]>([]);
@@ -19,6 +20,8 @@
   let newViewName = $state('');
   let calCursor = $state(new Date());
   let calSelectedDay = $state<string | null>(null);
+  // Doc open for reading/editing (master-detail); null = table/board/calendar.
+  let openedDoc = $state<Doc | null>(null);
 
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -172,12 +175,23 @@
   }
 
   async function openDoc(doc: Doc) {
+    // In-place detail: no workspace jump, no context loss. Back returns here.
+    openedDoc = doc;
     $currentDoc = doc;
-    $currentWorkspace = doc.workspace;
     if (!$openTabs.find(t => t.id === doc.id)) {
       $openTabs = [doc, ...$openTabs];
     }
     await api.usageRecord(doc.id, "open");
+  }
+
+  function closeDetail() {
+    openedDoc = null;
+  }
+
+  async function refreshAfterDelete(id: string) {
+    openedDoc = null;
+    allDocs = allDocs.filter((d) => d.id !== id);
+    applyFilters();
   }
 
   function formatDate(iso: string): string {
@@ -281,7 +295,15 @@
   </div>
 
   <div class="pv-content">
-    {#if loading}
+    {#if openedDoc}
+      <div class="pv-detail">
+        <DocDetail
+          backLabel="All Documents"
+          onBack={closeDetail}
+          onDeleted={refreshAfterDelete}
+        />
+      </div>
+    {:else if loading}
       <div class="empty-state">Loading...</div>
     {:else if filteredDocs.length === 0}
       <div class="empty-state">
@@ -684,6 +706,17 @@
   .pv-content {
     flex: 1;
     overflow: auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .pv-detail {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .empty-state {

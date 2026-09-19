@@ -5,6 +5,8 @@
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
   import EditorPane from './EditorPane.svelte';
+  import DocDetail from './DocDetail.svelte';
+  import DeleteButton from './DeleteButton.svelte';
 
   let projectId = $state<string | null>(null);
   let projects = $state<Doc[]>([]);
@@ -339,7 +341,19 @@
     </div>
   </div>
 
-  {#if !projectId}
+  {#if selectedBeat}
+    <div class="beat-detail">
+      <DocDetail
+        backLabel="Beat board"
+        onBack={() => { selectedBeat = null; }}
+        onDeleted={() => {
+          selectedBeat = null;
+          loadProject();
+          loadProjects();
+        }}
+      />
+    </div>
+  {:else if !projectId}
     <div class="project-select">
       {#if projects.length === 0}
         <p>No novel projects yet. Create one to start your beat board.</p>
@@ -348,10 +362,23 @@
         <p>Select a project above to open its beat board.</p>
         <div class="project-list">
           {#each projects as p}
-            <button class="project-item" onclick={() => { projectId = p.id; }}>
-              <span class="project-title">{p.title}</span>
-              <span class="project-meta">{p.word_count} words</span>
-            </button>
+            <div class="project-row">
+              <button class="project-item" onclick={() => { projectId = p.id; }}>
+                <span class="project-title">{p.title}</span>
+                <span class="project-meta">{p.word_count} words</span>
+              </button>
+              <DeleteButton
+                doc={p}
+                label="Delete novel project and its chapters"
+                onDeleted={(id) => {
+                  projects = projects.filter((x) => x.id !== id);
+                  if (projectId === id) {
+                    projectId = null;
+                    selectedBeat = null;
+                  }
+                }}
+              />
+            </div>
           {/each}
         </div>
       {/if}
@@ -564,6 +591,28 @@
     justify-content: center;
     gap: var(--space-3);
     color: var(--text-muted);
+  }
+
+  .beat-detail {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .project-row {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+  }
+
+  .project-row .project-item {
+    flex: 1;
+  }
+
+  .project-row > :global(.delete-btn) {
+    align-self: center;
   }
 
   .project-picker {

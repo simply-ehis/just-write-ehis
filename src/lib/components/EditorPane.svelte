@@ -7,13 +7,13 @@
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
   import { markdown } from "@codemirror/lang-markdown";
   import { currentDoc, aiPanelOpen, currentWorkspace } from "$lib/stores/app";
-  import { api } from "$lib/api";
+  import { api, type Doc } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { recordSave } from "$lib/stores/saveState";
   import { showToast } from "$lib/stores/notifications";
-  import { getAutocorrectSuggestions, normalizeCharacters } from "$lib/autocorrect";
-  import { ViewPlugin, type ViewUpdate, type DecorationSet, Decoration } from "@codemirror/view";
+  import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
+  import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
   import VersionHistory from "./VersionHistory.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
@@ -169,38 +169,24 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     previewVisible = false;
     lastPreviewTitle = null;
   }
-  const autocorrectPlugin = ViewPlugin.fromClass(
-    class {
-      decorations: DecorationSet;
-      constructor(view: EditorView) {
-        this.decorations = Decoration.none;
-      }
-      update(update: ViewUpdate) {
-        if (!update.docChanged) return;
-        const { state } = update;
-        const changes: { from: number; to: number; insert: string }[] = [];
-        update.changes.iterChangedRanges((_fromA, toA, fromB, _toB) => {
-          const line = state.doc.lineAt(toA);
-          const textBefore = line.text.slice(0, line.to === toA ? undefined : toA - line.from);
-          const wordMatch = textBefore.match(/(\w+)$/);
-          if (wordMatch) {
-            const word = wordMatch[1];
-            const lower = word.toLowerCase();
-            const suggestion = getAutocorrectSuggestions(lower, new Set(), $settings.dictionaryLanguage !== "off");
-            if (suggestion && suggestion !== lower) {
-              const start = line.from + (toA - word.length);
-              changes.push({ from: start, to: toA, insert: suggestion });
-            }
-          }
-        });
-        if (changes.length > 0) {
-          const tr = { changes, sequential: true };
-          update.view.dispatch(tr);
-        }
-      }
-    },
-    {}
-  );
+
+  // Story Bible vocabulary for autocorrect's custom dictionary (A8.8):
+  // refreshed per open doc so invented names are never "fixed".
+  let bibleWords = $state<Set<string>>(new Set());
+
+  function refreshBibleWords(doc: Doc | null) {
+    if (!doc) {
+      bibleWords = new Set();
+      return;
+    }
+    loadBibleWords(doc, api)
+      .then((w) => {
+        bibleWords = w;
+      })
+      .catch(() => {
+        bibleWords = new Set();
+      });
+  }
 
   async function handleFileDrop(e: DragEvent) {
     const files = e.dataTransfer?.files;
@@ -267,6 +253,10 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     },
     ".cm-focused .cm-selectionBackground": {
       backgroundColor: dark ? "#8FC7A940 !important" : "#3F665640 !important",
+    },
+    ".cm-autocorrect-suggest": {
+      textDecoration: "underline wavy #d9a521 1px",
+      textUnderlineOffset: "3px",
     },
   });
   }
@@ -338,10 +328,33 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
               return false;
             },
           },
+          {
+            // Spec §4.1: Ctrl+T inserts a timestamp (desktop shell; browsers
+            // reserve Ctrl+T for new tabs).
+            key: "Ctrl-t",
+            run: (view) => {
+              const pos = view.state.selection.main.head;
+              const stamp = new Date().toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              });
+              view.dispatch({ changes: { from: pos, insert: stamp } });
+              return true;
+            },
+          },
         ]),
         markdown(),
         darkTheme,
-        ...($settings.autocorrectEnabled ? [autocorrectPlugin] : []),
+        ...($settings.autocorrectEnabled
+          ? [
+              createAutocorrectPlugin({
+                enabled: () => $settings.autocorrectEnabled,
+                useEnglishTable: () => $settings.dictionaryLanguage !== "off",
+                getCustomWords: () => bibleWords,
+              }),
+            ]
+          : []),
         snippetPlugin,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -524,14 +537,17 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     const doc = $currentDoc;
     if (doc && editorContainer) {
       untrack(() => createEditor(doc));
+      refreshBibleWords(doc);
       loadCraftMetrics(doc.id);
+    } else {
+      refreshBibleWords(null);
     }
   });
 
   // Rebuild the editor live when theme or type settings change.
   // Same untrack rule: the rebuild must not resubscribe to what it rewrites.
   $effect(() => {
-    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight];
+    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
     });

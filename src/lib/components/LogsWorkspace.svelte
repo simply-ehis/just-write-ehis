@@ -5,6 +5,8 @@
   import { settings } from "$lib/stores/settings";
   import { fetchPlaceStamp } from "$lib/stamp";
   import MicButton from "$lib/components/MicButton.svelte";
+  import EditorPane from "$lib/components/EditorPane.svelte";
+  import DeleteButton from "$lib/components/DeleteButton.svelte";
 
   let today = $state(formatDate(new Date()));
   let selectedDate = $state(today);
@@ -223,6 +225,22 @@
         <div class="log-header">
           <h2>{formatDisplayDate($currentDoc.title)}</h2>
           <span class="word-count">{$currentDoc.word_count} words</span>
+          <span class="log-header-spacer"></span>
+          <DeleteButton
+            doc={$currentDoc}
+            label="Delete this day's note"
+            onDeleted={(id) => {
+              logEntries = logEntries.filter((e) => e.id !== id);
+              // Deleted the open day: today always exists, so reopen it
+              // (recreates a fresh note); other days stay deleted.
+              if ($currentDoc && !logEntries.find((e) => e.id === $currentDoc!.id)) {
+                selectDate($currentDoc.title === selectedDate ? selectedDate : today);
+              }
+            }}
+          />
+        </div>
+        <div class="log-editor">
+          <EditorPane />
         </div>
       {:else}
         <div class="empty-log">
@@ -456,15 +474,32 @@
 
   .current-log {
     flex: 1;
-    overflow-y: auto;
-    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px 16px 0 16px;
+    min-height: 0;
+  }
+
+  .log-editor {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--border-subtle);
+    margin: 0 -16px;
+    padding: 0 16px;
   }
 
   .log-header {
     display: flex;
     align-items: baseline;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+  }
+
+  .log-header-spacer {
+    flex: 1;
   }
 
   .log-header h2 {

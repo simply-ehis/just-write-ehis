@@ -4,6 +4,7 @@
   import { settings } from '$lib/stores/settings';
   import MicButton from '$lib/components/MicButton.svelte';
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
+  import DeleteButton from '$lib/components/DeleteButton.svelte';
 
   let scripts = $state<Doc[]>([]);
   let selectedScript = $state<Doc | null>(null);
@@ -15,6 +16,9 @@
   let roles = $state<Array<{ id: string; name: string; color: string; assignedTo: string }>>([]);
   let newRoleName = $state('');
   let newRoleColor = $state('#8FC7A9');
+  // Debounce handle: plain let, only touched in event handlers (never in
+  // an $effect), so it can't resubscribe anything.
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   interface FountainElement {
     type: 'title_page' | 'scene_heading' | 'action' | 'character' | 'dialogue' | 'parenthetical' | 'transition' | 'centered' | 'note' | 'empty';
@@ -33,7 +37,15 @@
     }
   }
 
-  function selectScript(doc: Doc) {
+  async function selectScript(doc: Doc) {
+    // Flush the outgoing script first — unsaved typing must not die on switch.
+    if (selectedScript && selectedScript.id !== doc.id) {
+      try {
+        await api.docSave(selectedScript.id, undefined, rawContent);
+      } catch (e) {
+        console.error('Failed to save outgoing script:', e);
+      }
+    }
     selectedScript = doc;
     rawContent = doc.content || '';
     parsedElements = parseFountain(rawContent);
@@ -224,6 +236,10 @@
     const textarea = e.target as HTMLTextAreaElement;
     rawContent = textarea.value;
     parsedElements = parseFountain(rawContent);
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      void handleSave();
+    }, 1200);
   }
 
   loadScripts();
@@ -259,6 +275,14 @@
           <button class:active={viewMode === 'screenplay'} onclick={() => viewMode = 'screenplay'}>Screenplay</button>
         </div>
         <button class="save-btn" onclick={handleSave}>Save</button>
+        <DeleteButton
+          doc={selectedScript}
+          label="Delete this script"
+          onDeleted={(id) => {
+            scripts = scripts.filter((s) => s.id !== id);
+            selectedScript = null;
+          }}
+        />
         <button class="save-btn cast-toggle" class:active={showCast} onclick={() => showCast = !showCast} title="Cast & roles" aria-label="Toggle cast and roles panel">
           Cast{roles.length > 0 ? ` (${roles.length})` : ''}
         </button>
