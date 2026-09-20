@@ -59,7 +59,7 @@
   let coldStartTime = $state(0);
   let selfTest = $state<{ name: string; pass: boolean; detail: string }[]>([]);
   let selfTestRunning = $state(false);
-  let appVersion = $state("0.2.0");
+  let appVersion = $state("0.2.1");
   let updateConfigured = $state<boolean | null>(null);
   let updateEndpoint = $state<string | null>(null);
   let updateInfo = $state<UpdateInfo | null>(null);
@@ -120,7 +120,7 @@
     coldStartTime = performance.timing
       ? performance.timing.domContentLoadedEventEnd - performance.timing.navigationStart
       : 0;
-    getAppVersion("0.2.0").then((v) => (appVersion = v));
+    getAppVersion("0.2.1").then((v) => (appVersion = v));
     loadMemoryFactCount();
     api.appUpdateStatus()
       .then((s) => {

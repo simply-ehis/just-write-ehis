@@ -78,7 +78,7 @@
     <span>{$currentWorkspace}</span>
   </div>
   <div class="item">
-    <span>v0.2.0</span>
+    <span>v0.2.1</span>
   </div>
 </div>
 
