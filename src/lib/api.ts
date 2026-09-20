@@ -465,6 +465,9 @@ export const api = {
   sidecarIsRunning: () =>
     safeInvoke<boolean>("sidecar_is_running"),
 
+  sidecarSetEndpoint: (endpoint: string) =>
+    safeInvoke<void>("sidecar_set_endpoint", { endpoint }),
+
   sidecarQuery: (prompt: string, sessionId: string) =>
     safeInvoke<{ response: string; confidence: number; escalated: boolean; tool_used: string | null }>(
       "sidecar_query", { prompt, sessionId }

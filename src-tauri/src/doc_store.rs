@@ -726,10 +726,14 @@ impl Database {
 
     pub fn record_usage_event(&self, doc_id: &str, event: &str) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let now = Utc::now().to_rfc3339();
+        let usage = UsageEvent {
+            doc_id: doc_id.to_string(),
+            event: event.to_string(),
+            ts: Utc::now().to_rfc3339(),
+        };
         conn.execute(
             "INSERT INTO usage_events (doc_id, event, ts) VALUES (?1, ?2, ?3)",
-            params![doc_id, event, now],
+            params![usage.doc_id, usage.event, usage.ts],
         ).map_err(|e| e.to_string())?;
 
         // Spec 8.2: weighted bumps — edits count most, reads least.
@@ -1061,9 +1065,13 @@ impl Database {
 
     pub fn update_reading_position(&self, doc_id: &str, position: f64) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let req = UpdateReadingPositionRequest {
+            doc_id: doc_id.to_string(),
+            position,
+        };
         conn.execute(
             "UPDATE docs SET reading_position = ?1 WHERE id = ?2",
-            params![position, doc_id],
+            params![req.position, req.doc_id],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -1156,13 +1164,17 @@ impl Database {
     }
 
     pub fn import_book(&self, title: &str, content: &str, kind: &str) -> Result<Doc, String> {
+        let req = ImportFileRequest {
+            file_path: title.to_string(),
+            workspace: Some("reader".to_string()),
+        };
         self.create_doc(CreateDocRequest {
-            workspace: "reader".to_string(),
+            workspace: req.workspace.unwrap_or_else(|| "reader".to_string()),
             kind: kind.to_string(),
             title: title.to_string(),
             parent_id: None,
             content: Some(content.to_string()),
-            frontmatter_json: Some(serde_json::json!({"status": "to-read"}).to_string()),
+            frontmatter_json: Some(serde_json::json!({"status": "to-read", "imported_from": req.file_path}).to_string()),
         })
     }
 
@@ -1431,11 +1443,16 @@ impl Database {
 
     pub fn record_craft_metric(&self, doc_id: &str, metric_type: &str, value: f64) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let id = uuid_v7();
-        let now = now_iso();
+        let metric = CraftMetric {
+            id: uuid_v7(),
+            doc_id: doc_id.to_string(),
+            metric_type: metric_type.to_string(),
+            value,
+            created_at: now_iso(),
+        };
         conn.execute(
             "INSERT INTO craft_metrics (id, doc_id, metric_type, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, doc_id, metric_type, value, now],
+            params![metric.id, metric.doc_id, metric.metric_type, metric.value, metric.created_at],
         ).map_err(|e| e.to_string())?;
         Ok(())
     }

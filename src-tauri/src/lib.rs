@@ -191,6 +191,7 @@ pub fn run() {
             commands::sidecar_start,
             commands::sidecar_stop,
             commands::sidecar_is_running,
+            commands::sidecar_set_endpoint,
             commands::sidecar_query,
             commands::get_workspace_context,
             commands::get_vault_path,

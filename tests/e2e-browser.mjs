@@ -148,7 +148,7 @@ async function updaterWiring() {
   check("tauri.conf has updater endpoints", Array.isArray(updater?.endpoints) && updater.endpoints.length > 0);
   check("tauri.conf has updater pubkey field", typeof updater?.pubkey === "string" && updater.pubkey.length > 0);
   check("tauri.conf updater dialog off (in-app UI owns it)", updater?.dialog === false);
-  check("tauri.conf has createUpdaterArtifacts field", typeof conf.bundle?.createUpdaterArtifacts === "boolean");
+  check("tauri.conf emits updater artifacts", conf.bundle?.createUpdaterArtifacts === true);
   const caps = JSON.parse(await readFile(join(root, "src-tauri/capabilities/default.json"), "utf8"));
   for (const perm of ["core:default", "updater:default", "process:default"]) {
     check(`capability grants ${perm}`, (caps.permissions ?? []).includes(perm));

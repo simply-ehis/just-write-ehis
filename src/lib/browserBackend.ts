@@ -967,6 +967,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "sidecar_is_running":
       return false as T;
 
+    case "sidecar_set_endpoint":
+      return undefined as T;
+
     case "sidecar_query":
       throw new Error("The small-model sidecar runs in the desktop app. Connect an HTTP model in Settings → AI & Providers to use AI here.");
 

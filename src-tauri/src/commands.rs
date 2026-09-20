@@ -750,6 +750,11 @@ pub fn sidecar_is_running(sidecar: State<'_, sidecar::SidecarManager>) -> bool {
 }
 
 #[tauri::command]
+pub fn sidecar_set_endpoint(sidecar: State<'_, sidecar::SidecarManager>, endpoint: String) -> Result<(), String> {
+    sidecar.set_endpoint(&endpoint)
+}
+
+#[tauri::command]
 pub async fn sidecar_query(sidecar: State<'_, sidecar::SidecarManager>, prompt: String, session_id: String) -> Result<sidecar::HarnessResponse, String> {
     let request = sidecar::HarnessRequest {
         prompt,
