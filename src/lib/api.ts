@@ -270,6 +270,9 @@ export const api = {
   backlinksGet: (docId: string) =>
     safeInvoke<Backlink[]>("backlinks_get", { docId }),
 
+  implicitLinksGet: (docId: string) =>
+    safeInvoke<{ source_id: string; target_id: string; match_type: string }[]>("implicit_links_get", { docId }),
+
   usageRecord: (docId: string, event: string) =>
     safeInvoke<void>("usage_record", { docId, event }),
 
@@ -537,6 +540,9 @@ export const api = {
   sttHealth: () =>
     safeInvoke<{ status: string; model_loaded: boolean; model?: string }>("stt_health"),
 
+  sttPort: () =>
+    safeInvoke<number>("stt_port"),
+
   sttTranscribe: (audio: string, format: string) =>
     safeInvoke<string>("stt_transcribe", { audio, format }),
 
@@ -562,6 +568,9 @@ export const api = {
   ttsHealth: () =>
     safeInvoke<{ status: string; model_loaded: boolean }>("tts_health"),
 
+  ttsPort: () =>
+    safeInvoke<number>("tts_port"),
+
   ttsSynthesize: (text: string, voice: string, speed: number, langCode: string, splitPattern: string, chunkSize: number) =>
     safeInvoke<[string, number]>("tts_synthesize", { text, voice, speed, langCode, splitPattern, chunkSize }),
 
@@ -580,6 +589,12 @@ export const api = {
 
   llmHealth: () =>
     safeInvoke<{ status: string; model?: string }>("llm_health"),
+
+  llmPort: () =>
+    safeInvoke<number>("llm_port"),
+
+  llmCompletion: (prompt: string, maxTokens: number, temperature: number) =>
+    safeInvoke<string>("llm_completion", { prompt, maxTokens, temperature }),
 
   llmChatCompletion: (messages: any[], maxTokens: number, temperature: number) =>
     safeInvoke<string>("llm_chat_completion", { messages, maxTokens, temperature }),

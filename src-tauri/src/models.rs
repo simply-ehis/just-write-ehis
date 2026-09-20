@@ -34,7 +34,7 @@ pub struct Backlink {
     pub context_snippet: String,
 }
 
-#[allow(dead_code)]
+// ── Implicit links (auto-detected mentions) ─────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkImplicit {
     pub source_id: String,
@@ -42,12 +42,36 @@ pub struct LinkImplicit {
     pub match_type: String,
 }
 
-#[allow(dead_code)]
+// ── Usage tracking ──────────────────────────────────────────────
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEvent {
     pub doc_id: String,
     pub event: String,
     pub ts: String,
+}
+
+// ── Craft / writing metrics ─────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CraftMetric {
+    pub id: String,
+    pub doc_id: String,
+    pub metric_type: String,
+    pub value: f64,
+    pub created_at: String,
+}
+
+// ── Reader position sync ────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateReadingPositionRequest {
+    pub doc_id: String,
+    pub position: f64,
+}
+
+// ── File import ─────────────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportFileRequest {
+    pub file_path: String,
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,16 +108,6 @@ pub struct BibleFact {
     pub kind: String,
     pub key: String,
     pub value: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CraftMetric {
-    pub id: String,
-    pub doc_id: String,
-    pub metric_type: String,
-    pub value: f64,
-    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,20 +184,6 @@ pub struct BookshelfEntry {
     pub doc: Doc,
     pub shelf_status: String,
     pub rating: Option<i64>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateReadingPositionRequest {
-    pub doc_id: String,
-    pub position: f64,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportFileRequest {
-    pub file_path: String,
-    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

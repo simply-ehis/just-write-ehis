@@ -223,6 +223,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "backlinks_get":
       return store.backlinksFor(String(payload.docId)) as T;
 
+    case "implicit_links_get":
+      return [] as T;
+
     case "backlinks_extract":
       return undefined as T; // links derive on read in the browser store
 
@@ -1174,6 +1177,12 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "llm_health":
       return { status: "unavailable", model_loaded: false } as T;
 
+    case "llm_port":
+      return 0 as T;
+
+    case "llm_completion":
+      throw new Error("LLM completion needs the desktop app's llama.cpp server. Connect an HTTP model in Settings → AI & Providers.");
+
     case "llm_chat_completion":
       throw new Error("LLM chat needs the desktop app's llama.cpp server. Connect an HTTP model in Settings → AI & Providers.");
 
@@ -1182,6 +1191,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "stt_health":
       return { status: "unavailable", model_loaded: false } as T;
+
+    case "stt_port":
+      return 0 as T;
 
     case "stt_transcribe":
     case "stt_stream_stop":
@@ -1197,6 +1209,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "tts_health":
       return { status: "unavailable", model_loaded: false } as T;
+
+    case "tts_port":
+      return 0 as T;
 
     case "tts_synthesize":
       throw new Error("Read-aloud voices need the desktop app's Kokoro sidecar. Your browser can still read via its built-in speech if enabled.");

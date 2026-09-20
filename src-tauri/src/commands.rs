@@ -186,6 +186,11 @@ pub fn backlinks_get(db: State<'_, Database>, doc_id: String) -> Result<Vec<Back
 }
 
 #[tauri::command]
+pub fn implicit_links_get(db: State<'_, Database>, doc_id: String) -> Result<Vec<LinkImplicit>, String> {
+    db.get_implicit_links(&doc_id)
+}
+
+#[tauri::command]
 pub fn usage_record(db: State<'_, Database>, doc_id: String, event: String) -> Result<(), String> {
     db.record_usage_event(&doc_id, &event)
 }
@@ -1306,6 +1311,11 @@ pub async fn stt_health(stt: State<'_, sidecar::SttManager>) -> Result<sidecar::
 }
 
 #[tauri::command]
+pub fn stt_port(stt: State<'_, sidecar::SttManager>) -> u16 {
+    stt.port()
+}
+
+#[tauri::command]
 pub async fn stt_transcribe(
     stt: State<'_, sidecar::SttManager>,
     audio: String,
@@ -1361,6 +1371,11 @@ pub async fn tts_health(tts: State<'_, sidecar::TtsManager>) -> Result<sidecar::
 }
 
 #[tauri::command]
+pub fn tts_port(tts: State<'_, sidecar::TtsManager>) -> u16 {
+    tts.port()
+}
+
+#[tauri::command]
 pub async fn tts_synthesize(
     tts: State<'_, sidecar::TtsManager>,
     text: String,
@@ -1402,6 +1417,21 @@ pub fn llm_is_running(llm: State<'_, sidecar::LlmManager>) -> bool {
 #[tauri::command]
 pub async fn llm_health(llm: State<'_, sidecar::LlmManager>) -> Result<sidecar::LlmHealth, String> {
     llm.health().await
+}
+
+#[tauri::command]
+pub fn llm_port(llm: State<'_, sidecar::LlmManager>) -> u16 {
+    llm.port()
+}
+
+#[tauri::command]
+pub async fn llm_completion(
+    llm: State<'_, sidecar::LlmManager>,
+    prompt: String,
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<String, String> {
+    llm.completion(&prompt, max_tokens, temperature).await
 }
 
 #[tauri::command]

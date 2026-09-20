@@ -103,14 +103,11 @@ fn compute_content_hash(content: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// Count words that changed between two texts (simple diff).
-#[allow(dead_code)]
-fn word_diff_count(old: &str, new: &str) -> usize {
+fn word_diff_count(old: &str, new: &str) -> i64 {
     let old_words: Vec<&str> = old.split_whitespace().collect();
     let new_words: Vec<&str> = new.split_whitespace().collect();
-    // Simple: count words in new that aren't at the same position in old
-    let mut changes = 0;
     let max_len = old_words.len().max(new_words.len());
+    let mut changes = 0i64;
     for i in 0..max_len {
         let o = old_words.get(i).copied().unwrap_or("");
         let n = new_words.get(i).copied().unwrap_or("");
@@ -868,6 +865,21 @@ impl Database {
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
+    pub fn get_implicit_links(&self, doc_id: &str) -> Result<Vec<LinkImplicit>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT source_id, target_id, match_type FROM links_implicit WHERE source_id = ?1 OR target_id = ?1"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![doc_id], |row| {
+            Ok(LinkImplicit {
+                source_id: row.get(0)?,
+                target_id: row.get(1)?,
+                match_type: row.get(2)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
+    }
+
     pub fn extract_backlinks(&self, doc_id: &str, content: &str) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
@@ -1557,7 +1569,24 @@ impl Database {
         let id = uuid_v7();
         let now = now_iso();
         let word_count = doc.content.split_whitespace().count() as i64;
-        let label = format!("v{}", now.split('T').next().unwrap_or(&now));
+
+        // Label: include word diff from previous snapshot
+        let prev_content: Option<String> = conn.query_row(
+            "SELECT content FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            params![doc_id],
+            |row| row.get(0),
+        ).unwrap_or(None);
+        let label = match prev_content {
+            Some(ref prev) => {
+                let diff = word_diff_count(prev, &doc.content);
+                if diff >= 0 {
+                    format!("v{} (+{} words)", now.split('T').next().unwrap_or(&now), diff)
+                } else {
+                    format!("v{} ({} words)", now.split('T').next().unwrap_or(&now), diff)
+                }
+            }
+            None => format!("v{}", now.split('T').next().unwrap_or(&now)),
+        };
 
         conn.execute(
             "INSERT INTO snapshots (id, doc_id, label, content, word_count, content_hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
