@@ -9,6 +9,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import MicButton from "$lib/components/MicButton.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
+  import DockSplit from "$lib/components/DockSplit.svelte";
 
   let inboxItems = $state<Doc[]>([]);
   let loading = $state(false);
@@ -17,6 +18,7 @@
   let bulkTarget = $state("logs");
   // Item open for reading/editing (master-detail); null = triage list.
   let viewing = $state<Doc | null>(null);
+  let listCollapsed = $state(false);
   let captureInput = $state<HTMLInputElement | null>(null);
   // Last consumed focus request (monotonic counter from the capture store).
   let lastFocusSeen = $state(0);
@@ -82,6 +84,10 @@
       selectedIds.delete(item.id);
       selectedIds = new Set(selectedIds);
       if (viewing?.id === item.id) viewing = null;
+      // The inbox original is gone: drop it from tabs, point at the new doc.
+      $openTabs = $openTabs.filter((t) => t.id !== item.id);
+      if ($currentDoc?.id === item.id) $currentDoc = newDoc;
+      if (!$openTabs.find((t) => t.id === newDoc.id)) $openTabs = [newDoc, ...$openTabs];
     } catch (e) {
       console.error("Failed to move item:", e);
     }
@@ -93,9 +99,12 @@
       inboxItems = inboxItems.filter(i => i.id !== item.id);
       selectedIds.delete(item.id);
       selectedIds = new Set(selectedIds);
+      $openTabs = $openTabs.filter((t) => t.id !== item.id);
       if (viewing?.id === item.id) {
         viewing = null;
-        if ($currentDoc?.id === item.id) $currentDoc = $openTabs.find((t) => t.id !== item.id) ?? null;
+        if ($currentDoc?.id === item.id) $currentDoc = $openTabs[0] ?? null;
+      } else if ($currentDoc?.id === item.id) {
+        $currentDoc = $openTabs[0] ?? null;
       }
     } catch (e) {
       console.error("Failed to delete item:", e);
@@ -204,6 +213,11 @@
       {/if}
       <h1>Inbox</h1>
       <span class="item-count">{inboxItems.length} items</span>
+      {#if viewing}
+        <button class="bulk-btn" onclick={() => (listCollapsed = !listCollapsed)} title={listCollapsed ? "Show list" : "Focus editor — hide list"} aria-pressed={listCollapsed}>
+          {listCollapsed ? "Show list" : "Focus editor"}
+        </button>
+      {/if}
     </div>
     <button class="refresh-btn" onclick={loadInbox} disabled={loading} title="Refresh inbox" aria-label="Refresh inbox">
       <Icon name="refresh" size={15} />
@@ -262,8 +276,20 @@
   </div>
   {/if}
 
-  <div class="inbox-list">
-    {#if loading}
+  <DockSplit
+    storageKey="jwe-split-inbox"
+    topLabel="Inbox list height"
+    hasBottom={!!viewing}
+    topCompact={listCollapsed && !!viewing}
+  >
+    {#snippet top()}
+  <div class="inbox-list" class:collapsed-list={listCollapsed && viewing}>
+    {#if listCollapsed && viewing}
+      <div class="board-collapsed-note">
+        <span>List hidden — editor has full height.</span>
+        <button class="bulk-btn" onclick={() => (listCollapsed = false)}>Show list</button>
+      </div>
+    {:else if loading}
       <div class="empty-state">Loading...</div>
     {:else if inboxItems.length === 0}
       <div class="empty-state">
@@ -308,6 +334,8 @@
       {/each}
     {/if}
   </div>
+    {/snippet}
+    {#snippet bottom()}
   {#if viewing}
     <div class="inbox-dock">
       <DocDetail
@@ -322,6 +350,8 @@
       />
     </div>
   {/if}
+    {/snippet}
+  </DockSplit>
 </div>
 
 <style>
@@ -333,14 +363,13 @@
     color: var(--text-primary);
   }
 
-  /* Docked editor: list stays visible above, writing fills below. */
+  /* Docked editor: fills the DockSplit bottom slot. */
   .inbox-dock {
-    flex: 0 0 54%;
-    min-height: 220px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border-subtle);
     background: var(--surface-base);
   }
 
@@ -458,10 +487,16 @@
   }
 
   .inbox-list {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     padding: var(--space-2);
+  }
+
+  .inbox-list.collapsed-list {
+    flex: 0 0 auto;
+    max-height: none;
+    padding: 0;
   }
 
   .empty-state {

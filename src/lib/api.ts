@@ -430,6 +430,9 @@ export const api = {
   dashboardPatterns: () =>
     safeInvoke<{ peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number; avg_session_minutes: number }>("dashboard_patterns"),
 
+  dashboardGoals: () =>
+    safeInvoke<{ id: string; title: string; workspace: string; goal_words: number; word_count: number; deadline: string | null }[]>("dashboard_goals"),
+
   // Usage Memory (8.3)
   getReopenNeverFinish: () =>
     safeInvoke<Array<{ doc: Doc; openCount: number; lastOpened: string }>>("get_reopen_never_finish"),

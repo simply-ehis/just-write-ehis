@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact } from '$lib/api';
-  import { currentDoc, currentWorkspace } from '$lib/stores/app';
+  import { currentDoc, currentWorkspace, openTabs } from '$lib/stores/app';
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
   import EditorPane from './EditorPane.svelte';
   import DocDetail from './DocDetail.svelte';
   import DeleteButton from './DeleteButton.svelte';
+  import DockSplit from './DockSplit.svelte';
 
   let projectId = $state<string | null>(null);
   let projects = $state<Doc[]>([]);
@@ -21,6 +22,105 @@
   let compileFormats = $state<string[]>(['md', 'txt', 'html']);
   let compiling = $state(false);
   let loading = $state(false);
+  let boardCollapsed = $state(false);
+  let importing = $state(false);
+  let importInput = $state<HTMLInputElement | null>(null);
+
+  /**
+   * Split imported prose into chapters: markdown headings first,
+   * chapter/part markers second, one chapter as fallback. Marker lines
+   * stay in the body so nothing is lost.
+   */
+  function splitChapters(text: string): { title: string; body: string }[] {
+    const lines = text.split("\n");
+    const cuts: { index: number; title: string }[] = [];
+    lines.forEach((line, i) => {
+      const m = line.match(/^#{1,3}\s+(.+?)\s*$/);
+      if (m && m[1]) cuts.push({ index: i, title: m[1].trim() });
+    });
+    if (cuts.length === 0) {
+      lines.forEach((line, i) => {
+        const t = line.trim();
+        if (t.length > 0 && t.length <= 70 && /^(chapter|part|prologue|epilogue|interlude|appendix|book)\b/i.test(t)) {
+          cuts.push({ index: i, title: t });
+        }
+      });
+    }
+    const cleanTitle = (t: string) => t.slice(0, 80) || "Untitled";
+    if (cuts.length === 0) return [{ title: "Chapter 1", body: text.trim() }];
+    const kept = cuts.slice(0, 200);
+    const chapters: { title: string; body: string }[] = [];
+    const preamble = lines.slice(0, kept[0].index).join("\n").trim();
+    if (preamble) chapters.push({ title: "Opening", body: preamble });
+    if (kept.length === 1 && !preamble) {
+      return [{ title: cleanTitle(kept[0].title), body: text.trim() }];
+    }
+    kept.forEach((cut, n) => {
+      const end = n + 1 < kept.length ? kept[n + 1].index : lines.length;
+      const body = lines.slice(cut.index, end).join("\n").trim();
+      if (body) chapters.push({ title: cleanTitle(cut.title), body });
+    });
+    return chapters.length > 0 ? chapters : [{ title: "Chapter 1", body: text.trim() }];
+  }
+
+  /**
+   * Read a novel file in any supported form: plain text directly,
+   * books via the shared book parser (same path as Reader import).
+   */
+  async function readNovelFile(file: File): Promise<{ title: string; text: string }> {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const fallbackTitle = file.name.replace(/\.[^.]+$/, "");
+    if (ext === "md" || ext === "txt" || ext === "fountain") {
+      const text = await file.text();
+      if (text.includes("\0")) {
+        throw new Error("That file looks binary, not text — import refused.");
+      }
+      if (!text.trim()) throw new Error("That file is empty.");
+      return { title: fallbackTitle, text };
+    }
+    if (ext === "epub" || ext === "pdf" || ext === "docx") {
+      showToast(`Extracting text from ${file.name}…`, "info");
+      const { parseBookFile } = await import("$lib/bookparse");
+      let worker: string | undefined;
+      if (ext === "pdf") {
+        worker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+      }
+      const data = new Uint8Array(await file.arrayBuffer());
+      const book = await parseBookFile(file.name, data, worker);
+      if (!book.text.trim()) throw new Error("No text could be extracted.");
+      return { title: book.title || fallbackTitle, text: book.text };
+    }
+    throw new Error(`.${ext ?? "?"} isn't importable — use .epub, .pdf, .docx, .md, .txt, or .fountain.`);
+  }
+
+  /** Import a novel file as a project: one act, one scene per chapter. */
+  async function handleImportFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || importing) return;
+    importing = true;
+    try {
+      const { title, text } = await readNovelFile(file);
+      const chapters = splitChapters(text);
+      const project = await api.docCreate("novel", "project", title);
+      projects = [...projects, project];
+      projectId = project.id;
+      $currentDoc = project;
+      await api.docCreate("novel", "act", "Part One", project.id, "", JSON.stringify({ status: "draft", act: 1, order: 1024 }));
+      let order = 2048;
+      for (const ch of chapters) {
+        await api.docCreate("novel", "scene", ch.title, project.id, ch.body, JSON.stringify({ status: "draft", act: 1, order }));
+        order += 1024;
+      }
+      await loadProject();
+      showToast(`Imported "${title}" — ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}`, "success");
+    } catch (err) {
+      showToast(`Import failed: ${err instanceof Error ? err.message : err}`, "error");
+    } finally {
+      importing = false;
+    }
+  }
 
   async function loadProjects() {
     try {
@@ -80,7 +180,8 @@
 
   function selectBeat(beat: BeatNode) {
     selectedBeat = beat;
-    currentDoc.set(beat.doc);
+    $currentDoc = beat.doc;
+    if (!$openTabs.find((t) => t.id === beat.doc.id)) $openTabs = [beat.doc, ...$openTabs];
   }
 
   async function addBeat(kind: 'act' | 'sequence' | 'scene', parentAct?: number | null, parentSeq?: number | null) {
@@ -337,6 +438,15 @@
     <div class="view-toggle">
       <button class:active={viewMode === 'board'} onclick={() => viewMode = 'board'}>Beat Board</button>
       <button class:active={viewMode === 'bible'} onclick={() => viewMode = 'bible'}>Story Bible</button>
+      <button onclick={() => (boardCollapsed = !boardCollapsed)} title={boardCollapsed ? "Show board" : "Focus editor — hide board"} aria-pressed={boardCollapsed}>{boardCollapsed ? "Show board" : "Focus editor"}</button>
+      <button class="import-btn" onclick={() => importInput?.click()} title="Import novel (.epub .pdf .docx .md .txt .fountain)" aria-label="Import novel" disabled={importing}>Import</button>
+      <input
+        bind:this={importInput}
+        type="file"
+        accept=".epub,.pdf,.docx,.md,.txt,.fountain"
+        onchange={handleImportFile}
+        hidden
+      />
       <button class="compile-btn" onclick={compileManuscript} disabled={!projectId}>Compile</button>
     </div>
   </div>
@@ -375,7 +485,20 @@
     <div class="project-select">Loading...</div>
   {:else}
     <div class="novel-main">
-      {#if viewMode === 'board'}
+      <DockSplit
+        storageKey="jwe-split-novel"
+        topLabel="Beat board height"
+        hasBottom={!!selectedBeat}
+        topCompact={boardCollapsed && !!selectedBeat}
+      >
+        {#snippet top()}
+      {#if boardCollapsed && selectedBeat}
+        <div class="board-collapsed-note">
+          <span>Board hidden — editor has full height.</span>
+          <button class="new-project-btn" onclick={() => (boardCollapsed = false)}>Show board</button>
+        </div>
+      {/if}
+      {#if viewMode === 'board' && !boardCollapsed}
       <div class="beat-board">
       {#each board.acts as act}
         <div
@@ -500,6 +623,8 @@
       {/each}
     </div>
       {/if}
+        {/snippet}
+        {#snippet bottom()}
       {#if selectedBeat}
         <div class="beat-dock">
           <DocDetail
@@ -513,6 +638,8 @@
           />
         </div>
       {/if}
+        {/snippet}
+      </DockSplit>
     </div>
   {/if}
 
@@ -583,10 +710,24 @@
     border-color: var(--accent-primary);
   }
 
-  .compile-btn {
-    background: var(--accent-semantic-purple) !important;
-    color: white !important;
-    border-color: var(--accent-semantic-purple) !important;
+  .import-btn {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+  }
+
+  .import-btn:hover:not(:disabled) {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+  }
+
+  .import-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .project-select {
@@ -607,14 +748,13 @@
     flex-direction: column;
   }
 
-  /* Docked editor: board stays visible above, writing fills below. */
+  /* Docked editor: fills the DockSplit bottom slot. */
   .beat-dock {
-    flex: 0 0 54%;
-    min-height: 220px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border-subtle);
     background: var(--surface-base);
   }
 
@@ -701,7 +841,8 @@
     gap: var(--space-4);
     padding: var(--space-4);
     overflow-x: auto;
-    flex: 1;
+    overflow-y: auto;
+    flex: 1 1 auto;
     min-height: 0;
   }
 
@@ -904,7 +1045,7 @@
   .compiled-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.8);
+    background: var(--bg-primary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -913,7 +1054,7 @@
 
   .compiled-content {
     background: var(--surface-raised);
-    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-subtle);
     width: 90vw;
     max-height: 80vh;
     display: flex;

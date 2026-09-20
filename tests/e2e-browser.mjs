@@ -348,6 +348,7 @@ async function auditBatchWiring() {
 async function canvasWiring() {
   const canvas = await readFile(join(root, "src/lib/components/CanvasWorkspace.svelte"), "utf8");
   check("canvas board renders cards+edges", canvas.includes("canvasUpsertNode") && canvas.includes("canvasConnect") && canvas.includes("edgePath"));
+  check("canvas card double-click inline edit", canvas.includes("startInlineEdit") && canvas.includes("inline-title") && canvas.includes("inline-body") && canvas.includes("commitInlineEdit"));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
   check("app routes canvas workspace", app.includes("CanvasWorkspace") && app.includes('"canvas"'));
   const stores = await readFile(join(root, "src/lib/stores/app.ts"), "utf8");
@@ -411,6 +412,53 @@ async function bookParsing() {
   }
 }
 
+async function recentWiring() {
+  // Skills/Craft/Stats live in Settings, not the sidebar.
+  const stores = await readFile(join(root, "src/lib/stores/app.ts"), "utf8");
+  for (const ws of ["craft", "stats", "skills"]) {
+    check(`"${ws}" out of sidebar nav`, !stores.includes(`id: "${ws}"`), ws);
+  }
+  const settings = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
+  check("settings owns skills/craft/stats categories", settings.includes('"skills"') && settings.includes('"craft"') && settings.includes('"stats"'));
+  check("settings deep-link store exists", settings.includes("settingsCategory") && settings.includes("openSettingsAt"));
+  const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
+  check("settings embeds skills/craft/stats", pane.includes("SkillsPage.svelte") && pane.includes("CraftPage.svelte") && pane.includes("UsageMemory.svelte"));
+  const app = await readFile(join(root, "src/App.svelte"), "utf8");
+  check("old workspace ids redirect to settings", app.includes('"craft"') && app.includes("settingsCategory.set"));
+  // Drag-resize dock dividers in the three docked workspaces.
+  for (const [f, key] of [["NovelWorkspace.svelte", "jwe-split-novel"], ["InboxWorkspace.svelte", "jwe-split-inbox"], ["ProjectsWorkspace.svelte", "jwe-split-projects"], ["CanvasWorkspace.svelte", "jwe-split-canvas"]]) {
+    const src = await readFile(join(root, "src/lib/components", f), "utf8");
+    check(`${f} has persisted divider`, src.includes("DockSplit") && src.includes(key), key);
+  }
+  const reader = await readFile(join(root, "src/lib/components/ReaderWorkspace.svelte"), "utf8");
+  check("ReaderWorkspace.svelte has persisted notes divider", reader.includes("DockSplit") && reader.includes("jwe-split-reader") && reader.includes('direction="horizontal"'));
+  const dock = await readFile(join(root, "src/lib/components/DockSplit.svelte"), "utf8");
+  check("divider supports both axes", dock.includes('"horizontal"') && dock.includes("clientX"));
+  const appShell = await readFile(join(root, "src/App.svelte"), "utf8");
+  check("settings + AI panel lazy-load", appShell.includes('import("$lib/components/SettingsPane.svelte")') && appShell.includes('import("$lib/components/AiPanel.svelte")'));
+  // Split editors in Write.
+  const jw = await readFile(join(root, "src/lib/components/JustWriteWorkspace.svelte"), "utf8");
+  check("write splits side-by-side", jw.includes("openSplit") && jw.includes("closeSplit") && jw.includes("split-picker"));
+  check("split pane autosaves", jw.includes("handleSplitChange") && jw.includes("Failed to save split doc"));
+  // Typing auto-hide chrome.
+  check("auto-hide setting exists", settings.includes("autoHideChrome"));
+  check("shell hides chrome while typing", app.includes("typing-focus") && app.includes("editor-typing"));
+  check("editors report typing", (await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8")).includes("editor-typing"));
+  // No floating action buttons.
+  const palette = await readFile(join(root, "src/lib/components/CommandPalette.svelte"), "utf8");
+  check("no floating palette trigger", !palette.includes("palette-trigger"));
+  check("no floating sidebar expand", !app.includes("sidebar-expand"));
+}
+
+async function splitHardeningWiring() {
+  const jw = await readFile(join(root, "src/lib/components/JustWriteWorkspace.svelte"), "utf8");
+  check("split publishes its target", jw.includes("splitTarget.set"));
+  check("split pane consumes write-back", jw.includes("Split-pane write-back"));
+  check("split swaps panes", jw.includes("swapSplit") && jw.includes("Swap panes"));
+  const panel = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
+  check("AI targets main/split", panel.includes("wbTargetId") && panel.includes("Write-back target"));
+}
+
 await serveAndFetch();
 await staticCoverage();
 await staticIcons();
@@ -422,6 +470,8 @@ await canvasWiring();
 await integrityWiring();
 await noNativeDialogs();
 await auditBatchWiring();
+await recentWiring();
+await splitHardeningWiring();
 await themeAndReaderWiring();
 await modelWiring();
 await modelsDocWiring();

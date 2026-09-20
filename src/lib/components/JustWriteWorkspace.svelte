@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
-  import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightSpecialChars, Decoration, ViewPlugin, ViewUpdate } from "@codemirror/view";
-  import { EditorState, StateField, StateEffect, RangeSet } from "@codemirror/state";
+  import { EditorView, keymap } from "@codemirror/view";
+  import { EditorState } from "@codemirror/state";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+  import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
-  import { aiPanelOpen, currentDoc, currentWorkspace } from "$lib/stores/app";
+  import { aiPanelOpen, currentDoc, currentWorkspace, inspectorOpen, openTabs } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { api, type Doc } from "$lib/api";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
@@ -18,7 +19,9 @@ import VersionHistory from "./VersionHistory.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
   import Icon from "./Icon.svelte";
   import { filterWordRatio } from "$lib/browserBackend";
+  import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
+  import { splitTarget } from "$lib/stores/split";
   import { markUsed } from "$lib/features";
 
   let editorContainer = $state<HTMLDivElement>();
@@ -27,13 +30,23 @@ import VersionHistory from "./VersionHistory.svelte";
   // graph on every assignment — a busy-loop that starves timers.
   let editorView = $state.raw<EditorView | null>(null);
   let saveTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
-  let typewriterEnabled = $state(true);
-  let focusDimming = $state(true);
+  let typewriterEnabled = $state($settings.typewriterDefault);
+  let focusDimming = $state($settings.focusDimmingDefault);
   let sessionStartTime = $state(Date.now());
   let sessionWords = $state(0);
   let elapsed = $state("00:00:00");
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let lastMetricAt = 0;
+
+  // Split editor: second doc side-by-side (session-only working state).
+  // The primary pane keeps the full power (ghost/slash/mic); the split
+  // pane is a clean second edit surface with the same theme + autosave.
+  let splitDoc = $state<Doc | null>(null);
+  let splitDocId = $state<string | null>(null);
+  let splitContainer = $state<HTMLDivElement>();
+  let splitView = $state.raw<EditorView | null>(null);
+  let splitSaveTimeout: ReturnType<typeof setTimeout> | null = null;
+  let splitWords = $state(0);
 
   // Ghost autocomplete (same board behavior as the main editor; longer
   // pause per spec — Just Write must never interrupt active typing).
@@ -144,41 +157,6 @@ import VersionHistory from "./VersionHistory.svelte";
     return false;
   }
 
-  const focusMark = Decoration.mark({ class: "cm-focus-dimmed" });
-
-  function focusDimmingPlugin() {
-    return ViewPlugin.fromClass(
-      class {
-        decorations: RangeSet<Decoration>;
-        constructor(view: EditorView) {
-          this.decorations = this.computeDecorations(view);
-        }
-        update(update: ViewUpdate) {
-          if (update.docChanged || update.selectionSet) {
-            this.decorations = this.computeDecorations(update.view);
-          }
-        }
-        computeDecorations(view: EditorView): RangeSet<Decoration> {
-          if (!focusDimming) return RangeSet.empty;
-          const selection = view.state.selection.main;
-          const doc = view.state.doc;
-          const builder: { from: number; to: number; value: Decoration }[] = [];
-          const contextLines = 2;
-          const focusStart = Math.max(0, selection.from - contextLines * 100);
-          const focusEnd = Math.min(doc.length, selection.to + contextLines * 100);
-          if (focusStart > 0) {
-            builder.push({ from: 0, to: focusStart, value: focusMark });
-          }
-          if (focusEnd < doc.length) {
-            builder.push({ from: focusEnd, to: doc.length, value: focusMark });
-          }
-          return RangeSet.of(builder);
-        }
-      },
-      { decorations: (v) => v.decorations }
-    );
-  }
-
   function makeDarkTheme(font: string, size: number, lh: number, dark = true) {
     // Paper & pine: keep the CodeMirror surface in lockstep with app.css.
     const bg = dark ? "#1B1A15" : "#F1EFE6";
@@ -228,6 +206,29 @@ import VersionHistory from "./VersionHistory.svelte";
       textDecoration: "underline wavy #d9a521 1px",
       textUnderlineOffset: "3px",
     },
+    // Find/replace panel: solid theme surfaces, never the default white.
+    ".cm-panel.cm-search": {
+      backgroundColor: overlay,
+      color: fg,
+      borderBottom: `1px solid ${muted}`,
+      padding: "6px 8px",
+    },
+    ".cm-panel.cm-search input": {
+      backgroundColor: bg,
+      color: fg,
+      border: `1px solid ${muted}`,
+    },
+    ".cm-panel.cm-search button": {
+      backgroundColor: "transparent",
+      color: fg,
+      border: `1px solid ${muted}`,
+    },
+    ".cm-searchMatch": {
+      backgroundColor: dark ? "#8FC7A940" : "#3F665640",
+    },
+    ".cm-searchMatch-selected": {
+      backgroundColor: dark ? "#8FC7A980" : "#3F665680",
+    },
   });
   }
 
@@ -242,9 +243,13 @@ import VersionHistory from "./VersionHistory.svelte";
       basicSetup,
       markdown(),
       darkTheme,
+      search({ top: true }),
+      highlightSelectionMatches(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           handleContentChange(update.state.doc.toString());
+          // Typing activity: lets the shell auto-hide chrome for focus.
+          window.dispatchEvent(new CustomEvent("editor-typing"));
         }
         // Slash command detection (A11.7)
         const pos = update.state.selection.main.head;
@@ -270,7 +275,7 @@ import VersionHistory from "./VersionHistory.svelte";
     ];
 
     if (focusDimming) {
-      extensions.push(focusDimmingPlugin());
+      extensions.push(focusDimmingPlugin(() => focusDimming));
     }
 
     if (typewriterEnabled) {
@@ -281,6 +286,8 @@ import VersionHistory from "./VersionHistory.svelte";
 
     extensions.push(
       keymap.of([
+        // Paid for in package.json but never wired: find/replace (Ctrl+F).
+        ...searchKeymap,
         {
           key: "Tab",
           run: () => {
@@ -340,20 +347,7 @@ import VersionHistory from "./VersionHistory.svelte";
     });
 
     if (typewriterEnabled && editorView) {
-      centerCursor();
-    }
-  }
-
-  function centerCursor() {
-    if (!editorView || !editorContainer) return;
-    const pos = editorView.state.selection.main.head;
-    const coords = editorView.coordsAtPos(pos);
-    if (coords) {
-      const containerRect = editorContainer.getBoundingClientRect();
-      const targetY = containerRect.height / 2;
-      const currentY = coords.top - containerRect.top;
-      const scrollDiff = currentY - targetY;
-      editorContainer.scrollBy({ top: scrollDiff, behavior: "smooth" });
+      centerCursorIn(editorView, editorContainer);
     }
   }
 
@@ -379,7 +373,7 @@ import VersionHistory from "./VersionHistory.svelte";
       }
     }, 500);
     if (typewriterEnabled) {
-      requestAnimationFrame(() => centerCursor());
+      requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
     }
     // Ghost waits for a real pause here (3s) — flow comes first.
     if ($settings.ghostEnabled && content.length > 20) {
@@ -392,6 +386,12 @@ import VersionHistory from "./VersionHistory.svelte";
 
   function toggleTypewriter() {
     typewriterEnabled = !typewriterEnabled;
+    if ($currentDoc) {
+      saveFocusPrefs($currentDoc.id, {
+        typewriter: typewriterEnabled,
+        focus: focusDimming,
+      });
+    }
     if (editorView) {
       createEditor($currentDoc);
     }
@@ -399,9 +399,120 @@ import VersionHistory from "./VersionHistory.svelte";
 
   function toggleFocusDimming() {
     focusDimming = !focusDimming;
+    if ($currentDoc) {
+      saveFocusPrefs($currentDoc.id, {
+        typewriter: typewriterEnabled,
+        focus: focusDimming,
+      });
+    }
     if (editorView) {
       createEditor($currentDoc);
     }
+  }
+
+  function openSplit(id: string) {
+    if (!id || id === $currentDoc?.id) return;
+    splitDocId = id;
+  }
+
+  function closeSplit() {
+    if (splitView) {
+      splitView.destroy();
+      splitView = null;
+    }
+    if (splitSaveTimeout) clearTimeout(splitSaveTimeout);
+    splitDocId = null;
+    splitDoc = null;
+    splitTarget.set(null);
+  }
+
+  /** Swap panes: the split doc becomes primary and vice versa. */
+  function swapSplit() {
+    const primary = $currentDoc;
+    const secondary = splitDoc;
+    if (!primary || !secondary) return;
+    splitDocId = primary.id;
+    splitTarget.set({ id: primary.id, title: primary.title });
+    $currentDoc = secondary;
+    if (!$openTabs.find((t) => t.id === secondary.id)) $openTabs = [secondary, ...$openTabs];
+  }
+
+  function createSplitEditor(doc: Doc) {
+    if (splitView) {
+      splitView.destroy();
+    }
+    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
+    const docId = doc.id;
+    const state = EditorState.create({
+      doc: doc.content ?? "",
+      extensions: [
+        basicSetup,
+        markdown(),
+        darkTheme,
+        search({ top: true }),
+        highlightSelectionMatches(),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            handleSplitChange(docId, update.state.doc.toString());
+          }
+          return false;
+        }),
+        ...(focusDimming ? [focusDimmingPlugin(() => focusDimming)] : []),
+        ...(typewriterEnabled
+          ? [EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))]
+          : []),
+        keymap.of([
+          // Find/replace, same as every other edit surface (Ctrl+F).
+          ...searchKeymap,
+          {
+            // Same timestamp shortcut as the primary pane (§4.1).
+            key: "Ctrl-t",
+            run: (view) => {
+              const pos = view.state.selection.main.head;
+              const stamp = new Date().toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              });
+              view.dispatch({ changes: { from: pos, insert: stamp } });
+              return true;
+            },
+          },
+        ]),
+        ...($settings.autocorrectEnabled
+          ? [
+              createAutocorrectPlugin({
+                enabled: () => $settings.autocorrectEnabled,
+                useEnglishTable: () => $settings.dictionaryLanguage !== "off",
+                getCustomWords: () => bibleWords,
+              }),
+            ]
+          : []),
+      ],
+    });
+
+    splitView = new EditorView({
+      state,
+      parent: splitContainer,
+    });
+    splitWords = doc.word_count;
+  }
+
+  function handleSplitChange(docId: string, content: string) {
+    const words = content.split(/\s+/).filter(Boolean).length;
+    if (splitDoc?.id === docId) splitWords = words;
+    if (splitSaveTimeout) clearTimeout(splitSaveTimeout);
+    splitSaveTimeout = setTimeout(async () => {
+      try {
+        await api.docSave(docId, undefined, content);
+        if (splitDoc?.id === docId) {
+          splitDoc = { ...splitDoc, word_count: words };
+        }
+        $openTabs = $openTabs.map((t) => (t.id === docId ? { ...t, word_count: words } : t));
+      } catch (e) {
+        console.error("Failed to save split doc:", e);
+      }
+    }, 500);
   }
 
   /** Drop/paste files as vault attachments (A8.9), same as the main editor. */
@@ -444,7 +555,15 @@ import VersionHistory from "./VersionHistory.svelte";
     // that rebuilds the whole editor and starves timers).
     const doc = $currentDoc;
     if (doc && editorContainer) {
-      untrack(() => createEditor(doc));
+      untrack(() => {
+        const prefs = loadFocusPrefs(doc.id, {
+          typewriter: $settings.typewriterDefault,
+          focus: $settings.focusDimmingDefault,
+        });
+        typewriterEnabled = prefs.typewriter;
+        focusDimming = prefs.focus;
+        createEditor(doc);
+      });
       refreshBibleWords(doc);
       sessionStartTime = Date.now();
       sessionWords = doc.word_count;
@@ -459,19 +578,64 @@ import VersionHistory from "./VersionHistory.svelte";
     void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+      if (splitView && splitContainer && splitDoc) createSplitEditor(splitDoc);
     });
   });
 
+  // Split doc loading: container mount + id change ONLY (same busy-loop
+  // guard as the primary pane — never track what this effect rewrites).
+  $effect(() => {
+    const id = splitDocId;
+    const ready = !!splitContainer;
+    if (id && ready) {
+      untrack(() => {
+        api.docGet(id)
+          .then((d) => {
+            if (splitDocId !== id) return;
+            splitDoc = d;
+            splitTarget.set({ id: d.id, title: d.title });
+            createSplitEditor(d);
+          })
+          .catch(() => {
+            if (splitDocId === id) {
+              splitDocId = null;
+              splitDoc = null;
+              splitTarget.set(null);
+            }
+          });
+      });
+    }
+  });
+
+  // The split pane never edits the open doc: if the primary catches up
+  // to the split id (tab switch), the split closes instead of forking.
+  $effect(() => {
+    if (splitDocId && $currentDoc && splitDocId === $currentDoc.id) closeSplit();
+  });
+
   // AI write-back lands here exactly like the main editor (same board).
+  // Either pane may own the event; only an event targeting neither open
+  // doc is stale and cleared.
   $effect(() => {
     const event = $writeBack;
     if (!event || !editorView) return;
-    if (!event.docId || event.docId !== $currentDoc?.id) {
+    if (!event.docId || (event.docId !== $currentDoc?.id && event.docId !== splitDoc?.id)) {
       writeBack.clear();
       return;
     }
+    if (event.docId !== $currentDoc?.id) return;
     applyWriteBackEvent(editorView, event);
     writeBack.clear();
+  });
+
+  // Split-pane write-back: same shared applier, own doc id.
+  $effect(() => {
+    const event = $writeBack;
+    if (!event || !splitView) return;
+    if (event.docId && splitDoc && event.docId === splitDoc.id) {
+      applyWriteBackEvent(splitView, event);
+      writeBack.clear();
+    }
   });
 
   // Listen for scroll-to-line events from InspectorPanel outline
@@ -504,7 +668,10 @@ import VersionHistory from "./VersionHistory.svelte";
       showToast(`${sessionWords.toLocaleString()} words in ${timeStr}`, "info");
     }
     if (editorView) editorView.destroy();
+    if (splitView) splitView.destroy();
+    splitTarget.set(null);
     if (saveTimeout) clearTimeout(saveTimeout);
+    if (splitSaveTimeout) clearTimeout(splitSaveTimeout);
     if (timerInterval) clearInterval(timerInterval);
     if (ghostDebounce) clearTimeout(ghostDebounce);
   });
@@ -522,6 +689,40 @@ import VersionHistory from "./VersionHistory.svelte";
       <button class="toolbar-btn icon-btn" class:active={$aiPanelOpen} onclick={() => $aiPanelOpen = !$aiPanelOpen} title="AI panel (Ctrl+J)" aria-label="Toggle AI panel">
         <Icon name="sparkle" size={15} />
       </button>
+      <button class="toolbar-btn icon-btn" class:active={$inspectorOpen} onclick={() => $inspectorOpen = !$inspectorOpen} title="Outline & links (Ctrl+I)" aria-label="Toggle inspector">
+        <Icon name="panel" size={15} />
+      </button>
+      <button
+        class="toolbar-btn icon-btn"
+        class:active={!!splitDocId}
+        onclick={() => {
+          if (splitDocId) {
+            closeSplit();
+          } else {
+            const candidate = $openTabs.find((t) => t.id !== $currentDoc?.id);
+            if (candidate) openSplit(candidate.id);
+            else showToast("Open another tab first, then split", "info");
+          }
+        }}
+        title="Split editor side-by-side"
+        aria-label="Toggle split editor"
+        aria-pressed={!!splitDocId}
+      >
+        <Icon name="board" size={15} />
+      </button>
+      {#if splitDocId}
+        <select
+          class="split-picker"
+          value={splitDocId}
+          onchange={(e) => openSplit((e.target as HTMLSelectElement).value)}
+          title="Split document"
+          aria-label="Split document"
+        >
+          {#each $openTabs.filter((t) => t.id !== $currentDoc?.id) as t}
+            <option value={t.id}>{t.title}</option>
+          {/each}
+        </select>
+      {/if}
       <VersionHistory />
       {#if $settings.sttEnabled}
         <MicButton onTranscribe={(text) => {
@@ -564,17 +765,36 @@ import VersionHistory from "./VersionHistory.svelte";
 
   <FormatToolbar view={editorView} />
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
-  <div class="editor-container" bind:this={editorContainer} onkeydown={handleSlashKeydown} ondrop={handleFileDrop} onpaste={handlePaste} ondragover={(e) => e.preventDefault()} role="application">
-    {#if ghostVisible && ghostSuggestion}
-      <div class="ghost-overlay">
-        <div class="ghost-suggestion">
-          <span class="ghost-text">{ghostSuggestion}</span>
-          <div class="ghost-actions">
-            <button class="ghost-accept" onclick={acceptGhost}>Tab to accept</button>
-            <button class="ghost-dismiss" onclick={dismissGhost}>Esc to dismiss</button>
+  <div class="split-wrap" class:split-on={!!splitDocId}>
+    <div class="split-pane">
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
+      <div class="editor-container" bind:this={editorContainer} onkeydown={handleSlashKeydown} ondrop={handleFileDrop} onpaste={handlePaste} ondragover={(e) => e.preventDefault()} role="application">
+        {#if ghostVisible && ghostSuggestion}
+          <div class="ghost-overlay">
+            <div class="ghost-suggestion">
+              <span class="ghost-text">{ghostSuggestion}</span>
+              <div class="ghost-actions">
+                <button class="ghost-accept" onclick={acceptGhost}>Tab to accept</button>
+                <button class="ghost-dismiss" onclick={dismissGhost}>Esc to dismiss</button>
+              </div>
+            </div>
           </div>
+        {/if}
+      </div>
+    </div>
+    {#if splitDocId}
+      <div class="split-pane split-second">
+        <div class="split-header">
+          <span class="split-title" title={splitDoc?.title ?? "Loading…"}>{splitDoc?.title ?? "Loading…"}</span>
+          <span class="split-words">{splitWords.toLocaleString()} words</span>
+          <button class="icon-btn split-swap" onclick={swapSplit} title="Swap panes" aria-label="Swap panes">
+            <Icon name="arrow-left" size={14} />
+          </button>
+          <button class="icon-btn split-close" onclick={closeSplit} title="Close split" aria-label="Close split">
+            <Icon name="x" size={14} />
+          </button>
         </div>
+        <div class="editor-container" bind:this={splitContainer} role="application" aria-label="Split editor"></div>
       </div>
     {/if}
   </div>
@@ -693,8 +913,78 @@ import VersionHistory from "./VersionHistory.svelte";
 
   .editor-container {
     flex: 1;
+    min-height: 0;
     overflow: auto;
     position: relative;
+  }
+
+  .split-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .split-wrap.split-on {
+    flex-direction: row;
+  }
+
+  .split-pane {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .split-second {
+    border-left: 1px solid var(--border-subtle);
+  }
+
+  .split-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px 4px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-base);
+    flex-shrink: 0;
+  }
+
+  .split-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .split-words {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+  }
+
+  .split-picker {
+    height: 28px;
+    font-size: 12px;
+    max-width: 160px;
+  }
+
+  @media (max-width: 768px) {
+    .split-wrap.split-on {
+      flex-direction: column;
+    }
+
+    .split-second {
+      border-left: none;
+      border-top: 1px solid var(--border-subtle);
+    }
   }
 
   .ghost-overlay {

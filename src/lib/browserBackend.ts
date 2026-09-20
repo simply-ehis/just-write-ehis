@@ -899,6 +899,25 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       } as T;
     }
 
+    case "dashboard_goals": {
+      return store.docs
+        .filter((d) => !d.locked && d.goal_words && d.goal_words > 0)
+        .map((d) => ({
+          id: d.id,
+          title: d.title,
+          workspace: d.workspace,
+          goal_words: d.goal_words,
+          word_count: d.word_count,
+          deadline: d.deadline ?? null,
+        }))
+        .sort((a, b) => {
+          if (a.deadline && b.deadline) return a.deadline.localeCompare(b.deadline);
+          if (a.deadline) return -1;
+          if (b.deadline) return 1;
+          return 0;
+        }) as T;
+    }
+
     case "vault_rename_preview": {
       const old = String(payload.oldTitle);
       const pattern = `[[${old}]]`;

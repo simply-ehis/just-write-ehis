@@ -166,7 +166,7 @@
   .more-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--bg-primary);
     z-index: 501;
   }
 

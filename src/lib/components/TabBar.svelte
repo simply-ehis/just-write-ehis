@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentDoc, openTabs, workspaces } from "$lib/stores/app";
+  import { currentDoc, openTabs, workspaces, currentWorkspace } from "$lib/stores/app";
   import { transferDocsToWorkspace } from "$lib/stores/uiState";
   import { globalLoading } from "$lib/stores/loading";
   import { api } from "$lib/api";
@@ -185,6 +185,7 @@
     const labels: Record<string, string> = {
       home: "H", logs: "L", write: "W", map: "M", canvas: "C",
       novel: "N", script: "S", projects: "P", reader: "R", files: "F",
+      inbox: "I", properties: "L", craft: "C", stats: "S", skills: "K",
     };
     return labels[doc.workspace] ?? doc.workspace[0]?.toUpperCase() ?? "?";
   }
@@ -204,6 +205,16 @@
       showToast(`Copied "${target.title}" to ${workspaceId}`, "success");
     } catch (e) {
       showToast(`Couldn't copy tab: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  async function newTabDoc() {
+    try {
+      const doc = await api.docCreate($currentWorkspace === "home" ? "write" : $currentWorkspace, "doc", "Untitled");
+      $currentDoc = doc;
+      $openTabs = [doc, ...$openTabs];
+    } catch (e) {
+      showToast(`Couldn't create doc: ${e instanceof Error ? e.message : e}`, "error");
     }
   }
 </script>
@@ -255,6 +266,7 @@
 
   {#if $openTabs.length === 0}
     <div class="tab-placeholder">No open documents</div>
+    <button class="new-tab-btn" onclick={newTabDoc} title="New document in this workspace" aria-label="New document">+ New</button>
   {/if}
 </div>
 
@@ -436,12 +448,27 @@
   }
 
   .tab-placeholder {
-    padding: 0 16px;
+    padding: 0 8px 0 16px;
     display: flex;
     align-items: center;
     color: var(--text-muted);
     font-size: 12px;
     font-style: italic;
+  }
+
+  .new-tab-btn {
+    margin-left: 4px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .new-tab-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
   }
 
   .context-menu {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { currentDoc, currentWorkspace, showSettings } from "$lib/stores/app";
-  import { settings } from "$lib/stores/settings";
+  import { settings, openSettingsAt } from "$lib/stores/settings";
   import { showToast } from "$lib/stores/notifications";
   import { markUsed } from "$lib/features";
   import Icon from "./Icon.svelte";
@@ -23,7 +23,7 @@
     { feature: "ghost", label: "Ghost mode", desc: "Autocomplete as you type — enable in Settings.", workspace: null, shortcut: "Settings" },
     { feature: "palette", label: "Command Palette", desc: "Every action at your fingertips.", workspace: null, shortcut: "Ctrl+K" },
     { feature: "export", label: "Export", desc: "Markdown, HTML, Word, eBook, or PDF.", workspace: "write" },
-    { feature: "craft", label: "Craft analytics", desc: "Dialogue, sentence, and filter-word trends.", workspace: "craft" },
+    { feature: "craft", label: "Craft analytics", desc: "Dialogue, sentence, and filter-word trends.", workspace: null, shortcut: "Settings → Craft" },
   ];
 
   let dialogueTrend = $state<[string, number][]>([]);
@@ -61,6 +61,11 @@
 
   function tryFeature(pf: PowerFeature) {
     markUsed(pf.feature);
+    if (pf.feature === "craft") {
+      openSettingsAt("craft");
+      $showSettings = true;
+      return;
+    }
     if (pf.workspace === null && pf.feature === "ghost") {
       $showSettings = true;
     } else if (pf.workspace === null) {

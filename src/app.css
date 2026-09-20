@@ -319,6 +319,163 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: var(--sidebar-width) var(--inspector-width) 1fr var(--ai-panel-width);
 }
 
+/* Sidebar collapse: chrome stays, editor takes the width. */
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0px 1fr;
+}
+
+.app-shell.sidebar-collapsed.with-ai-panel {
+  grid-template-columns: 0px 1fr var(--ai-panel-width);
+}
+
+.app-shell.sidebar-collapsed.with-inspector {
+  grid-template-columns: 0px var(--inspector-width) 1fr;
+}
+
+.app-shell.sidebar-collapsed.with-inspector.with-ai-panel {
+  grid-template-columns: 0px var(--inspector-width) 1fr var(--ai-panel-width);
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  display: none;
+}
+
+.sidebar-collapse-btn {
+  margin-left: auto;
+}
+
+/* Editor-first: docked editors grow, boards/lists cap above them. */
+.beat-dock,
+.inbox-dock,
+.project-dock {
+  flex: 1 1 auto;
+  min-height: 260px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-base);
+}
+
+/* Collapsed DocDetail: dock shrinks to its header bar. */
+.beat-dock:has(.doc-detail.collapsed),
+.inbox-dock:has(.doc-detail.collapsed),
+.project-dock:has(.doc-detail.collapsed) {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.ds-bottom:has(.doc-detail.collapsed) {
+  flex: 0 0 auto;
+}
+
+.novel-main,
+.inbox-workspace,
+.projects-workspace {
+  min-height: 0;
+}
+
+.board-collapsed-note {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-base);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Smooth panel motion + focus visibility for desktop flow. */
+.sidebar,
+.ai-panel,
+.inspector-panel {
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.content-pane {
+  min-width: 0;
+}
+
+.main-area {
+  min-width: 0;
+  position: relative;
+}
+
+/* Writing tabs: keep the prose column centered and dominant. */
+.editor-container,
+.log-editor,
+.fountain-input,
+.screenplay-view,
+.reader-content {
+  scroll-behavior: smooth;
+}
+
+/* Subtle motion: workspace enter, no blocky pops. */
+@keyframes pane-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.content-pane > * {
+  animation: pane-in 140ms ease-out;
+}
+
+.icon-btn {
+  transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
+}
+
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+.tab-bar .tab,
+.workspace-nav .nav-item,
+.settings-nav .nav-item {
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.board-collapsed-note,
+.touched-today,
+.inbox-dock,
+.beat-dock,
+.project-dock {
+  transition: background 0.12s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-pane > *,
+  .icon-btn,
+  .tab-bar,
+  .breadcrumb-bar,
+  .tab-bar .tab,
+  .workspace-nav .nav-item {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Compact density: tighter chrome, same structure (Settings → General). */
+.app-shell.compact {
+  --tabbar-height: 32px;
+  --statusbar-height: 22px;
+}
+
+.app-shell.compact .breadcrumb-bar {
+  height: 26px;
+  font-size: 11px;
+}
+
+.app-shell.compact .workspace-nav .nav-item {
+  height: 30px;
+  font-size: 12px;
+}
+
+.app-shell.compact .tab-bar .tab {
+  height: 26px;
+  font-size: 11px;
+}
+
 .app-shell.zen {
   grid-template-columns: 0px 1fr;
   grid-template-rows: 1fr;
@@ -378,6 +535,7 @@ input:focus, textarea:focus, select:focus {
 
 .tab-bar {
   height: var(--tabbar-height);
+  max-height: var(--tabbar-height);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -385,7 +543,9 @@ input:focus, textarea:focus, select:focus {
   padding: 0 8px;
   gap: 2px;
   overflow-x: auto;
+  overflow-y: hidden;
   flex-shrink: 0;
+  transition: max-height 0.15s ease, border-bottom-width 0.15s ease;
 }
 
 .tab-bar .tab {
@@ -434,6 +594,7 @@ input:focus, textarea:focus, select:focus {
 
 .breadcrumb-bar {
   height: 32px;
+  max-height: 32px;
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -442,6 +603,15 @@ input:focus, textarea:focus, select:focus {
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow: hidden;
+  transition: max-height 0.15s ease, border-bottom-width 0.15s ease;
+}
+
+/* Typing focus: tab bar + breadcrumb collapse away, restore on idle. */
+.app-shell.typing-focus .tab-bar,
+.app-shell.typing-focus .breadcrumb-bar {
+  max-height: 0;
+  border-bottom-width: 0;
 }
 
 .breadcrumb-bar .separator {
@@ -663,7 +833,7 @@ input:focus, textarea:focus, select:focus {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.5);
+    background: var(--bg-primary);
     z-index: 499;
   }
 

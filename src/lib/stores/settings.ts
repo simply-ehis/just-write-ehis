@@ -9,6 +9,9 @@ export type SettingsCategory =
   | "sync"
   | "capture"
   | "keybindings"
+  | "skills"
+  | "craft"
+  | "stats"
   | "about";
 
 export interface SavedView {
@@ -26,6 +29,10 @@ export interface AppSettings {
   theme: "dark" | "light";
   iconSet: "phosphor" | "tabler";
   streakGoal: number;
+  /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */
+  compactMode: boolean;
+  /** Hide tab bar + breadcrumb while actively typing, restore on idle. */
+  autoHideChrome: boolean;
 
   fontSize: number;
   lineHeight: number;
@@ -171,6 +178,9 @@ const defaultSettings: AppSettings = {
   workspacePrivacy: { logs: true },
   savedViews: [],
 
+  compactMode: false,
+  autoHideChrome: true,
+
   autoCheckUpdates: true,
 
   sttEnabled: true,
@@ -208,6 +218,14 @@ export const settings = writable<AppSettings>(loadSettings());
 settings.subscribe((value) => {
   saveSettings(value);
 });
+
+/** Global Settings nav: lets palette/sidebar deep-link into a category. */
+export const settingsCategory = writable<SettingsCategory>("general");
+
+/** Open Settings at a specific category (single call from anywhere). */
+export function openSettingsAt(category: SettingsCategory) {
+  settingsCategory.set(category);
+}
 
 /**
  * Check if a workspace is private (local-only AI, no API calls).

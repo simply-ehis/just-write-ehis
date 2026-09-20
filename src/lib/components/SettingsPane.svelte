@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings, type SettingsCategory } from "$lib/stores/settings";
+  import { settings, settingsCategory, type SettingsCategory } from "$lib/stores/settings";
   import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
   import { testProvider, type ProviderTestResult } from "$lib/providerTest";
   import BackupManager from "./BackupManager.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import LazyWorkspace from "./LazyWorkspace.svelte";
   import { stopStt, stopTts, stopLlm } from "$lib/stores/audio";
   import { stopHarness } from "$lib/harness";
   import { pinCaptureNotification } from "$lib/launch";
@@ -52,7 +53,7 @@
     }
   }
 
-  let activeCategory = $state<SettingsCategory>("general");
+  let activeCategory = $derived($settingsCategory);
   let benchResults = $state<Record<string, number> | null>(null);
   let benchRunning = $state(false);
   let coldStartTime = $state(0);
@@ -104,6 +105,9 @@
     { id: "general", label: "General", icon: "settings" },
     { id: "editor", label: "Editor & Writing", icon: "pencil" },
     { id: "ai", label: "AI & Providers", icon: "sparkle" },
+    { id: "skills", label: "Skills", icon: "sparkle" },
+    { id: "craft", label: "Craft", icon: "chart" },
+    { id: "stats", label: "Stats", icon: "calendar" },
     { id: "privacy", label: "Privacy & Security", icon: "lock" },
     { id: "vaults", label: "Vaults & Backup", icon: "download" },
     { id: "sync", label: "Sync & Files", icon: "refresh" },
@@ -352,7 +356,7 @@
         <button
           class="nav-item"
           class:active={activeCategory === cat.id}
-          onclick={() => activeCategory = cat.id}
+          onclick={() => settingsCategory.set(cat.id)}
         >
           <span class="nav-icon"><Icon name={cat.icon} size={16} /></span>
           <span>{cat.label}</span>
@@ -382,6 +386,14 @@
         <div class="setting-row">
           <label for="setting-streak-goal">Daily Streak Goal (words)</label>
           <input id="setting-streak-goal" type="number" bind:value={$settings.streakGoal} min="0" max="10000" />
+        </div>
+        <div class="setting-row">
+          <label for="setting-compact-mode">Compact mode (tighter chrome)</label>
+          <input id="setting-compact-mode" type="checkbox" bind:checked={$settings.compactMode} />
+        </div>
+        <div class="setting-row">
+          <label for="setting-autohide-chrome">Auto-hide tabs while typing</label>
+          <input id="setting-autohide-chrome" type="checkbox" bind:checked={$settings.autoHideChrome} />
         </div>
       </div>
 
@@ -821,6 +833,21 @@
         </div>
       </div>
 
+    {:else if activeCategory === "skills"}
+      <div class="settings-embed">
+        <LazyWorkspace loader={() => import("./SkillsPage.svelte")} />
+      </div>
+
+    {:else if activeCategory === "craft"}
+      <div class="settings-embed">
+        <LazyWorkspace loader={() => import("./CraftPage.svelte")} />
+      </div>
+
+    {:else if activeCategory === "stats"}
+      <div class="settings-embed">
+        <LazyWorkspace loader={() => import("./UsageMemory.svelte")} />
+      </div>
+
     {:else if activeCategory === "keybindings"}
       <div class="settings-section">
         <h3>Keybindings</h3>
@@ -1084,8 +1111,15 @@
 
   .settings-content {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 24px;
+  }
+
+  .settings-embed {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .settings-section h3 {

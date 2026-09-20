@@ -2095,6 +2095,31 @@ impl Database {
         }))
     }
 
+    pub fn dashboard_goals(&self) -> Result<Vec<(String, String, String, i64, i64, Option<String>)>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, title, workspace, goal_words, word_count, deadline FROM docs \
+             WHERE goal_words IS NOT NULL AND goal_words > 0 AND locked = 0 \
+             ORDER BY deadline ASC NULLS LAST, updated_at DESC"
+        ).map_err(|e| e.to_string())?;
+
+        let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt.query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
+    }
+
     /// Spec 8.3: docs opened 2+ times with no write since the last open.
     /// Locked docs are excluded (invisible to stats).
     pub fn get_reopen_never_finish(&self) -> Result<Vec<(Doc, i64, String)>, String> {

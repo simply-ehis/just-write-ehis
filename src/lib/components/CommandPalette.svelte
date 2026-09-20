@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api, type SearchResult, type Doc } from '$lib/api';
-  import { aiPanelOpen, currentDoc, currentWorkspace, showSettings, openTabs } from '$lib/stores/app';
-  import { settings } from '$lib/stores/settings';
+  import { aiPanelOpen, currentDoc, currentWorkspace, showSettings, openTabs, sidebarOpen, inspectorOpen, zenMode } from '$lib/stores/app';
+  import { settings, openSettingsAt } from '$lib/stores/settings';
   import { showToast } from '$lib/stores/notifications';
   import { get } from 'svelte/store';
   import VaultRenameDialog from './VaultRenameDialog.svelte';
@@ -32,9 +32,9 @@
     { id: 'reader', label: 'Go to Reader', icon: 'book-open', action: () => { $currentWorkspace = 'reader'; close(); } },
     { id: 'files', label: 'Go to Files', icon: 'files', action: () => { $currentWorkspace = 'files'; close(); } },
     { id: 'inbox', label: 'Open Inbox', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
-    { id: 'craft', label: 'Open Craft Analytics', icon: 'chart', action: () => { $currentWorkspace = 'craft'; close(); } },
-    { id: 'stats', label: 'Open Usage Stats', icon: 'calendar', action: () => { $currentWorkspace = 'stats'; close(); } },
-    { id: 'skills', label: 'Open Skills', icon: 'sparkle', action: () => { $currentWorkspace = 'skills'; close(); } },
+    { id: 'craft', label: 'Open Craft Analytics (Settings)', icon: 'chart', action: () => { openSettingsAt('craft'); $showSettings = true; close(); } },
+    { id: 'stats', label: 'Open Usage Stats (Settings)', icon: 'calendar', action: () => { openSettingsAt('stats'); $showSettings = true; close(); } },
+    { id: 'skills', label: 'Open Skills (Settings)', icon: 'sparkle', action: () => { openSettingsAt('skills'); $showSettings = true; close(); } },
     { id: 'properties', label: 'All Documents (Table/Board)', icon: 'table', action: () => { $currentWorkspace = 'properties'; close(); } },
     { id: 'daily-note', label: 'Open Today\'s Daily Note', icon: 'calendar', action: () => { void openDailyNotePalette(); } },
     { id: 'quick-capture', label: 'Quick Capture (Inbox)', icon: 'inbox', action: () => { quickCapture(); close(); } },
@@ -44,6 +44,9 @@
     { id: 'save', label: 'Save Current Document', icon: 'check', action: async () => { await saveCurrentDoc(); close(); } },
     { id: 'close-tab', label: 'Close Current Tab', icon: 'x', action: () => { closeCurrentTab(); close(); } },
     { id: 'ai-panel', label: 'Toggle AI Panel (Ctrl+J)', icon: 'sparkle', action: () => { $aiPanelOpen = !$aiPanelOpen; close(); } },
+    { id: 'sidebar', label: 'Toggle Sidebar (Ctrl+B)', icon: 'menu', action: () => { $sidebarOpen = !$sidebarOpen; close(); } },
+    { id: 'inspector', label: 'Toggle Outline & Links (Ctrl+I)', icon: 'panel', action: () => { $inspectorOpen = !$inspectorOpen; close(); } },
+    { id: 'zen', label: 'Toggle Zen Mode (F11)', icon: 'eye', action: () => { $zenMode = !$zenMode; close(); } },
     { id: 'vault-rename', label: 'Vault-Wide Rename', icon: 'edit', action: () => { showRename = true; close(); } },
     { id: 'publish', label: 'Publish Static Site…', icon: 'send', action: () => { publishSite(); close(); } },
     { id: 'compile-tabs', label: 'Compile Open Tabs…', icon: 'download', action: () => { compileOpenTabs(); close(); } },
@@ -351,10 +354,6 @@
   </div>
 {/if}
 
-<button class="palette-trigger" onclick={openPalette} title="Command Palette (Ctrl+K)" aria-label="Open command palette">
-  <Icon name="search" size={20} />
-</button>
-
 <VaultRenameDialog open={showRename} onClose={() => showRename = false} />
 
 {#if showTemplatePicker}
@@ -373,29 +372,10 @@
 {/if}
 
 <style>
-  .palette-trigger {
-    position: fixed;
-    bottom: 40px;
-    right: 40px;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .palette-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: var(--bg-primary);
     display: flex;
     justify-content: center;
     padding-top: 15vh;

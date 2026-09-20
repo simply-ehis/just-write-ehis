@@ -87,6 +87,11 @@
 | AiPanel | skin | ui | `src/lib/components/AiPanel.svelte` | App.svelte | ✅ wired |
 | SettingsPane | skin | ui | `src/lib/components/SettingsPane.svelte` | App.svelte | ✅ wired |
 | EmptyState | skin | ui | `src/lib/components/EmptyState.svelte` | App.svelte | ✅ wired |
+| LazyWorkspace | skin | ui | `src/lib/components/LazyWorkspace.svelte` | App.svelte (map/canvas/novel/script/projects/reader/properties) + SettingsPane (skills/craft/stats) | ✅ wired |
+| QuickCaptureOverlay | skin | ui | `src/lib/components/QuickCaptureOverlay.svelte` | App.svelte + StatusBar (Ctrl+Shift+F) | ✅ wired |
+| DockSplit | skin | ui | `src/lib/components/DockSplit.svelte` | Novel/Inbox/Projects/Canvas (vertical) + Reader notes (horizontal) — persisted drag dividers | ✅ wired |
+| Split target store | tendon | frontend | `src/lib/stores/split.ts` | JustWriteWorkspace → AiPanel (Main/Split write-back) | ✅ wired |
+| Settings sections | skin | ui | `SettingsPane` embeds `SkillsPage`/`CraftPage`/`UsageMemory` | `src/lib/stores/settings.ts::settingsCategory` + CommandPalette/Home deep-links | ✅ wired (moved out of sidebar 2026-09-19) |
 
 ---
 

@@ -4,6 +4,7 @@
   import { currentDoc, currentWorkspace, aiPanelOpen } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { writeBack } from "$lib/stores/writeBack";
+  import { splitTarget } from "$lib/stores/split";
   import { globalLoading } from "$lib/stores/loading";
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
@@ -64,6 +65,20 @@
   }
 
   let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat");  let blankMode = $state(false);
+  let minimized = $state(false);
+
+  $effect(() => {
+    try {
+      const raw = localStorage.getItem("jwe-ai-min");
+      if (raw === "1") minimized = true;
+    } catch {}
+  });
+
+  $effect(() => {
+    try {
+      localStorage.setItem("jwe-ai-min", minimized ? "1" : "0");
+    } catch {}
+  });
   let input = $state("");
   let messages = $state<ChatMessage[]>([]);
   let conversation = $state<Conversation | null>(null);
@@ -75,6 +90,17 @@
   let sidecarConfidence = $state<number | null>(null);
 
   let endpointUnreachable = $state(false);
+
+  // Write-back target: the open doc by default, the Write split pane
+  // when one is open and picked. Resets whenever the split changes.
+  let wbTargetOverride = $state<string | null>(null);
+  let splitLive = $derived($splitTarget && $splitTarget.id !== $currentDoc?.id ? $splitTarget : null);
+  let wbTargetId = $derived(wbTargetOverride ?? $currentDoc?.id ?? null);
+
+  $effect(() => {
+    void $splitTarget?.id;
+    wbTargetOverride = null;
+  });
 
   // Chat history: past conversations persist in the backend; list + resume them here.
   let historyOpen = $state(false);
@@ -180,11 +206,12 @@
       event.preventDefault();
       const lastAi = [...messages].reverse().find((m) => m.role === "assistant");
       if (lastAi) {
-        if (!$currentDoc) {
+        const docId = wbTargetId;
+        if (!docId) {
           showToast("Open a document to write into", "warning");
           return;
         }
-        writeBack.insert(lastAi.content, $currentDoc.id);
+        writeBack.insert(lastAi.content, docId);
       }
     }
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "C") {
@@ -236,7 +263,9 @@
 
   function acceptStructurize() {
     if (!structurizeOutput) return;
-    writeBack.replace(structurizeOutput);
+    // Targeted replace: honors the Main/Split pick (previously untargeted,
+    // which write panes dropped). Falls back to untargeted when no doc.
+    writeBack.replace(structurizeOutput, wbTargetId ?? undefined);
     structurizeAccepted = true;
   }
 
@@ -407,11 +436,11 @@
   }
 
   function handleWriteBack(action: "insert" | "replace" | "append", content: string) {
-    if (!$currentDoc) {
+    const docId = wbTargetId;
+    if (!docId) {
       showToast("Open a document to write into", "warning");
       return;
     }
-    const docId = $currentDoc.id;
     switch (action) {
       case "insert": writeBack.insert(content, docId); break;
       case "replace": writeBack.replace(content, docId); break;
@@ -424,15 +453,22 @@
   }
 </script>
 
-<div class="ai-panel">
+<div class="ai-panel" class:minimized>
   <div class="ai-header">
     <div class="mode-tabs">
+      {#if !minimized}
       <button class:active={mode === "chat"} onclick={() => mode = "chat"}>Chat</button>
       <button class:active={mode === "composer"} onclick={() => { mode = "composer"; markUsed("composer"); }}>Composer</button>
       <button class:active={mode === "structurize"} onclick={() => { mode = "structurize"; markUsed("structurize"); }}>Structurize</button>
       <button class:active={mode === "ghost"} onclick={() => { mode = "ghost"; markUsed("ghost"); }}>Ghost</button>
+      {:else}
+      <span class="min-title">AI</span>
+      {/if}
     </div>
     <div class="header-actions">
+      <button class="icon-btn" onclick={() => (minimized = !minimized)} title={minimized ? "Expand AI panel" : "Minimize AI panel"} aria-label={minimized ? "Expand AI panel" : "Minimize AI panel"} aria-pressed={minimized}>
+        <Icon name={minimized ? "arrow-right" : "minus"} size={14} />
+      </button>
       <button class="icon-btn" class:active={historyOpen} onclick={openHistory} title="Chat history" aria-label="Open chat history">
         <Icon name="history" size={15} />
       </button>
@@ -452,6 +488,24 @@
     </div>
   </div>
 
+  {#snippet wbTargetToggle()}
+    {#if splitLive}
+      <div class="wb-target" role="group" aria-label="Write-back target">
+        <button
+          class:active={!wbTargetOverride}
+          onclick={() => (wbTargetOverride = null)}
+          title="Write into {$currentDoc?.title ?? 'open doc'}"
+        >Main</button>
+        <button
+          class:active={!!wbTargetOverride}
+          onclick={() => { if (splitLive) wbTargetOverride = splitLive.id; }}
+          title="Write into {splitLive.title}"
+        >Split</button>
+      </div>
+    {/if}
+  {/snippet}
+
+  {#if !minimized}
   {#if historyOpen}
     <div class="history-dropdown" role="dialog" aria-label="Chat history">
       <div class="history-header">
@@ -497,6 +551,7 @@
         <div class="composer-output">
           <div class="output-header">
             <span>Generated</span>
+            {@render wbTargetToggle()}
             <div class="output-actions">
               <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", composerOutput)} title="Insert at cursor" aria-label="Insert at cursor">
                 <Icon name="plus" size={14} />
@@ -540,6 +595,7 @@
         <div class="structurize-output">
           <div class="output-header">
             <span>Result</span>
+            {@render wbTargetToggle()}
             <div class="output-actions">
               <button class="action-btn icon-btn" onclick={acceptStructurize} title="Replace current selection with this" aria-label="Accept structurize result">
                 <Icon name="check" size={14} />
@@ -627,6 +683,7 @@
           <span>{$currentDoc.title}</span>
           <span class="ws-label">{$currentWorkspace}</span>
         </div>
+        {@render wbTargetToggle()}
       {/if}
       <div class="input-row">
         <textarea
@@ -642,6 +699,7 @@
       </div>
     </div>
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -651,6 +709,21 @@
     height: 100%;
     border-left: 1px solid var(--border);
     background: var(--surface-base);
+  }
+
+  .ai-panel.minimized {
+    justify-content: flex-start;
+  }
+
+  .ai-panel.minimized .ai-header {
+    border-bottom: none;
+  }
+
+  .min-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 4px 8px;
   }
 
   .ai-header {
@@ -939,6 +1012,28 @@
     background: var(--surface-overlay);
     color: var(--text-muted);
     text-transform: uppercase;
+  }
+
+  .wb-target {
+    display: inline-flex;
+    border: 1px solid var(--border-subtle);
+    margin: 0 0 8px 8px;
+    vertical-align: middle;
+  }
+
+  .output-header .wb-target {
+    margin: 0;
+  }
+
+  .wb-target button {
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .wb-target button.active {
+    background: var(--surface-overlay);
+    color: var(--accent-primary);
   }
 
   .input-row {

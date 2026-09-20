@@ -48,6 +48,7 @@
     dots: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
     history: '<path d="M4 12a8 8 0 118-8"/><path d="M4 4v5h5"/><path d="M12 8v4l3 2"/>',
     download: '<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/>',
+    upload: '<path d="M12 20v-11"/><path d="M17 13l-5-5-5 5"/><path d="M4 4h16"/>',
     trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
     edit: '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 00-3-3L5 17l-1 3z"/>',
     link: '<path d="M10 14a5 5 0 007 0l3-3a5 5 0 00-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 00-7 0l-3 3a5 5 0 007 7l1.5-1.5"/>',

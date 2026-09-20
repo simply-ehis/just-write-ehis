@@ -1,10 +1,14 @@
 <script lang="ts">
   import { api, type Doc } from '$lib/api';
-  import { currentDoc } from '$lib/stores/app';
+  import { currentDoc, openTabs } from '$lib/stores/app';
   import { settings } from '$lib/stores/settings';
+  import { showToast } from '$lib/stores/notifications';
   import MicButton from '$lib/components/MicButton.svelte';
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
   import DeleteButton from '$lib/components/DeleteButton.svelte';
+  import Icon from '$lib/components/Icon.svelte';
+  import { downloadConvertOutput } from '$lib/download';
+  import { parseBookFile } from '$lib/bookparse';
 
   let scripts = $state<Doc[]>([]);
   let selectedScript = $state<Doc | null>(null);
@@ -16,9 +20,65 @@
   let roles = $state<Array<{ id: string; name: string; color: string; assignedTo: string }>>([]);
   let newRoleName = $state('');
   let newRoleColor = $state('#8FC7A9');
+  let listCollapsed = $state(false);
   // Debounce handle: plain let, only touched in event handlers (never in
   // an $effect), so it can't resubscribe anything.
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  let showExportMenu = $state(false);
+  let exportFormats = $state<string[]>(["md", "txt", "html"]);
+  let exportMenuLoaded = $state(false);
+  let importInput = $state<HTMLInputElement | null>(null);
+
+  function exportLabel(format: string): string {
+    switch (format) {
+      case 'md': return 'Markdown (.md)';
+      case 'txt': return 'Plain Text (.txt)';
+      case 'html': return 'HTML (.html)';
+      case 'docx': return 'Word (.docx)';
+      case 'epub': return 'eBook (.epub)';
+      case 'pdf': return 'PDF (.pdf)';
+      default: return format;
+    }
+  }
+
+  async function toggleExportMenu() {
+    showExportMenu = !showExportMenu;
+    if (showExportMenu && !exportMenuLoaded) {
+      try {
+        const status = await api.convertStatus();
+        exportFormats = status.formats;
+      } catch {
+        exportFormats = ["md", "txt", "html"];
+      }
+      exportMenuLoaded = true;
+    }
+  }
+
+  async function exportAs(format: string) {
+    if (!selectedScript) return;
+    showExportMenu = false;
+    if (format === 'fountain') {
+      const content = rawContent;
+      const title = selectedScript.title || 'untitled';
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title}.fountain`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+    try {
+      await api.docSave(selectedScript.id, undefined, rawContent);
+      const out = await api.convertRun(selectedScript.id, format);
+      downloadConvertOutput(out);
+      showToast(`Exported ${out.filename}`, 'success');
+    } catch (e) {
+      showToast(`Export failed: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
 
   interface FountainElement {
     type: 'title_page' | 'scene_heading' | 'action' | 'character' | 'dialogue' | 'parenthetical' | 'transition' | 'centered' | 'note' | 'empty';
@@ -49,7 +109,8 @@
     selectedScript = doc;
     rawContent = doc.content || '';
     parsedElements = parseFountain(rawContent);
-    currentDoc.set(doc);
+    $currentDoc = doc;
+    if (!$openTabs.find((t) => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
     loadRoles(doc.id);
   }
 
@@ -232,10 +293,48 @@
     }
   }
 
+  async function handleImportScript(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      const fallbackTitle = file.name.replace(/\.[^.]+$/, "");
+      if (ext === "md" || ext === "txt" || ext === "fountain") {
+        const text = await file.text();
+        if (text.includes("\0")) {
+          showToast("That file looks binary, not text — import refused.", "error");
+          return;
+        }
+        const doc = await api.docCreate("script", "fountain", fallbackTitle, undefined, text);
+        scripts.unshift(doc);
+        selectScript(doc);
+        showToast(`Imported "${fallbackTitle}"`, "success");
+        return;
+      }
+      if (ext === "epub" || ext === "pdf" || ext === "docx") {
+        showToast(`Extracting text from ${file.name}…`, "info");
+        const data = new Uint8Array(await file.arrayBuffer());
+        const book = await parseBookFile(file.name, data, ext === "pdf" ? (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default : undefined);
+        const doc = await api.docCreate("script", "fountain", book.title, undefined, book.text);
+        scripts.unshift(doc);
+        selectScript(doc);
+        showToast(`Imported "${book.title}"`, "success");
+        return;
+      }
+      showToast(`.${ext ?? "?"} isn't importable — use .fountain, .md, .txt, .epub, .pdf, or .docx.`, "warning");
+    } catch (err) {
+      showToast(`Import failed: ${err instanceof Error ? err.message : err}`, "error");
+    }
+  }
+
   function handleContentChange(e: Event) {
     const textarea = e.target as HTMLTextAreaElement;
     rawContent = textarea.value;
     parsedElements = parseFountain(rawContent);
+    // Typing activity: lets the shell auto-hide chrome for focus.
+    window.dispatchEvent(new CustomEvent("editor-typing"));
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       void handleSave();
@@ -245,9 +344,9 @@
   loadScripts();
 </script>
 
-<div class="script-workspace">
+<div class="script-workspace" class:list-collapsed={listCollapsed}>
   {#if !selectedScript}
-    <div class="script-list">
+    <div class="script-list full">
       <div class="list-header">
         <h1>Scripts</h1>
         <button class="new-btn" onclick={handleNewScript}>+ New Script</button>
@@ -269,12 +368,36 @@
     <div class="script-editor">
       <div class="editor-toolbar">
         <button class="back-btn" onclick={() => { selectedScript = null; }}>← Scripts</button>
+        <button class="back-btn" onclick={() => (listCollapsed = !listCollapsed)} title={listCollapsed ? "Show script list" : "Focus editor — hide list"} aria-pressed={listCollapsed}>{listCollapsed ? "List" : "Focus"}</button>
         <span class="script-name">{selectedScript.title}</span>
         <div class="view-toggle">
           <button class:active={viewMode === 'edit'} onclick={() => viewMode = 'edit'}>Edit</button>
           <button class:active={viewMode === 'screenplay'} onclick={() => viewMode = 'screenplay'}>Screenplay</button>
         </div>
         <button class="save-btn" onclick={handleSave}>Save</button>
+        <button class="save-btn import-btn" onclick={() => importInput?.click()} title="Import script (.fountain .md .txt .epub .pdf .docx)" aria-label="Import script">
+          <Icon name="download" size={14} /><span>Import</span>
+        </button>
+        <input
+          bind:this={importInput}
+          type="file"
+          accept=".fountain,.md,.txt,.epub,.pdf,.docx"
+          onchange={handleImportScript}
+          hidden
+        />
+        <div class="export-wrapper">
+          <button class="export-btn icon-btn" onclick={toggleExportMenu} title="Export script" aria-label="Export script">
+            <Icon name="upload" size={14} />
+          </button>
+          {#if showExportMenu}
+            <div class="export-menu" role="menu" aria-label="Export formats">
+              {#each exportFormats as fmt}
+                <button onclick={() => exportAs(fmt)} title="Export as {exportLabel(fmt)}">{exportLabel(fmt)}</button>
+              {/each}
+              <button onclick={() => exportAs('fountain')} title="Export raw Fountain source">Fountain (.fountain)</button>
+            </div>
+          {/if}
+        </div>
         <DeleteButton
           doc={selectedScript}
           label="Delete this script"
@@ -411,6 +534,11 @@
     height: 100%;
     background: var(--surface-base);
     color: var(--text-primary);
+    min-height: 0;
+  }
+
+  .script-workspace.list-collapsed .script-list {
+    display: none;
   }
 
   .script-list {
@@ -419,6 +547,14 @@
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .script-list.full {
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+    border-right: none;
   }
 
   .list-header {
@@ -480,8 +616,10 @@
 
   .script-editor {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
+    position: relative;
   }
 
   .editor-toolbar {
@@ -637,14 +775,21 @@
   }
 
   .cast-panel {
-    width: 280px;
-    flex-shrink: 0;
-    border-left: 1px solid var(--border-subtle);
+    position: absolute;
+    right: 12px;
+    top: 52px;
+    bottom: 12px;
+    width: 300px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
     padding: var(--space-4);
     overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+    background: var(--surface-raised);
+    z-index: 20;
   }
 
   .cast-panel h2 {
@@ -757,5 +902,71 @@
     border-radius: var(--radius-sm);
     background: transparent;
     cursor: pointer;
+  }
+
+  .import-btn {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .import-btn:hover:not(:disabled) {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+  }
+
+  .import-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .export-wrapper {
+    position: relative;
+  }
+
+  .export-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .export-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 50;
+    min-width: 160px;
+  }
+
+  .export-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .export-menu button:hover {
+    background: var(--surface-overlay);
   }
 </style>

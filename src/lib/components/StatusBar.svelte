@@ -40,6 +40,14 @@
 </script>
 
 <div class="status-bar">
+  <button class="item status-btn" onclick={() => window.dispatchEvent(new CustomEvent("open-command-palette"))} title="Command palette (Ctrl+K)" aria-label="Open command palette">
+    <Icon name="search" size={12} />
+    <span>Search</span>
+  </button>
+  <button class="item status-btn" onclick={() => window.dispatchEvent(new CustomEvent("open-quick-capture"))} title="Quick capture (Ctrl+Shift+F)" aria-label="Open quick capture">
+    <Icon name="plus" size={12} />
+    <span>Capture</span>
+  </button>
   <div class="item" title="Words in current document">
     <Icon name="pencil" size={12} />
     <span>{wordCount.toLocaleString()} words</span>
@@ -91,6 +99,19 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  .status-btn {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    color: var(--text-secondary);
+    background: var(--surface-raised);
+  }
+
+  .status-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
   }
 
   .streak {

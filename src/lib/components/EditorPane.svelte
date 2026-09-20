@@ -5,8 +5,9 @@
   import { EditorState } from "@codemirror/state";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
+  import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
-  import { currentDoc, aiPanelOpen, currentWorkspace } from "$lib/stores/app";
+  import { currentDoc, aiPanelOpen, currentWorkspace, inspectorOpen } from "$lib/stores/app";
   import { api, type Doc } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
@@ -25,7 +26,8 @@
   import { filterWordRatio } from "$lib/browserBackend";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
   import { markUsed } from "$lib/features";
-import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
+  import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
+  import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
 
   let editorContainer = $state<HTMLDivElement>();
   // $state.raw: the CodeMirror view is an opaque handle (never deep-read by
@@ -44,6 +46,31 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   let sentenceTrend = $state<[string, number][]>([]);
   let focusMode = $state(false);
   let readingMode = $state(false);
+  // Typewriter + dimming parity with Write (per-doc prefs, same store).
+  let typewriterEnabled = $state($settings.typewriterDefault);
+  let focusDimming = $state($settings.focusDimmingDefault);
+
+  function toggleTypewriter() {
+    typewriterEnabled = !typewriterEnabled;
+    if ($currentDoc) {
+      saveFocusPrefs($currentDoc.id, {
+        typewriter: typewriterEnabled,
+        focus: focusDimming,
+      });
+    }
+    if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+  }
+
+  function toggleFocusDimming() {
+    focusDimming = !focusDimming;
+    if ($currentDoc) {
+      saveFocusPrefs($currentDoc.id, {
+        typewriter: typewriterEnabled,
+        focus: focusDimming,
+      });
+    }
+    if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+  }
 
   // Slash commands (A11.7)
   let slashVisible = $state(false);
@@ -258,6 +285,33 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
       textDecoration: "underline wavy #d9a521 1px",
       textUnderlineOffset: "3px",
     },
+    ".cm-focus-dimmed": {
+      opacity: "0.35",
+      transition: "opacity 0.3s ease",
+    },
+    // Find/replace panel: solid theme surfaces, never the default white.
+    ".cm-panel.cm-search": {
+      backgroundColor: overlay,
+      color: fg,
+      borderBottom: `1px solid ${muted}`,
+      padding: "6px 8px",
+    },
+    ".cm-panel.cm-search input": {
+      backgroundColor: bg,
+      color: fg,
+      border: `1px solid ${muted}`,
+    },
+    ".cm-panel.cm-search button": {
+      backgroundColor: "transparent",
+      color: fg,
+      border: `1px solid ${muted}`,
+    },
+    ".cm-searchMatch": {
+      backgroundColor: dark ? "#8FC7A940" : "#3F665640",
+    },
+    ".cm-searchMatch-selected": {
+      backgroundColor: dark ? "#8FC7A980" : "#3F665680",
+    },
   });
   }
 
@@ -308,6 +362,8 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
+          // Paid for in package.json but never wired: find/replace (Ctrl+F).
+          ...searchKeymap,
           {
             key: "Tab",
             run: () => {
@@ -346,6 +402,12 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
         ]),
         markdown(),
         darkTheme,
+        search({ top: true }),
+        highlightSelectionMatches(),
+        ...(focusDimming ? [focusDimmingPlugin(() => focusDimming)] : []),
+        ...(typewriterEnabled
+          ? [EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))]
+          : []),
         ...($settings.autocorrectEnabled
           ? [
               createAutocorrectPlugin({
@@ -359,6 +421,8 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             handleContentChange(update.state.doc.toString());
+            // Typing activity: lets the shell auto-hide chrome for focus.
+            window.dispatchEvent(new CustomEvent("editor-typing"));
             // Slash command detection (A11.7)
             const pos = update.state.selection.main.head;
             const line = update.state.doc.lineAt(pos);
@@ -396,6 +460,9 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     if (!$currentDoc) return;
 
     recordSave();
+    if (typewriterEnabled) {
+      requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
+    }
 
     if (saveTimeout) clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
@@ -517,6 +584,12 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     }
   }
 
+  function closeExportOnOutside(e: MouseEvent) {
+    if (!showExportMenu) return;
+    if ((e.target as HTMLElement).closest?.(".export-wrapper")) return;
+    showExportMenu = false;
+  }
+
   function exportLabel(format: string): string {
     switch (format) {
       case 'md': return 'Markdown (.md)';
@@ -536,7 +609,15 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
     // that rebuilds the whole editor and starves timers).
     const doc = $currentDoc;
     if (doc && editorContainer) {
-      untrack(() => createEditor(doc));
+      untrack(() => {
+        const prefs = loadFocusPrefs(doc.id, {
+          typewriter: $settings.typewriterDefault,
+          focus: $settings.focusDimmingDefault,
+        });
+        typewriterEnabled = prefs.typewriter;
+        focusDimming = prefs.focus;
+        createEditor(doc);
+      });
       refreshBibleWords(doc);
       loadCraftMetrics(doc.id);
     } else {
@@ -602,6 +683,7 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   });
 </script>
 
+<svelte:window onclick={closeExportOnOutside} />
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
 <div
   class="editor-pane"
@@ -639,6 +721,36 @@ import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
           aria-pressed={readingMode}
         >
           <Icon name="book-open" size={15} />
+        </button>
+        <button
+          class="icon-btn"
+          class:active={typewriterEnabled}
+          onclick={toggleTypewriter}
+          title="Typewriter mode"
+          aria-label="Toggle typewriter mode"
+          aria-pressed={typewriterEnabled}
+        >
+          <Icon name="pencil" size={15} />
+        </button>
+        <button
+          class="icon-btn"
+          class:active={focusDimming}
+          onclick={toggleFocusDimming}
+          title="Focus dimming"
+          aria-label="Toggle focus dimming"
+          aria-pressed={focusDimming}
+        >
+          <Icon name="eye" size={15} />
+        </button>
+        <button
+          class="icon-btn"
+          class:active={$inspectorOpen}
+          onclick={() => $inspectorOpen = !$inspectorOpen}
+          title="Outline & links (Ctrl+I)"
+          aria-label="Toggle inspector"
+          aria-pressed={$inspectorOpen}
+        >
+          <Icon name="panel" size={15} />
         </button>
       </div>
       {#if $settings.sttEnabled || $settings.ttsEnabled}

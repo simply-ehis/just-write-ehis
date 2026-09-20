@@ -29,9 +29,6 @@
     reader: "book-open",
     files: "files",
     properties: "table",
-    craft: "chart",
-    stats: "calendar",
-    skills: "sparkle",
   };
 
   let { class: className = '' } = $props();
@@ -175,6 +172,9 @@
   <div class="wordmark">
     <img class="logo" src={markSrc} alt="Just Write ehis logo" />
     <span class="name">Just Write ehis</span>
+    <button class="icon-btn sidebar-collapse-btn" onclick={() => ($sidebarOpen = false)} title="Hide sidebar (Ctrl+B)" aria-label="Hide sidebar">
+      <Icon name="arrow-left" size={14} />
+    </button>
   </div>
 
   <nav class="workspace-nav" aria-label="Workspaces">

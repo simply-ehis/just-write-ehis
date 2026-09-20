@@ -198,7 +198,7 @@
   .diff-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--bg-primary);
     z-index: 600;
     display: flex;
     align-items: center;

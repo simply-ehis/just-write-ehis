@@ -18,21 +18,14 @@
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import EditorPane from "$lib/components/EditorPane.svelte";
-  import AiPanel from "$lib/components/AiPanel.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LogsWorkspace from "$lib/components/LogsWorkspace.svelte";
   import JustWriteWorkspace from "$lib/components/JustWriteWorkspace.svelte";
-  import NodeMapWorkspace from "$lib/components/NodeMapWorkspace.svelte";
-import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
-  import ReaderWorkspace from "$lib/components/ReaderWorkspace.svelte";
-  import NovelWorkspace from "$lib/components/NovelWorkspace.svelte";
-  import ScriptWorkspace from "$lib/components/ScriptWorkspace.svelte";
-  import ProjectsWorkspace from "$lib/components/ProjectsWorkspace.svelte";
+  import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
   import InspectorPanel from "$lib/components/InspectorPanel.svelte";
   import InboxWorkspace from "$lib/components/InboxWorkspace.svelte";
-  import PropertiesView from "$lib/components/PropertiesView.svelte";
-  import SettingsPane from "$lib/components/SettingsPane.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
+  import QuickCaptureOverlay from "$lib/components/QuickCaptureOverlay.svelte";
   import SkillNudges from "$lib/components/SkillNudges.svelte";
   import HomePane from "$lib/components/HomePane.svelte";
   import FileBrowser from "$lib/components/FileBrowser.svelte";
@@ -46,12 +39,20 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
   import { unlockedDocs } from "$lib/stores/lock";
   import HelpOverlay from "$lib/components/HelpOverlay.svelte";
   import { showConflict } from "$lib/stores/conflict";
-  import CraftPage from "$lib/components/CraftPage.svelte";
-  import UsageMemory from "$lib/components/UsageMemory.svelte";
-  import SkillsPage from "$lib/components/SkillsPage.svelte";
+  import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   let viewedFile = $state<string | null>(null);
   let showOnboarding = $state(false);
+
+  // Skills/Craft/Stats now live in Settings: old workspace ids redirect.
+  $effect(() => {
+    const ws = $currentWorkspace;
+    if (ws === "craft" || ws === "stats" || ws === "skills") {
+      settingsCategory.set(ws);
+      $showSettings = true;
+      $currentWorkspace = "home";
+    }
+  });
 
   // Leaving Files drops the raw-file view so returning later starts at the
   // browser, not a stale file with no Back context.
@@ -61,7 +62,7 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
 
   // Workspaces that render the open doc's content: a locked-out doc
   // covers the pane with the PIN gate (lists/graphs show titles only).
-  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files"];
+  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files", "inbox", "projects", "craft", "properties", "canvas"];
   let lockCover = $derived(
     !$showSettings &&
     !!$currentDoc?.locked &&
@@ -72,6 +73,27 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
   let ready = $state(false);
   let isMobile = $state(false);
   let sidebarVisible = $state(false);
+  // Typing focus: tab bar + breadcrumb collapse while prose is flowing,
+  // restore after 2.5s idle, mouse-to-top, or Escape. Plain let timer:
+  // only touched in event handlers, never inside an $effect.
+  let typingFocus = $state(false);
+  let typingIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function handleEditorTyping() {
+    if (!$settings.autoHideChrome || $zenMode || $showSettings) return;
+    typingFocus = true;
+    if (typingIdleTimer) clearTimeout(typingIdleTimer);
+    typingIdleTimer = setTimeout(() => {
+      typingFocus = false;
+    }, 2500);
+  }
+
+  function handleMouseNearTop(e: MouseEvent) {
+    if (typingFocus && e.clientY < 64) {
+      typingFocus = false;
+      if (typingIdleTimer) clearTimeout(typingIdleTimer);
+    }
+  }
   // Tab persistence guard: never write until the startup restore has run,
   // or the empty initial strip would clobber the saved one.
   let tabsRestored = false;
@@ -144,14 +166,23 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
     if (e.key === "F11") {
       e.preventDefault();
       $zenMode = !$zenMode;
     } else if (e.key === "Escape" && $zenMode) {
       $zenMode = false;
-    } else if ((e.ctrlKey || e.metaKey) && (e.key === "j" || e.key === "J")) {
+    } else if (e.key === "Escape" && typingFocus) {
+      typingFocus = false;
+    } else if (mod && (e.key === "j" || e.key === "J")) {
       e.preventDefault();
       $aiPanelOpen = !$aiPanelOpen;
+    } else if (mod && (e.key === "b" || e.key === "B")) {
+      e.preventDefault();
+      $sidebarOpen = !$sidebarOpen;
+    } else if (mod && (e.key === "i" || e.key === "I")) {
+      e.preventDefault();
+      $inspectorOpen = !$inspectorOpen;
     }
   }
 
@@ -259,6 +290,8 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
     checkMobile();
     window.addEventListener('resize', checkMobile);
     window.addEventListener('keydown', handleGlobalKeydown);
+    window.addEventListener('editor-typing', handleEditorTyping);
+    window.addEventListener('mousemove', handleMouseNearTop);
 
     // Async init (fire and forget)
     (async () => {
@@ -343,6 +376,9 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
     return () => {
       window.removeEventListener('resize', checkMobile);
       window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('editor-typing', handleEditorTyping);
+      window.removeEventListener('mousemove', handleMouseNearTop);
+      if (typingIdleTimer) clearTimeout(typingIdleTimer);
     };
   });
 
@@ -360,6 +396,9 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
     class="app-shell"
     class:with-ai-panel={$aiPanelOpen && !isMobile}
     class:with-inspector={$inspectorOpen && !isMobile}
+    class:sidebar-collapsed={!$sidebarOpen}
+    class:compact={$settings.compactMode}
+    class:typing-focus={typingFocus && !$zenMode}
     class:mobile={isMobile}
     class:zen={$zenMode}
   >
@@ -387,7 +426,7 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
           <LockScreen doc={$currentDoc} />
         {/if}
         {#if $showSettings}
-          <SettingsPane />
+          <LazyWorkspace loader={() => import("$lib/components/SettingsPane.svelte")} />
         {:else if $currentWorkspace === "home"}
           <HomePane />
         {:else if $currentWorkspace === "logs"}
@@ -399,33 +438,27 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
             <EmptyState />
           {/if}
         {:else if $currentWorkspace === "map"}
-          <NodeMapWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/NodeMapWorkspace.svelte")} />
         {:else if $currentWorkspace === "canvas"}
-          <CanvasWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/CanvasWorkspace.svelte")} />
         {:else if $currentWorkspace === "reader"}
-          <ReaderWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/ReaderWorkspace.svelte")} />
         {:else if $currentWorkspace === "novel"}
-          <NovelWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/NovelWorkspace.svelte")} />
         {:else if $currentWorkspace === "script"}
-          <ScriptWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/ScriptWorkspace.svelte")} />
         {:else if $currentWorkspace === "projects"}
-          <ProjectsWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/ProjectsWorkspace.svelte")} />
         {:else if $currentWorkspace === "inbox"}
           <InboxWorkspace />
         {:else if $currentWorkspace === "properties"}
-          <PropertiesView />
+          <LazyWorkspace loader={() => import("$lib/components/PropertiesView.svelte")} />
         {:else if $currentWorkspace === "files"}
           {#if viewedFile}
             <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />
           {:else}
             <FileBrowser onSelect={(path, isDir) => { if (!isDir && (path.endsWith('.md') || path.endsWith('.txt'))) { viewedFile = path; } else if (!isDir) { api.docGet(path).then(d => { $currentDoc = d; if (!$openTabs.find(t => t.id === d.id)) $openTabs = [d, ...$openTabs]; }).catch(() => {}); } }} />
           {/if}
-        {:else if $currentWorkspace === "craft"}
-          <CraftPage />
-        {:else if $currentWorkspace === "stats"}
-          <UsageMemory />
-        {:else if $currentWorkspace === "skills"}
-          <SkillsPage />
         {:else if $currentDoc}
           <EditorPane />
         {:else}
@@ -442,15 +475,16 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
       {#if isMobile}
         <div class="mobile-ai-overlay" onclick={(e) => { if (e.target === e.currentTarget) $aiPanelOpen = false; }} role="presentation" onkeydown={(e) => { if (e.key === 'Escape') $aiPanelOpen = false; }}>
           <div class="mobile-ai-container" role="dialog" tabindex="-1">
-            <AiPanel />
+            <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} />
           </div>
         </div>
       {:else}
-        <AiPanel />
+        <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} />
       {/if}
     {/if}
 
     <CommandPalette />
+    <QuickCaptureOverlay />
     <SkillNudges />
     <StatusBar />
   </div>
@@ -476,7 +510,7 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.5);
+    background: var(--bg-primary);
     z-index: 499;
   }
 
@@ -487,7 +521,7 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
   .mobile-ai-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: var(--bg-primary);
     z-index: 300;
     display: flex;
     align-items: flex-end;
@@ -498,7 +532,7 @@ import CanvasWorkspace from "$lib/components/CanvasWorkspace.svelte";
     width: 100%;
     max-height: 80vh;
     background: var(--surface-base);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-top: 1px solid var(--border-subtle);
     overflow: hidden;
   }
 

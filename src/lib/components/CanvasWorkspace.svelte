@@ -10,6 +10,7 @@
   import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
+  import DockSplit from "$lib/components/DockSplit.svelte";
 
   const CARD_W = 200;
   const COLORS: Record<string, string> = {
@@ -34,6 +35,9 @@
   let panning = $state<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   let nodeSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let edgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let editingNodeId = $state<string | null>(null);
+  let editingTitle = $state("");
+  let editingBody = $state("");
   let docQuery = $state("");
   let docResults = $state<Doc[]>([]);
   let docSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -248,6 +252,27 @@
     }, 600);
   }
 
+  function startInlineEdit(node: CanvasNode) {
+    editingNodeId = node.id;
+    editingTitle = node.title;
+    editingBody = node.body;
+  }
+
+  function commitInlineEdit() {
+    if (!editingNodeId) return;
+    const node = nodes.find((n) => n.id === editingNodeId);
+    if (node) {
+      const next = { ...node, title: editingTitle, body: editingBody };
+      nodes = nodes.map((n) => (n.id === next.id ? next : n));
+      scheduleSave(next);
+    }
+    editingNodeId = null;
+  }
+
+  function cancelInlineEdit() {
+    editingNodeId = null;
+  }
+
   function searchDocs(q: string) {
     docQuery = q;
     if (docSearchTimer) clearTimeout(docSearchTimer);
@@ -279,17 +304,31 @@
 
   function handleKeydown(e: KeyboardEvent) {
     const tag = (document.activeElement?.tagName ?? "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (tag === "input" || tag === "textarea" || tag === "select") {
+      if (editingNodeId && e.key === "Escape") {
+        e.preventDefault();
+        cancelInlineEdit();
+      }
+      if (editingNodeId && e.key === "Enter" && !e.shiftKey && tag !== "textarea") {
+        e.preventDefault();
+        commitInlineEdit();
+      }
+      return;
+    }
     if (e.key === "Delete" || e.key === "Backspace") {
       if (selectedNodeId || selectedEdgeId) {
         e.preventDefault();
         deleteSelected();
       }
     } else if (e.key === "Escape") {
-      selectedNodeId = null;
-      selectedEdgeId = null;
-      pendingSourceId = null;
-      connectMode = false;
+      if (editingNodeId) {
+        cancelInlineEdit();
+      } else {
+        selectedNodeId = null;
+        selectedEdgeId = null;
+        pendingSourceId = null;
+        connectMode = false;
+      }
     }
   }
 
@@ -336,6 +375,12 @@
     </div>
   </div>
 
+  <DockSplit
+    storageKey="jwe-split-canvas"
+    topLabel="Board height"
+    hasBottom={!!selectedNode || !!selectedEdge}
+  >
+    {#snippet top()}
   <div
     class="board"
     class:connecting={connectMode}
@@ -389,25 +434,55 @@
           class="card"
           class:selected={node.id === selectedNodeId}
           class:pending={node.id === pendingSourceId}
+          class:editing={node.id === editingNodeId}
           style="left: {node.x}px; top: {node.y}px; --card-accent: {COLORS[node.color] ?? COLORS.slate};"
-          onpointerdown={(e) => onCardPointerDown(e, node)}
+          onpointerdown={(e) => { if (node.id !== editingNodeId) onCardPointerDown(e, node); }}
           onpointermove={onBoardPointerMove}
           onpointerup={(e) => onBoardPointerUp(e, node)}
+          ondblclick={(e) => { e.stopPropagation(); startInlineEdit(node); }}
           role="button"
           tabindex="0"
           aria-label="Card {node.title || 'untitled'}"
           onkeydown={(e) => {
-            if (e.key === "Enter") {
+            if (e.key === "Enter" && node.id !== editingNodeId) {
               selectedNodeId = node.id;
               selectedEdgeId = null;
             }
           }}
         >
-          <div class="card-title">{node.title || "Untitled"}</div>
-          {#if node.body}
-            <div class="card-body">{node.body.length > 140 ? node.body.slice(0, 140) + "…" : node.body}</div>
+          {#if node.id === editingNodeId}
+            <input
+              class="inline-title"
+              value={editingTitle}
+              placeholder="Card title"
+              aria-label="Card title"
+              oninput={(e) => { editingTitle = (e.target as HTMLInputElement).value; }}
+              onblur={commitInlineEdit}
+              onkeydown={(e) => {
+                if (e.key === "Escape") { e.stopPropagation(); cancelInlineEdit(); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); commitInlineEdit(); }
+              }}
+            />
+            <textarea
+              class="inline-body"
+              value={editingBody}
+              placeholder="Card notes…"
+              aria-label="Card notes"
+              rows="3"
+              oninput={(e) => { editingBody = (e.target as HTMLTextAreaElement).value; }}
+              onblur={commitInlineEdit}
+              onkeydown={(e) => {
+                if (e.key === "Escape") { e.stopPropagation(); cancelInlineEdit(); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); commitInlineEdit(); }
+              }}
+            ></textarea>
+          {:else}
+            <div class="card-title">{node.title || "Untitled"}</div>
+            {#if node.body}
+              <div class="card-body">{node.body.length > 140 ? node.body.slice(0, 140) + "…" : node.body}</div>
+            {/if}
           {/if}
-          {#if node.doc_id}
+          {#if node.doc_id && node.id !== editingNodeId}
             <button
               class="card-doc"
               title="Open linked document"
@@ -420,7 +495,8 @@
       {/each}
     </div>
   </div>
-
+    {/snippet}
+    {#snippet bottom()}
   {#if selectedNode}
     <div class="inspector">
       <div class="inspector-row">
@@ -431,6 +507,9 @@
           aria-label="Card title"
           oninput={(e) => editSelected({ title: (e.target as HTMLInputElement).value })}
         />
+        <button class="icon-btn" onclick={() => (selectedNodeId = null)} title="Minimize panel" aria-label="Minimize panel">
+          <Icon name="minus" size={14} />
+        </button>
         <button class="icon-btn" onclick={deleteSelected} title="Delete card" aria-label="Delete card">
           <Icon name="trash" size={14} />
         </button>
@@ -488,12 +567,17 @@
           aria-label="Link label"
           oninput={(e) => editEdgeLabel((e.target as HTMLInputElement).value)}
         />
+        <button class="icon-btn" onclick={() => (selectedEdgeId = null)} title="Minimize panel" aria-label="Minimize panel">
+          <Icon name="minus" size={14} />
+        </button>
         <button class="icon-btn" onclick={deleteSelected} title="Delete link" aria-label="Delete link">
           <Icon name="trash" size={14} />
         </button>
       </div>
     </div>
   {/if}
+    {/snippet}
+  </DockSplit>
 </div>
 
 <style>
@@ -646,6 +730,49 @@
     box-shadow: 0 0 0 2px var(--accent-primary);
   }
 
+  .card.editing {
+    cursor: default;
+    z-index: 10;
+    padding: 6px 8px;
+    min-width: 200px;
+    width: 200px;
+  }
+
+  .inline-title {
+    width: 100%;
+    height: 26px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 2px 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-base);
+    color: var(--text-primary);
+    outline: none;
+  }
+
+  .inline-title:focus {
+    border-color: var(--accent-primary);
+  }
+
+  .inline-body {
+    width: 100%;
+    min-height: 40px;
+    font-size: 11px;
+    padding: 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-base);
+    color: var(--text-secondary);
+    resize: vertical;
+    outline: none;
+    margin-top: 4px;
+  }
+
+  .inline-body:focus {
+    border-color: var(--accent-primary);
+  }
+
   .card-title {
     font-size: 13px;
     font-weight: 600;
@@ -673,14 +800,13 @@
   }
 
   .inspector {
-    flex-shrink: 0;
-    border-top: 1px solid var(--border-subtle);
+    flex: 1 1 auto;
+    min-height: 0;
     background: var(--surface-raised);
     padding: 8px 12px;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 40%;
     overflow-y: auto;
   }
 

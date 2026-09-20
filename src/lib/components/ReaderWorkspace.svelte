@@ -1,11 +1,14 @@
 <script lang="ts">
   import { api, type Doc, type BookshelfEntry } from '$lib/api';
-  import { currentDoc } from '$lib/stores/app';
+  import { currentDoc, openTabs } from '$lib/stores/app';
   import { showToast } from '$lib/stores/notifications';
   import { settings } from '$lib/stores/settings';
   import { processTransclusions } from '$lib/transclude';
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
   import PdfViewer from '$lib/components/PdfViewer.svelte';
+  import { downloadConvertOutput } from '$lib/download';
+  import Icon from '$lib/components/Icon.svelte';
+  import DockSplit from '$lib/components/DockSplit.svelte';
 
   let shelfFilter = $state<string>('all');
   let books = $state<BookshelfEntry[]>([]);
@@ -61,7 +64,8 @@
     try {
       const updated = await api.docSave(selectedBook.doc.id, undefined, undefined, undefined, JSON.stringify(fm));
       selectedBook.doc = updated;
-      currentDoc.set(updated);
+      $currentDoc = updated;
+      $openTabs = $openTabs.map((t) => (t.id === updated.id ? updated : t));
       marginNotes = notes;
     } catch (e) {
       showToast(`Couldn't save note: ${e instanceof Error ? e.message : e}`, "error");
@@ -93,6 +97,32 @@
 
   async function deleteNote(id: string) {
     await persistMarginNotes(marginNotes.filter((n) => n.id !== id));
+  }
+
+  /** Export margin notes as a new doc. */
+  async function exportNotes() {
+    if (!selectedBook || marginNotes.length === 0) {
+      showToast("No notes to export", "info");
+      return;
+    }
+    try {
+      const bookTitle = selectedBook.doc.title;
+      const lines = [`# Margin Notes — ${bookTitle}`, ""];
+      for (const note of [...marginNotes].sort((a, b) => a.pos - b.pos)) {
+        lines.push(`## ${noteTime(note.created_at)}`);
+        if (note.quote) lines.push(`> ${note.quote}`);
+        lines.push(note.text);
+        lines.push("");
+      }
+      const markdown = lines.join("\n");
+      const title = `Notes — ${bookTitle}`;
+      const doc = await api.docCreate("reader", "md", title, undefined, markdown);
+      $currentDoc = doc;
+      $openTabs = [doc, ...$openTabs];
+      showToast(`Exported ${marginNotes.length} notes as "${title}"`, "success");
+    } catch (err) {
+      showToast(`Export failed: ${err instanceof Error ? err.message : err}`, "error");
+    }
   }
 
   function jumpToNote(note: MarginNote) {
@@ -129,7 +159,8 @@
 
   async function openBook(entry: BookshelfEntry) {
     selectedBook = entry;
-    currentDoc.set(entry.doc);
+    $currentDoc = entry.doc;
+    if (!$openTabs.find((t) => t.id === entry.doc.id)) $openTabs = [entry.doc, ...$openTabs];
     readerContent = await processTransclusions(entry.doc.content || '');
     readerPosition = entry.doc.reading_position || 0;
     marginNotes = readMarginNotes(entry.doc.frontmatter_json);
@@ -393,16 +424,31 @@
         {/if}
       </div>
       <div class="reader-body">
+        <DockSplit
+          direction="horizontal"
+          defaultPct={72}
+          storageKey="jwe-split-reader"
+          topLabel="Notes panel width"
+          hasBottom={showNotes}
+        >
+          {#snippet top()}
         <div class="reader-content" bind:this={scrollEl} onscroll={handleScroll}>
           <div class="reader-prose">
             {@html readerContent}
           </div>
         </div>
+          {/snippet}
+          {#snippet bottom()}
         {#if showNotes}
           <aside class="notes-panel" aria-label="Margin notes">
             <div class="notes-header">
               <span class="notes-title">Margin notes</span>
               <span class="notes-count">{marginNotes.length}</span>
+              {#if marginNotes.length > 0}
+                <button class="note-export" onclick={exportNotes} title="Export notes as new doc" aria-label="Export notes">
+                  <Icon name="download" size={14} />
+                </button>
+              {/if}
             </div>
             <div class="note-composer">
               {#if noteQuote}
@@ -451,6 +497,8 @@
             </div>
           </aside>
         {/if}
+          {/snippet}
+        </DockSplit>
       </div>
     </div>
   {/if}
@@ -655,9 +703,8 @@
   }
 
   .notes-panel {
-    width: 300px;
-    flex-shrink: 0;
-    border-left: 1px solid var(--border-subtle);
+    flex: 1 1 auto;
+    min-height: 0;
     background: var(--surface-base);
     display: flex;
     flex-direction: column;
@@ -954,7 +1001,7 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-4);
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--bg-primary);
   }
 
   .pdf-preview-panel {
@@ -966,5 +1013,22 @@
     background: var(--surface-base);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
+  }
+
+  .note-export {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    background: transparent;
+  }
+
+  .note-export:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
   }
 </style>

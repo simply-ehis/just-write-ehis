@@ -21,10 +21,12 @@
     onDeleted?: (id: string) => void;
     backLabel?: string;
   } = $props();
+
+  let collapsed = $state(false);
 </script>
 
 {#if $currentDoc}
-  <div class="doc-detail">
+  <div class="doc-detail" class:collapsed>
     <div class="detail-bar">
       <button class="back-btn" onclick={onBack} title={backLabel} aria-label={backLabel}>
         <span aria-hidden="true">←</span>
@@ -32,11 +34,16 @@
       </button>
       <span class="detail-title" title={$currentDoc.title}>{$currentDoc.title}</span>
       <span class="detail-words">{$currentDoc.word_count.toLocaleString()} words · ~{Math.max(1, Math.round($currentDoc.word_count / 200))} min</span>
+      <button class="icon-btn" onclick={() => (collapsed = !collapsed)} title={collapsed ? "Expand editor" : "Minimize editor"} aria-label={collapsed ? "Expand editor" : "Minimize editor"} aria-pressed={collapsed}>
+        <Icon name={collapsed ? "arrow-right" : "minus"} size={14} />
+      </button>
       <DeleteButton doc={$currentDoc} {onDeleted} />
     </div>
-    <div class="detail-editor">
-      <EditorPane />
-    </div>
+    {#if !collapsed}
+      <div class="detail-editor">
+        <EditorPane />
+      </div>
+    {/if}
   </div>
 {:else}
   <div class="doc-detail-empty">
@@ -108,6 +115,10 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .doc-detail.collapsed .detail-editor {
+    display: none;
   }
 
   .doc-detail-empty {

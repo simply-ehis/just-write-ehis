@@ -8,6 +8,7 @@
   import Icon from "./Icon.svelte";
   import DocDetail from "./DocDetail.svelte";
   import DeleteButton from "./DeleteButton.svelte";
+  import DockSplit from "./DockSplit.svelte";
 
   let projects = $state<Doc[]>([]);
   let selectedProject = $state<Doc | null>(null);
@@ -19,6 +20,7 @@
   let boardColumns = $state<Record<string, Doc[]>>({});
   // Task/project open for reading/editing (master-detail); null = boards.
   let editingDoc = $state<Doc | null>(null);
+  let sidebarCollapsed = $state(false);
 
   function openForEdit(doc: Doc) {
     editingDoc = doc;
@@ -173,11 +175,15 @@
   });
 </script>
 
-<div class="projects-workspace">
+<div class="projects-workspace" class:sidebar-collapsed={sidebarCollapsed}>
+  {#if !sidebarCollapsed}
   <div class="projects-sidebar">
     <div class="sidebar-header">
       <span class="sidebar-title">Projects</span>
-      <button class="add-btn" onclick={createProject} title="New Project">+</button>
+      <span class="sidebar-actions">
+        <button class="add-btn" onclick={() => (sidebarCollapsed = true)} title="Hide project list — focus editor" aria-label="Hide project list">−</button>
+        <button class="add-btn" onclick={createProject} title="New Project">+</button>
+      </span>
     </div>
     <div class="project-list">
       {#each projects as project}
@@ -195,8 +201,15 @@
       {/if}
     </div>
   </div>
+  {/if}
 
   <div class="projects-content">
+    {#if sidebarCollapsed}
+      <div class="board-collapsed-note">
+        <button class="open-btn" onclick={() => (sidebarCollapsed = false)} title="Show project list" aria-label="Show project list">Show projects</button>
+        <span>List hidden — editor has full width.</span>
+      </div>
+    {/if}
     {#if !selectedProject}
       <div class="empty-state">
         <div class="empty-icon"><Icon name="folder" size={44} /></div>
@@ -226,6 +239,12 @@
         </div>
       </div>
 
+      <DockSplit
+        storageKey="jwe-split-projects"
+        topLabel="Project board height"
+        hasBottom={!!editingDoc}
+      >
+        {#snippet top()}
       {#if viewMode === 'dashboard'}
         <div class="dashboard">
           <!-- Stats row -->
@@ -307,6 +326,8 @@
           {/each}
         </div>
       {/if}
+        {/snippet}
+        {#snippet bottom()}
       {#if editingDoc}
         <div class="project-dock">
           <DocDetail
@@ -320,6 +341,8 @@
           />
         </div>
       {/if}
+        {/snippet}
+      </DockSplit>
     {/if}
   </div>
 </div>
@@ -346,6 +369,11 @@
     align-items: center;
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .sidebar-actions {
+    display: flex;
+    gap: 4px;
   }
 
   .sidebar-title {
@@ -434,14 +462,13 @@
     min-height: 0;
   }
 
-  /* Docked editor: dashboard/board stay visible above, writing fills below. */
+  /* Docked editor: fills the DockSplit bottom slot. */
   .project-dock {
-    flex: 0 0 54%;
-    min-height: 220px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border-subtle);
     background: var(--surface-base);
   }
 

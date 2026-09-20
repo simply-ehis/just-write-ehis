@@ -15,6 +15,8 @@
   let quickCapture = $state("");
   let calendarMonth = $state(new Date());
   let loading = $state(false);
+  let navCollapsed = $state(false);
+  let touchedCollapsed = $state(false);
 
   /** Docs touched today (derived, never stored) for the daily-note footer. */
   async function loadTouchedToday() {
@@ -41,7 +43,10 @@
   }
 
   function formatDate(d: Date): string {
-    return d.toISOString().split("T")[0];
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   }
 
   function formatDisplayDate(dateStr: string): string {
@@ -158,13 +163,17 @@
   });
 </script>
 
-<div class="logs-workspace">
+<div class="logs-workspace" class:nav-collapsed={navCollapsed}>
+  {#if !navCollapsed}
   <div class="logs-sidebar">
     <div class="calendar">
       <div class="calendar-header">
         <button onclick={prevMonth}>&#8249;</button>
         <span class="month-label">{getMonthLabel(calendarMonth)}</span>
-        <button onclick={nextMonth}>&#8250;</button>
+        <span class="cal-actions">
+          <button onclick={nextMonth}>&#8250;</button>
+          <button onclick={() => (navCollapsed = true)} title="Hide calendar — focus editor" aria-label="Hide calendar">−</button>
+        </span>
       </div>
       <div class="calendar-grid">
         {#each ["S", "M", "T", "W", "T", "F", "S"] as day}
@@ -199,8 +208,15 @@
       {/each}
     </div>
   </div>
+  {/if}
 
   <div class="logs-content">
+    {#if navCollapsed}
+      <div class="board-collapsed-note">
+        <button class="capture-btn" onclick={() => (navCollapsed = false)} title="Show calendar" aria-label="Show calendar" style="width:auto;padding:0 12px;font-size:12px;height:28px;">Calendar</button>
+        <span>Calendar hidden — editor has full width.</span>
+      </div>
+    {/if}
     <div class="quick-capture">
       {#if $settings.sttEnabled}
         <MicButton onTranscribe={(text) => {
@@ -250,13 +266,18 @@
     </div>
 
     {#if touchedToday.length > 0}
-      <div class="touched-today">
-        <div class="touched-header">Touched today</div>
+      <div class="touched-today" class:collapsed={touchedCollapsed}>
+        <button class="touched-header" onclick={() => (touchedCollapsed = !touchedCollapsed)} title={touchedCollapsed ? "Show touched today" : "Hide touched today"} aria-pressed={touchedCollapsed}>
+          <span>Touched today</span>
+          <span aria-hidden="true">{touchedCollapsed ? "+" : "−"}</span>
+        </button>
+        {#if !touchedCollapsed}
         {#each touchedToday as [id, title]}
           <button class="touched-item" onclick={() => openTouched(id)}>
             {title}
           </button>
         {/each}
+        {/if}
       </div>
     {/if}
   </div>
@@ -276,6 +297,15 @@
     flex-direction: column;
     overflow-y: auto;
     flex-shrink: 0;
+  }
+
+  .logs-workspace.nav-collapsed .logs-sidebar {
+    display: none;
+  }
+
+  .cal-actions {
+    display: flex;
+    gap: 2px;
   }
 
   .calendar {
@@ -443,12 +473,21 @@
   }
 
   .touched-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-muted);
     margin-bottom: 6px;
+    cursor: pointer;
+  }
+
+  .touched-today.collapsed .touched-header {
+    margin-bottom: 0;
   }
 
   .touched-item {

@@ -9,7 +9,12 @@
 
   const shortcuts = [
     { keys: "Ctrl+K", desc: "Command palette — fuzzy search docs, actions, AI ops" },
+    { keys: "Ctrl+F", desc: "Find & replace in the open editor" },
+    { keys: "Ctrl+Shift+F", desc: "Quick capture to Inbox from anywhere" },
     { keys: "Ctrl+J", desc: "Toggle AI panel" },
+    { keys: "Ctrl+B", desc: "Toggle sidebar" },
+    { keys: "Ctrl+I", desc: "Toggle outline & links" },
+    { keys: "F11", desc: "Zen mode — editor only" },
     { keys: "Ctrl+N", desc: "New document" },
     { keys: "Ctrl+W", desc: "Close tab" },
     { keys: "Ctrl+Tab", desc: "Next tab" },
@@ -34,6 +39,9 @@
     { name: "Canvas", desc: "Freeform board: cards, links, and doc-links, pan and zoom." },
     { name: "Library", desc: "Every document as table, board, or calendar, with saved views." },
     { name: "Files", desc: "Browse vault folder structure, open any file." },
+    { name: "Settings → Skills", desc: "Power features, hints, and try-one-click list." },
+    { name: "Settings → Craft", desc: "Dialogue, sentence, and filter-word trends for the open doc." },
+    { name: "Settings → Stats", desc: "Streaks, patterns, velocity, and reopen lists." },
     { name: "AI Panel", desc: "Chat, Composer, Ghost, Structurize — right docked panel." },
     { name: "Zen Mode", desc: "One keystroke hides all chrome, leaving only text." },
   ];
@@ -98,7 +106,7 @@
   .help-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--bg-primary);
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -109,7 +117,7 @@
   .help-panel {
     background: var(--surface-base);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-md);
     width: 100%;
     max-width: 640px;
     max-height: 80vh;

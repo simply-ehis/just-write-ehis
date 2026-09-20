@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Doc } from "$lib/api";
-  import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
+  import { currentDoc, openTabs, currentWorkspace, showSettings } from "$lib/stores/app";
+  import { openSettingsAt } from "$lib/stores/settings";
   import { smartTasks, openTasks, addTask, toggleTask, removeTask } from "$lib/stores/uiState";
   import Icon from "$lib/components/Icon.svelte";
 
@@ -9,6 +10,7 @@
   let workspaceCounts: [string, number][] = $state([]);
   let writingDays: string[] = $state([]);
   let patterns: { peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number; avg_session_minutes: number } | null = $state(null);
+  let goals: { id: string; title: string; workspace: string; goal_words: number; word_count: number; deadline: string | null }[] = $state([]);
   let pinnedDocs: Doc[] = $state([]);
   let suggestedDocs: Doc[] = $state([]);
   let greeting = $state("");
@@ -34,18 +36,20 @@
     else greeting = "Good evening";
 
     try {
-      const [docs, counts, days, p, pinned] = await Promise.all([
+      const [docs, counts, days, p, pinned, g] = await Promise.all([
         api.dashboardRecentDocs(8),
         api.dashboardWorkspaceCounts(),
         api.dashboardWritingDays(),
         api.dashboardPatterns(),
         api.docListPinned(),
+        api.dashboardGoals(),
       ]);
       recentDocs = docs;
       workspaceCounts = counts;
       writingDays = days;
       patterns = p;
       pinnedDocs = pinned;
+      goals = g;
       loadSuggestions(counts);
     } catch {}
   });
@@ -83,11 +87,12 @@
     }
   }
 
-  function heatColor(count: number): string {
-    if (count === 0) return "var(--surface-overlay)";
-    if (count < 3) return "var(--accent-primary)";
-    if (count < 6) return "var(--accent-primary)";
-    return "var(--accent-primary)";
+  function heatOpacity(key: string): number {
+    // Single hue, varied intensity: today counts more than a passing touch.
+    // Writing-days list has no per-day counts, so recency weights it.
+    const idx = writingDays.indexOf(key);
+    if (idx < 0) return 0;
+    return 0.45 + (idx / Math.max(1, writingDays.length)) * 0.55;
   }
 
   const workspaceIcons: Record<string, string> = {
@@ -128,6 +133,15 @@
       files: "Files",
     };
     return labels[ws] ?? ws;
+  }
+
+  function openWorkspace(ws: string) {
+    if (ws === "craft" || ws === "stats" || ws === "skills") {
+      openSettingsAt(ws as "craft" | "stats" | "skills");
+      $showSettings = true;
+      return;
+    }
+    $currentWorkspace = ws;
   }
 
   function formatDate(iso: string): string {
@@ -263,7 +277,7 @@
       {:else}
         <div class="workspace-grid">
           {#each workspaceCounts as [ws, count]}
-            <button class="workspace-card" onclick={() => $currentWorkspace = ws} title={workspaceLabel(ws)} aria-label={workspaceLabel(ws)}>
+            <button class="workspace-card" onclick={() => openWorkspace(ws)} title={workspaceLabel(ws)} aria-label={workspaceLabel(ws)}>
               <span class="ws-icon"><Icon name={workspaceIcons[ws] ?? "files"} size={20} /></span>
               <span class="ws-name">{workspaceLabel(ws)}</span>
               <span class="ws-count">{count}</span>
@@ -285,6 +299,7 @@
           <div
             class="heat-cell"
             class:active
+            style={active ? `opacity: ${heatOpacity(key).toFixed(2)}` : undefined}
             title={key}
           ></div>
         {/each}
@@ -328,6 +343,35 @@
               <span class="pattern-value">{Math.round(patterns.avg_session_minutes)} min</span>
             </div>
           {/if}
+        </div>
+      </section>
+    {/if}
+
+    <!-- Goals -->
+    {#if goals.length > 0}
+      <section class="home-section">
+        <h2>Goals</h2>
+        <div class="goals-grid">
+          {#each goals as goal}
+            <div class="goal-card">
+              <div class="goal-header">
+                <span class="goal-title">{goal.title}</span>
+                <span class="goal-workspace">{workspaceLabel(goal.workspace)}</span>
+              </div>
+              <div class="goal-progress">
+                <div class="goal-bar">
+                  <div class="goal-fill" style="width: {Math.min(100, Math.round((goal.word_count / goal.goal_words) * 100))}%"></div>
+                </div>
+                <span class="goal-text">{goal.word_count.toLocaleString()} / {goal.goal_words.toLocaleString()} words ({Math.min(100, Math.round((goal.word_count / goal.goal_words) * 100))}%)</span>
+              </div>
+              {#if goal.deadline}
+                <div class="goal-deadline" class:overdue={new Date(goal.deadline) < new Date()}>
+                  <Icon name="calendar" size={12} />
+                  <span>{goal.deadline.slice(0, 10)}</span>
+                </div>
+              {/if}
+            </div>
+          {/each}
         </div>
       </section>
     {/if}
@@ -623,5 +667,85 @@
   .pattern-delta {
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  .goals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .goal-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    background: var(--surface-raised);
+  }
+
+  .goal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .goal-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .goal-workspace {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-overlay);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .goal-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .goal-bar {
+    height: 8px;
+    background: var(--surface-overlay);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+
+  .goal-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: var(--radius-full);
+    transition: width 0.3s ease;
+  }
+
+  .goal-text {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+
+  .goal-deadline {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .goal-deadline.overdue {
+    color: var(--error);
   }
 </style>

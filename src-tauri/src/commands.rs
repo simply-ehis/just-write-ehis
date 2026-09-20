@@ -508,6 +508,21 @@ pub fn dashboard_patterns(db: State<'_, Database>) -> Result<serde_json::Value, 
 }
 
 #[tauri::command]
+pub fn dashboard_goals(db: State<'_, Database>) -> Result<serde_json::Value, String> {
+    let rows = db.dashboard_goals()?;
+    Ok(serde_json::Value::Array(rows.into_iter().map(|(id, title, workspace, goal_words, word_count, deadline)| {
+        serde_json::json!({
+            "id": id,
+            "title": title,
+            "workspace": workspace,
+            "goal_words": goal_words,
+            "word_count": word_count,
+            "deadline": deadline
+        })
+    }).collect()))
+}
+
+#[tauri::command]
 pub fn get_reopen_never_finish(db: State<'_, Database>) -> Result<serde_json::Value, String> {
     let rows = db.get_reopen_never_finish()?;
     Ok(serde_json::Value::Array(rows.into_iter().map(|(doc, open_count, last_opened)| {

@@ -85,8 +85,8 @@
   }
 
   function draw() {
-    if (!ctx || !canvas || !graphData) return;
-    const gd = graphData;
+    if (ctx && canvas && graphData) {
+      const gd = graphData;
 
     ctx.clearRect(0, 0, width, height);
     ctx.save();
@@ -154,6 +154,7 @@
     }
 
     ctx.restore();
+    }
     requestAnimationFrame(draw);
   }
 
@@ -393,9 +394,14 @@
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       if (ctx) {
-        ctx.scale(devicePixelRatio, devicePixelRatio);
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       }
     }
+  }
+
+  function setWorkspaceFilter(ws: string) {
+    filterWorkspace = ws;
+    loadGraph();
   }
 
   onMount(() => {
@@ -419,7 +425,7 @@
     <div class="toolbar-left">
       <button class="toolbar-btn icon-btn" onclick={loadGraph} title="Refresh graph" aria-label="Refresh graph"><Icon name="refresh" size={15} /></button>
       <button class="toolbar-btn icon-btn" onclick={fitGraph} title="Fit to view (F)" aria-label="Fit graph to view"><Icon name="fit" size={15} /></button>
-      <select class="filter-select" bind:value={filterWorkspace}>
+      <select class="filter-select" value={filterWorkspace} onchange={(e) => setWorkspaceFilter((e.target as HTMLSelectElement).value)} aria-label="Filter by workspace">
         <option value="all">All workspaces</option>
         <option value="logs">Logs</option>
         <option value="write">Write</option>
@@ -515,6 +521,9 @@
         <div class="inspector-header">
           <span class="node-dot" style="background: {getNodeColor(node.workspace)}"></span>
           <h3>{node.title}</h3>
+          <button class="icon-btn" onclick={() => (selectedNodeId = null)} title="Minimize panel" aria-label="Minimize panel">
+            <Icon name="minus" size={14} />
+          </button>
         </div>
         <div class="inspector-meta">
           <span>{node.workspace}</span>

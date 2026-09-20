@@ -26,7 +26,16 @@
 
   onMount(() => {
     const vault = localStorage.getItem("vault-path") || "";
-    if (vault) navigateTo(vault);
+    if (vault) {
+      navigateTo(vault);
+      return;
+    }
+    api.getVaultPath().then((p) => {
+      if (p) {
+        try { localStorage.setItem("vault-path", p); } catch {}
+        navigateTo(p);
+      }
+    }).catch(() => {});
   });
 
   async function navigateTo(path: string) {
@@ -252,7 +261,14 @@
 
   <div class="entry-list">
     {#if entries.length === 0}
-      <p class="empty">{currentPath ? "Empty folder" : "No folder selected"}</p>
+      {#if currentPath}
+        <p class="empty">Empty folder</p>
+      {:else}
+        <div class="empty-vault">
+          <p class="empty">No folder selected</p>
+          <button class="nav-btn open-vault" onclick={() => { editingPath = true; pathInput = ""; setTimeout(() => document.querySelector<HTMLInputElement>(".path-input")?.focus(), 10); }} title="Type or paste a folder path">Choose folder…</button>
+        </div>
+      {/if}
     {:else}
       {#each entries as [name, isDir, size]}
         {@const fullPath = currentPath + (currentPath.includes("\\") ? "\\" : "/") + name}
@@ -376,6 +392,22 @@
     text-align: center;
     padding: 20px;
     font-style: italic;
+  }
+
+  .empty-vault {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 20px;
+  }
+
+  .open-vault {
+    width: auto;
+    padding: 6px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-size: 12px;
   }
 
   .entry {

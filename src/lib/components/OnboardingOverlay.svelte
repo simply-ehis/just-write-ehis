@@ -118,7 +118,7 @@
   .onboarding-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: var(--bg-primary);
     display: flex;
     align-items: center;
     justify-content: center;

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Backlink, type Doc, type UnlinkedMention } from "$lib/api";
-  import { currentDoc, openTabs } from "$lib/stores/app";
+  import { currentDoc, openTabs, inspectorOpen } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
+  import Icon from "$lib/components/Icon.svelte";
 
   let backlinks = $state<Backlink[]>([]);
   let outgoingBacklinks = $state<Backlink[]>([]);
@@ -166,6 +167,9 @@
     <button class:active={activeTab === 'outline'} onclick={() => activeTab = 'outline'}>Outline</button>
     <button class:active={activeTab === 'properties'} onclick={() => activeTab = 'properties'}>Props</button>
     <button class:active={activeTab === 'backlinks'} onclick={() => activeTab = 'backlinks'}>Links</button>
+    <button class="icon-btn insp-close" onclick={() => ($inspectorOpen = false)} title="Hide inspector (Ctrl+I)" aria-label="Hide inspector">
+      <Icon name="x" size={13} />
+    </button>
   </div>
 
   <div class="inspector-content">
@@ -359,6 +363,11 @@
   .inspector-tabs button.active {
     color: var(--accent-primary);
     border-bottom: 2px solid var(--accent-primary);
+  }
+
+  .insp-close {
+    flex: 0 0 auto;
+    width: 28px;
   }
 
   .inspector-content {
