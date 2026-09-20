@@ -71,6 +71,7 @@ impl SidecarManager {
         self.process.lock().map(|p| p.is_some()).unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn set_endpoint(&self, endpoint: &str) -> Result<(), String> {
         *self.endpoint.lock().map_err(|e| e.to_string())? = endpoint.to_string();
         Ok(())
@@ -138,6 +139,7 @@ impl SttManager {
         self.process.lock().map(|p| p.is_some()).unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn port(&self) -> u16 { self.port }
 
     fn base_url(&self) -> String {
@@ -251,6 +253,7 @@ impl TtsManager {
         self.process.lock().map(|p| p.is_some()).unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn port(&self) -> u16 { self.port }
 
     fn base_url(&self) -> String {
@@ -463,6 +466,7 @@ impl LlmManager {
         self.process.lock().map(|p| p.is_some()).unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn port(&self) -> u16 { self.port }
 
     fn base_url(&self) -> String {
@@ -476,6 +480,7 @@ impl LlmManager {
         resp.json().await.map_err(|e| e.to_string())
     }
 
+    #[allow(dead_code)]
     pub async fn completion(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
         let client = reqwest::Client::new();
         let body = serde_json::json!({

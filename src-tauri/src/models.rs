@@ -34,6 +34,7 @@ pub struct Backlink {
     pub context_snippet: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LinkImplicit {
     pub source_id: String,
@@ -41,6 +42,7 @@ pub struct LinkImplicit {
     pub match_type: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsageEvent {
     pub doc_id: String,
@@ -84,6 +86,7 @@ pub struct BibleFact {
     pub value: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CraftMetric {
     pub id: String,
@@ -169,12 +172,14 @@ pub struct BookshelfEntry {
     pub rating: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateReadingPositionRequest {
     pub doc_id: String,
     pub position: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportFileRequest {
     pub file_path: String,

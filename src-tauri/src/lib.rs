@@ -132,6 +132,7 @@ pub fn run() {
             commands::dashboard_workspace_counts,
             commands::dashboard_writing_days,
             commands::dashboard_patterns,
+            commands::dashboard_goals,
             commands::get_reopen_never_finish,
             commands::dashboard_streak_heatmap,
             commands::dashboard_writing_time_patterns,

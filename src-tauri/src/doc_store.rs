@@ -104,6 +104,7 @@ fn compute_content_hash(content: &str) -> String {
 }
 
 /// Count words that changed between two texts (simple diff).
+#[allow(dead_code)]
 fn word_diff_count(old: &str, new: &str) -> usize {
     let old_words: Vec<&str> = old.split_whitespace().collect();
     let new_words: Vec<&str> = new.split_whitespace().collect();
