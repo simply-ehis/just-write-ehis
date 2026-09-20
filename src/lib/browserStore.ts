@@ -261,6 +261,11 @@ class BrowserStore {
     return { ...doc };
   }
 
+  deleteDoc(id: string): void {
+    this.docs = this.docs.filter((d) => d.id !== id);
+    this.persistDocs();
+  }
+
   /**
    * Spec 8.2: weighted activity bumps + open/write tracking for the
    * "reopened but never finished" query. Never touches updated_at.

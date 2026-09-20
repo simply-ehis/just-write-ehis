@@ -279,3 +279,22 @@ pub struct RagChunk {
     pub start_word: usize,
     pub end_word: usize,
 }
+
+// ── Ghosts (scene forking) ──────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GhostGroup {
+    pub original: Doc,
+    pub ghosts: Vec<Doc>,
+}
+
+// ── Atlas (star-sky memory) ─────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtlasStar {
+    pub id: String,
+    pub title: String,
+    pub workspace: String,
+    pub word_count: i64,
+    pub activity_score: f64,
+    pub updated_at: String,
+    pub embedding: Vec<f32>,
+}

@@ -1542,3 +1542,32 @@ pub fn app_update_status(app: tauri::AppHandle) -> Result<serde_json::Value, Str
         "endpoint": endpoints.first(),
     }))
 }
+
+// ── Ghosts (scene forking) ──────────────────────────────────────
+
+#[tauri::command]
+pub fn ghost_fork(db: State<'_, Database>, doc_id: String, label: Option<String>) -> Result<Doc, String> {
+    db.ghost_fork(&doc_id, label.as_deref())
+}
+
+#[tauri::command]
+pub fn ghost_list(db: State<'_, Database>, doc_id: String) -> Result<GhostGroup, String> {
+    db.ghost_list(&doc_id)
+}
+
+#[tauri::command]
+pub fn ghost_merge(db: State<'_, Database>, ghost_id: String, target_id: Option<String>) -> Result<Doc, String> {
+    db.ghost_merge(&ghost_id, target_id.as_deref())
+}
+
+#[tauri::command]
+pub fn ghost_dismiss(db: State<'_, Database>, ghost_id: String) -> Result<(), String> {
+    db.ghost_dismiss(&ghost_id)
+}
+
+// ── Atlas (star-sky memory) ─────────────────────────────────────
+
+#[tauri::command]
+pub fn atlas_get_stars(db: State<'_, Database>) -> Result<Vec<AtlasStar>, String> {
+    db.atlas_get_stars()
+}

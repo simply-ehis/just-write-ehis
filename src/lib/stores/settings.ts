@@ -111,6 +111,9 @@ export interface AppSettings {
   llmEnabled: boolean;
   /** Paste-to-swap LLM model: local .gguf path or models/ filename; empty = bundled default. */
   llmModel: string;
+
+  /** Show paragraph density heatmap in the status bar. */
+  rhythmHeatmapInStatusBar: boolean;
 }
 
 const defaultSettings: AppSettings = {
@@ -195,6 +198,7 @@ const defaultSettings: AppSettings = {
   pythonPath: "python",
   llmEnabled: true,
   llmModel: "",
+  rhythmHeatmapInStatusBar: false,
 };
 
 function loadSettings(): AppSettings {

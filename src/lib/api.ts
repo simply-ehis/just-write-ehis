@@ -212,6 +212,21 @@ export interface ConvertStatus {
   formats: string[];
 }
 
+export interface GhostGroup {
+  original: Doc;
+  ghosts: Doc[];
+}
+
+export interface AtlasStar {
+  id: string;
+  title: string;
+  workspace: string;
+  word_count: number;
+  activity_score: number;
+  updated_at: string;
+  embedding: number[];
+}
+
 export interface CanvasNode {
   id: string;
   title: string;
@@ -721,5 +736,19 @@ export const api = {
     safeInvoke<Array<{ event: string; date: string; act: number }>>("script_timeline_get", { docId }),
   scriptTimelineAdd: (docId: string, event: string, date: string, act: number) =>
     safeInvoke<{ success: boolean }>("script_timeline_add", { docId, event, date, act }),
+
+  // Ghosts (scene forking)
+  ghostFork: (docId: string, label?: string) =>
+    safeInvoke<Doc>("ghost_fork", { docId, label }),
+  ghostList: (docId: string) =>
+    safeInvoke<GhostGroup>("ghost_list", { docId }),
+  ghostMerge: (ghostId: string, targetId?: string) =>
+    safeInvoke<Doc>("ghost_merge", { ghostId, targetId }),
+  ghostDismiss: (ghostId: string) =>
+    safeInvoke<void>("ghost_dismiss", { ghostId }),
+
+  // Atlas (star-sky memory)
+  atlasGetStars: () =>
+    safeInvoke<AtlasStar[]>("atlas_get_stars"),
 
 };

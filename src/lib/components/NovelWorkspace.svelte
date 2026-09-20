@@ -8,6 +8,8 @@
   import DocDetail from './DocDetail.svelte';
   import DeleteButton from './DeleteButton.svelte';
   import DockSplit from './DockSplit.svelte';
+  import GhostPanel from './GhostPanel.svelte';
+  import GhostBadge from './GhostBadge.svelte';
 
   let projectId = $state<string | null>(null);
   let projects = $state<Doc[]>([]);
@@ -25,6 +27,9 @@
   let boardCollapsed = $state(false);
   let importing = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
+  let ghostCounts = $state<Record<string, number>>({});
+  let activeGhostId = $state<string | null>(null);
+  let activeGhostParentId = $state<string | null>(null);
 
   /**
    * Split imported prose into chapters: markdown headings first,
@@ -171,6 +176,7 @@
       if (board.acts.length > 0) {
         bibleFacts = await api.bibleGetFacts(projectId);
       }
+      loadGhostCounts();
     } catch (e) {
       console.error('Failed to load novel project:', e);
     } finally {
@@ -182,6 +188,29 @@
     selectedBeat = beat;
     $currentDoc = beat.doc;
     if (!$openTabs.find((t) => t.id === beat.doc.id)) $openTabs = [beat.doc, ...$openTabs];
+  }
+
+  async function forkScene(beat: BeatNode) {
+    try {
+      const ghost = await api.ghostFork(beat.doc.id, "Fork");
+      ghostCounts[beat.doc.id] = (ghostCounts[beat.doc.id] ?? 0) + 1;
+      showToast(`Forked "${beat.doc.title}"`, "success");
+    } catch (e) {
+      showToast(`Fork failed: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  async function loadGhostCounts() {
+    if (!board) return;
+    const all = [...board.acts, ...board.sequences, ...board.scenes];
+    const counts: Record<string, number> = {};
+    for (const beat of all) {
+      try {
+        const group = await api.ghostList(beat.doc.id);
+        if (group.ghosts.length > 0) counts[beat.doc.id] = group.ghosts.length;
+      } catch {}
+    }
+    ghostCounts = counts;
   }
 
   async function addBeat(kind: 'act' | 'sequence' | 'scene', parentAct?: number | null, parentSeq?: number | null) {
@@ -546,26 +575,36 @@
               </div>
 
               {#each getScenesForSequence(act.act ?? 0, seq.sequence ?? 0) as scene}
-                <button
-                  class="scene-card"
-                  onclick={() => selectBeat(scene)}
-                  draggable="true"
-                  title="Drag to reorder scenes — Compile follows this order"
-                  ondragstart={() => { dragSceneId = scene.doc.id; }}
-                  ondragover={(e) => { if (dragSceneId) e.preventDefault(); }}
-                  ondrop={() => dropSceneOnto(scene)}
-                  ondragend={() => { dragSceneId = null; }}
-                >
-                  <div class="scene-title">{scene.doc.title}</div>
-                  {#if scene.summary}
-                    <div class="scene-summary">{scene.summary}</div>
-                  {/if}
-                  <div class="scene-meta">
-                    {#if scene.pov}<span class="meta-tag">{scene.pov}</span>{/if}
-                    {#if scene.location}<span class="meta-tag">{scene.location}</span>{/if}
-                    <span class="word-count">{scene.doc.word_count}w</span>
+                <div class="scene-card-wrapper">
+                  <button
+                    class="scene-card"
+                    onclick={() => selectBeat(scene)}
+                    draggable="true"
+                    title="Drag to reorder scenes — Compile follows this order"
+                    ondragstart={() => { dragSceneId = scene.doc.id; }}
+                    ondragover={(e) => { if (dragSceneId) e.preventDefault(); }}
+                    ondrop={() => dropSceneOnto(scene)}
+                    ondragend={() => { dragSceneId = null; }}
+                  >
+                    <div class="scene-title">{scene.doc.title}</div>
+                    {#if scene.summary}
+                      <div class="scene-summary">{scene.summary}</div>
+                    {/if}
+                    <div class="scene-meta">
+                      {#if scene.pov}<span class="meta-tag">{scene.pov}</span>{/if}
+                      {#if scene.location}<span class="meta-tag">{scene.location}</span>{/if}
+                      <span class="word-count">{scene.doc.word_count}w</span>
+                    </div>
+                  </button>
+                  <div class="scene-card-actions">
+                    {#if ghostCounts[scene.doc.id]}
+                      <GhostBadge count={ghostCounts[scene.doc.id]} />
+                    {/if}
+                    <button class="fork-btn" onclick={() => forkScene(scene)} title="Fork this scene" aria-label="Fork scene">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
+                    </button>
                   </div>
-                </button>
+                </div>
               {/each}
 
               <button class="add-beat-btn" onclick={() => addBeat('scene', act.act, seq.sequence)}>+ Scene</button>
@@ -627,15 +666,24 @@
         {#snippet bottom()}
       {#if selectedBeat}
         <div class="beat-dock">
-          <DocDetail
-            backLabel="Beat board"
-            onBack={() => { selectedBeat = null; }}
-            onDeleted={() => {
-              selectedBeat = null;
-              loadProject();
-              loadProjects();
-            }}
-          />
+          {#if activeGhostId && activeGhostParentId}
+            <GhostPanel
+              ghostId={activeGhostId}
+              originalId={activeGhostParentId}
+              onClose={() => { activeGhostId = null; activeGhostParentId = null; }}
+              onMerged={() => { loadProject(); loadGhostCounts(); }}
+            />
+          {:else}
+            <DocDetail
+              backLabel="Beat board"
+              onBack={() => { selectedBeat = null; }}
+              onDeleted={() => {
+                selectedBeat = null;
+                loadProject();
+                loadProjects();
+              }}
+            />
+          {/if}
         </div>
       {/if}
         {/snippet}
@@ -887,6 +935,45 @@
     text-align: left;
     cursor: pointer;
     color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+  }
+
+  .scene-card-wrapper {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+  }
+
+  .scene-card-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .scene-card-wrapper:hover .scene-card-actions {
+    opacity: 1;
+  }
+
+  .fork-btn {
+    background: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .fork-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .scene-title {

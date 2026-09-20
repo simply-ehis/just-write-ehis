@@ -1219,6 +1219,61 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "tts_synthesize":
       throw new Error("Read-aloud voices need the desktop app's Kokoro sidecar. Your browser can still read via its built-in speech if enabled.");
 
+    // Ghosts (scene forking) — browser preview stubs
+    case "ghost_fork": {
+      const srcDoc = store.get(String(payload.docId));
+      const label = String(payload.label ?? "Ghost");
+      const forked = store.create(
+        srcDoc.workspace,
+        srcDoc.kind,
+        `${srcDoc.title} — ${label}`,
+        srcDoc.parent_id ?? undefined,
+        srcDoc.content,
+        JSON.stringify({ ghost_parent: srcDoc.id, ghost_label: label }),
+      );
+      return docShape(forked) as T;
+    }
+    case "ghost_list": {
+      const docId = String(payload.docId);
+      const original = store.get(docId);
+      const ghosts = store.docs.filter((d) => {
+        if (!d.frontmatter_json) return false;
+        try {
+          const fm = JSON.parse(d.frontmatter_json);
+          return fm.ghost_parent === docId;
+        } catch { return false; }
+      });
+      return { original: docShape(original), ghosts: ghosts.map(docShape) } as T;
+    }
+    case "ghost_merge": {
+      const ghostDoc = store.get(String(payload.ghostId));
+      const targetId = String(payload.targetId ?? (() => {
+        const fm = ghostDoc.frontmatter_json ? JSON.parse(ghostDoc.frontmatter_json) : {};
+        return fm.ghost_parent;
+      })());
+      store.saveDoc(targetId, { content: ghostDoc.content });
+      store.deleteDoc(String(payload.ghostId));
+      return docShape(store.get(targetId)) as T;
+    }
+    case "ghost_dismiss": {
+      store.deleteDoc(String(payload.ghostId));
+      return undefined as T;
+    }
+
+    // Atlas (star-sky memory) — browser preview stub
+    case "atlas_get_stars":
+      return store.docs
+        .filter((d) => !d.locked && d.content)
+        .map((d) => ({
+          id: d.id,
+          title: d.title,
+          workspace: d.workspace,
+          word_count: d.word_count,
+          activity_score: d.activity_score ?? 0,
+          updated_at: d.updated_at,
+          embedding: [],
+        })) as T;
+
     default:
       throw new Error(`Unknown command in browser preview: ${cmd}`);
   }

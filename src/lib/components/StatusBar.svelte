@@ -3,6 +3,8 @@
   import { currentDoc, currentWorkspace } from "$lib/stores/app";
   import { saveState } from "$lib/stores/saveState";
   import Icon from "$lib/components/Icon.svelte";
+  import RhythmHeatmap from "$lib/components/RhythmHeatmap.svelte";
+  import { settings } from "$lib/stores/settings";
 
   let wordCount = $derived($currentDoc?.word_count ?? 0);
   let stats = $state<{ totalDocs: number; totalWords: number; totalBacklinks: number } | null>(null);
@@ -52,6 +54,11 @@
     <Icon name="pencil" size={12} />
     <span>{wordCount.toLocaleString()} words</span>
   </div>
+  {#if $settings.rhythmHeatmapInStatusBar && $currentDoc?.content}
+    <div class="item heatmap-item" title="Paragraph density">
+      <RhythmHeatmap content={$currentDoc.content} height={10} />
+    </div>
+  {/if}
   <div class="item save-indicator" class:saving={$saveState === "saving"}>
     <span class="save-dot" class:pulse={$saveState === "saving"}></span>
     <span>{$saveState === "saving" ? "Saving..." : "Saved"}</span>
@@ -120,6 +127,11 @@
 
   .sparkline {
     opacity: 0.85;
+    flex-shrink: 0;
+  }
+
+  .heatmap-item {
+    width: 80px;
     flex-shrink: 0;
   }
 

@@ -36,6 +36,13 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "headerImage": "installer-assets/header.bmp",
+        "sidebarImage": "installer-assets/sidebar.bmp"
+      }
+    },
     "resources": [
       "sidecars/fetch_sidecars.py",
       "sidecars/requirements.txt",

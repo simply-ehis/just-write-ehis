@@ -76,6 +76,12 @@
     "arrow-left": '<path d="M19 12H5M12 19l-7-7 7-7"/>',
     minus: '<path d="M5 12h14"/>',
     tag: '<path d="M6 3h10l4 4v10H6V3z"/><circle cx="12" cy="12" r="2"/>',
+    waveform:
+      '<path d="M2 12h2l2-4 3 8 2-6 2 4 2-2h2l2 2h3"/><circle cx="12" cy="12" r="0" />',
+    constellation:
+      '<circle cx="5" cy="5" r="1.5"/><circle cx="19" cy="7" r="1.5"/><circle cx="12" cy="12" r="1.8"/><circle cx="7" cy="19" r="1.2"/><circle cx="17" cy="17" r="1.3"/><path d="M6 6l5.5 5M13 13l5.5 3.5M12 13l-4 5.5M6.5 6l5 12.5" opacity="0.35"/>',
+    ghost:
+      '<path d="M12 3c-3.3 0-6 2.7-6 6v5l-1 2v1h16v-1l-1-2V9c0-3.3-2.7-6-6-6z"/><circle cx="9.5" cy="9" r="1"/><circle cx="14.5" cy="9" r="1"/><path d="M9 15c1 1 5 1 6 0" fill="none"/>',
   };
 
   const svg = $derived(paths[name] ?? paths.info);

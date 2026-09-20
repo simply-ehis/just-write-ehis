@@ -2779,6 +2779,153 @@ impl Database {
 
         Ok(context)
     }
+
+    // ── Ghosts (scene forking) ──────────────────────────────────
+
+    /// Fork a document: create a new doc with the same content and frontmatter,
+    /// linked via `ghost_parent` in frontmatter_json.
+    pub fn ghost_fork(&self, doc_id: &str, label: Option<&str>) -> Result<Doc, String> {
+        let original = self.get_doc(doc_id)?;
+        let fork_label = label.unwrap_or("Ghost");
+        let new_title = format!("{} — {}", original.title, fork_label);
+
+        // Build new frontmatter with ghost_parent
+        let mut fm: serde_json::Value = original
+            .frontmatter_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        fm["ghost_parent"] = serde_json::Value::String(doc_id.to_string());
+        fm["ghost_label"] = serde_json::Value::String(fork_label.to_string());
+        let fm_str = serde_json::to_string(&fm).ok();
+
+        self.create_doc(CreateDocRequest {
+            workspace: original.workspace.clone(),
+            kind: original.kind.clone(),
+            title: new_title,
+            parent_id: original.parent_id.clone(),
+            content: Some(original.content.clone()),
+            frontmatter_json: fm_str,
+        })
+    }
+
+    /// List all forks of a document (original + ghosts), grouped.
+    pub fn ghost_list(&self, doc_id: &str) -> Result<GhostGroup, String> {
+        let original = self.get_doc(doc_id)?;
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        // Find all docs whose frontmatter contains ghost_parent = doc_id
+        let mut ghosts = Vec::new();
+        let mut stmt = conn
+            .prepare("SELECT id FROM docs WHERE frontmatter_json LIKE '%\"ghost_parent\":\"%' || ?1 || '%' ESCAPE '\\'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![doc_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            if let Ok(gid) = row {
+                // Verify it's actually a ghost of this doc (not just a substring match)
+                if let Ok(ghost_doc) = self.get_doc(&gid) {
+                    if let Some(ref fm_str) = ghost_doc.frontmatter_json {
+                        if let Ok(fm) = serde_json::from_str::<serde_json::Value>(fm_str) {
+                            if fm.get("ghost_parent").and_then(|v| v.as_str()) == Some(doc_id) {
+                                ghosts.push(ghost_doc);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        drop(stmt);
+
+        Ok(GhostGroup { original, ghosts })
+    }
+
+    /// Merge a ghost into the original (or another target). Copies content, deletes ghost.
+    pub fn ghost_merge(&self, ghost_id: &str, target_id: Option<&str>) -> Result<Doc, String> {
+        let ghost = self.get_doc(ghost_id)?;
+        let target = match target_id {
+            Some(tid) => tid.to_string(),
+            None => ghost
+                .frontmatter_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                .and_then(|fm| fm.get("ghost_parent").and_then(|v| v.as_str()).map(String::from))
+                .ok_or("No ghost_parent found and no target specified".to_string())?,
+        };
+
+        // Overwrite target content with ghost content
+        self.save_doc(SaveDocRequest {
+            id: target.to_string(),
+            title: None,
+            content: Some(ghost.content.clone()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })?;
+
+        // Delete the ghost doc
+        self.delete_doc(ghost_id)?;
+
+        self.get_doc(&target)
+    }
+
+    /// Dismiss (delete) a ghost without merging.
+    pub fn ghost_dismiss(&self, ghost_id: &str) -> Result<(), String> {
+        self.delete_doc(ghost_id)
+    }
+
+    // ── Atlas (star-sky memory) ─────────────────────────────────
+
+    /// Return all docs with their embeddings and activity scores for Atlas rendering.
+    pub fn atlas_get_stars(&self) -> Result<Vec<AtlasStar>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT d.id, d.title, d.workspace, d.word_count, d.activity_score, d.updated_at,
+                        rv.embedding
+                 FROM docs d
+                 LEFT JOIN rag_chunks rc ON rc.doc_id = d.id AND rc.chunk_index = 0
+                 LEFT JOIN rag_vec rv ON rv.chunk_id = rc.id
+                 WHERE d.locked = 0 AND d.content != ''
+                 GROUP BY d.id
+                 ORDER BY d.activity_score DESC",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let stars = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let title: String = row.get(1)?;
+                let workspace: String = row.get(2)?;
+                let word_count: i64 = row.get(3)?;
+                let activity_score: f64 = row.get(4)?;
+                let updated_at: String = row.get(5)?;
+                let embedding: Vec<f32> = row
+                    .get::<_, Option<Vec<u8>>>(6)?
+                    .map(|bytes| {
+                        bytes
+                            .chunks_exact(4)
+                            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(AtlasStar {
+                    id,
+                    title,
+                    workspace,
+                    word_count,
+                    activity_score,
+                    updated_at,
+                    embedding,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(stars)
+    }
 }
 
 trait Pipe {

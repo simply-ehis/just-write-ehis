@@ -17,6 +17,7 @@
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
   import VersionHistory from "./VersionHistory.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
+  import RhythmPanel from "./RhythmPanel.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
   import MicButton from "./MicButton.svelte";
   import ReadAloudButton from "./ReadAloudButton.svelte";
@@ -42,8 +43,10 @@
   let lastPreviewTitle = $state<string | null>(null);
   let ghostDebounce: ReturnType<typeof setTimeout> | null = null;
   let showCraft = $state(false);
+  let showRhythm = $state(false);
   let dialogueTrend = $state<[string, number][]>([]);
   let sentenceTrend = $state<[string, number][]>([]);
+  let liveContent = $state("");
   let focusMode = $state(false);
   let readingMode = $state(false);
   // Typewriter + dimming parity with Write (per-doc prefs, same store).
@@ -458,6 +461,7 @@
 
   function handleContentChange(content: string) {
     if (!$currentDoc) return;
+    liveContent = content;
 
     recordSave();
     if (typewriterEnabled) {
@@ -779,7 +783,10 @@
         </div>
       {/if}
       <div class="toolbar-group" role="group" aria-label="File">
-        <button class="craft-toggle icon-btn" class:active={showCraft} onclick={() => showCraft = !showCraft} title="Craft metrics" aria-label="Toggle craft metrics">
+        <button class="icon-btn" class:active={showRhythm} onclick={() => { showRhythm = !showRhythm; if (showRhythm) showCraft = false; }} title="Rhythm" aria-label="Toggle rhythm view">
+          <Icon name="waveform" size={15} />
+        </button>
+        <button class="craft-toggle icon-btn" class:active={showCraft} onclick={() => { showCraft = !showCraft; if (showCraft) showRhythm = false; }} title="Craft metrics" aria-label="Toggle craft metrics">
           <Icon name="chart" size={15} />
         </button>
         <div class="export-wrapper">
@@ -800,6 +807,14 @@
       </div>
     </div>
   </div>
+  {#if showRhythm}
+    <RhythmPanel content={liveContent} {dialogueTrend} {sentenceTrend} onJumpToLine={(line) => {
+      if (!editorView) return;
+      const pos = editorView.state.doc.line(line + 1).from;
+      editorView.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "start" }) });
+      editorView.focus();
+    }} />
+  {/if}
   {#if showCraft}
     <div class="craft-panel">
       <div class="craft-charts">

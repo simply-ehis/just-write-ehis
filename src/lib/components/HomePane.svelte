@@ -15,6 +15,9 @@
   let suggestedDocs: Doc[] = $state([]);
   let greeting = $state("");
   let newTaskTitle = $state("");
+  let atlasStars: { id: string; title: string; workspace: string; word_count: number; activity_score: number; updated_at: string }[] = $state([]);
+  let atlasEligible = $state(false);
+  let atlasCanvas: HTMLCanvasElement | null = $state(null);
 
   function submitTask() {
     if (!newTaskTitle.trim()) return;
@@ -51,6 +54,13 @@
       pinnedDocs = pinned;
       goals = g;
       loadSuggestions(counts);
+
+      // Atlas eligibility: 20+ writing days AND 30+ docs
+      const allDocCount = counts.reduce((sum, [, c]) => sum + c, 0);
+      atlasEligible = writingDays.length >= 20 && allDocCount >= 30;
+      if (atlasEligible) {
+        atlasStars = await api.atlasGetStars().catch(() => []);
+      }
     } catch {}
   });
 
@@ -94,6 +104,91 @@
     if (idx < 0) return 0;
     return 0.45 + (idx / Math.max(1, writingDays.length)) * 0.55;
   }
+
+  function drawAtlas() {
+    const canvas = atlasCanvas;
+    if (!canvas || atlasStars.length === 0) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Simple layout: arrange stars in a spiral-like pattern based on activity_score
+    const sorted = [...atlasStars].sort((a, b) => b.activity_score - a.activity_score);
+    const cx = W / 2;
+    const cy = H / 2;
+    const positions: { x: number; y: number }[] = [];
+
+    for (let i = 0; i < sorted.length; i++) {
+      const angle = (i * 2.399) + (i * 0.618); // golden angle spiral
+      const radius = 20 + Math.sqrt(i) * 28;
+      positions.push({
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+      });
+    }
+
+    // Draw constellation lines between similar-workspace stars
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (sorted[i].workspace === sorted[j].workspace) {
+          const dx = positions[i].x - positions[j].x;
+          const dy = positions[i].y - positions[j].y;
+          if (Math.sqrt(dx * dx + dy * dy) < 80) {
+            ctx.beginPath();
+            ctx.moveTo(positions[i].x, positions[i].y);
+            ctx.lineTo(positions[j].x, positions[j].y);
+            ctx.strokeStyle = "rgba(128, 128, 128, 0.15)";
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+
+    // Draw stars
+    const maxActivity = Math.max(1, ...sorted.map((s) => s.activity_score));
+    for (let i = 0; i < sorted.length; i++) {
+      const star = sorted[i];
+      const pos = positions[i];
+      const brightness = 0.3 + (star.activity_score / maxActivity) * 0.7;
+      const size = 1.5 + (star.activity_score / maxActivity) * 2.5;
+
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200, 200, 220, ${brightness})`;
+      ctx.fill();
+
+      // Glow for high-activity stars
+      if (star.activity_score > maxActivity * 0.6) {
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size + 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(180, 180, 210, ${brightness * 0.2})`;
+        ctx.fill();
+      }
+
+      // Label for top stars
+      if (star.activity_score > maxActivity * 0.5 && sorted.length <= 30) {
+        ctx.font = "9px sans-serif";
+        ctx.fillStyle = `rgba(160, 160, 180, ${brightness * 0.8})`;
+        ctx.textAlign = "center";
+        ctx.fillText(star.title.slice(0, 18), pos.x, pos.y + size + 10);
+      }
+    }
+  }
+
+  $effect(() => {
+    if (atlasStars.length > 0 && atlasCanvas) {
+      // Set canvas size to container
+      const container = atlasCanvas.parentElement;
+      if (container) {
+        atlasCanvas.width = container.clientWidth;
+        atlasCanvas.height = container.clientHeight;
+      }
+      drawAtlas();
+    }
+  });
 
   const workspaceIcons: Record<string, string> = {
     map: "graph",
@@ -372,6 +467,16 @@
               {/if}
             </div>
           {/each}
+        </div>
+      </section>
+    {/if}
+
+    <!-- Atlas (star-sky memory) -->
+    {#if atlasEligible && atlasStars.length > 0}
+      <section class="home-section atlas-section">
+        <h2>Atlas</h2>
+        <div class="atlas-canvas-wrap">
+          <canvas bind:this={atlasCanvas} class="atlas-canvas"></canvas>
         </div>
       </section>
     {/if}
@@ -747,5 +852,23 @@
 
   .goal-deadline.overdue {
     color: var(--error);
+  }
+
+  .atlas-section {
+    min-height: 0;
+  }
+
+  .atlas-canvas-wrap {
+    width: 100%;
+    height: 320px;
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .atlas-canvas {
+    width: 100%;
+    height: 100%;
   }
 </style>

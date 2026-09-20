@@ -239,6 +239,11 @@ pub fn run() {
             commands::canvas_connect,
             commands::canvas_delete_edge,
             commands::publish_static_site,
+            commands::ghost_fork,
+            commands::ghost_list,
+            commands::ghost_merge,
+            commands::ghost_dismiss,
+            commands::atlas_get_stars,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
