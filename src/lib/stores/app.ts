@@ -29,6 +29,9 @@ export const inspectorOpen = writable<boolean>(initialPanels.inspector);
 export const showSettings = writable<boolean>(false);
 export const zenMode = writable<boolean>(false);
 
+/** Preset text for inline structurize: set by editor, consumed by AiPanel. */
+export const structurizePreset = writable<string | null>(null);
+
 // Persist chrome prefs (debounced by Svelte batching: one write per toggle).
 if (typeof localStorage !== "undefined") {
   let panelTimer: ReturnType<typeof setTimeout> | null = null;

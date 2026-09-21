@@ -6,15 +6,18 @@
     <meta name="theme-color" content="#1a1a2e" />
     <meta name="description" content="Just Write ehis — a personal writing super app." />
     <title>Just Write ehis</title>
-    <link rel="icon" type="image/svg+xml" href="logo.svg" />
-    <link rel="alternate icon" type="image/png" href="icon-192.png" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="alternate icon" type="image/x-icon" href="favicon.ico" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="service-worker" href="sw.js" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
     <script>
       try {
         var s = JSON.parse(localStorage.getItem("writing-app-settings") || "{}");
-        if (s.theme === "light") document.documentElement.dataset.theme = "light";
+        if (s.theme) document.documentElement.dataset.theme = s.theme;
       } catch (e) {}
     </script>
     <script>

@@ -2,6 +2,8 @@ use tauri::{Manager, State};
 use crate::database::Database;
 use crate::models::*;
 use crate::sidecar;
+use std::time::Duration;
+use ammonia;
 
 #[tauri::command]
 pub fn doc_create(
@@ -319,7 +321,10 @@ pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateRespons
         "stream": false,
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .map_err(|e| e.to_string())?;
     let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
         .header("Content-Type", "application/json")
         .json(&body);
@@ -364,7 +369,10 @@ pub async fn ai_generate_stream(
         "stream": true,
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
     let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
         .header("Content-Type", "application/json")
         .json(&body);
@@ -374,7 +382,14 @@ pub async fn ai_generate_stream(
     let mut resp = req_builder.send().await.map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
-        return Err(format!("AI endpoint returned {}", resp.status()));
+        let status = resp.status().as_u16();
+        let msg = match status {
+            401 | 403 => "API key rejected — check your provider settings".to_string(),
+            429 => "Rate limited — wait a moment and try again".to_string(),
+            408 => "Request timed out — the model may be overloaded".to_string(),
+            _ => format!("AI endpoint returned HTTP {}", status),
+        };
+        return Err(msg);
     }
 
     // `chunk()` needs no extra stream traits; split SSE frames manually.
@@ -446,7 +461,10 @@ Output the final transformed document. Use markdown where appropriate."#
         "stream": false,
     });
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
     let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
         .header("Content-Type", "application/json")
         .json(&body);
@@ -973,7 +991,7 @@ fn build_toc(content: &str, max_depth: usize) -> String {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&").replace('<', "<").replace('>', ">").replace('"', "\"").replace('\'', "&#039;")
+    ammonia::clean(s)
 }
 
 fn render_publish_html(

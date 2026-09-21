@@ -6,7 +6,7 @@
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
-  import { aiPanelOpen, currentDoc, currentWorkspace, inspectorOpen, openTabs } from "$lib/stores/app";
+  import { aiPanelOpen, currentDoc, currentWorkspace, inspectorOpen, openTabs, structurizePreset } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { api, type Doc } from "$lib/api";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
@@ -85,6 +85,7 @@ import VersionHistory from "./VersionHistory.svelte";
       provider: $settings.smallModelEndpoint || undefined,
       model: $settings.smallModelName || undefined,
       apiKey: $settings.apiKey || undefined,
+      useLocalLlm: $settings.llmEnabled,
     });
     if (suggestion) {
       ghostSuggestion = suggestion;
@@ -128,6 +129,7 @@ import VersionHistory from "./VersionHistory.svelte";
     { label: "Horizontal Rule", icon: "—", insert: "---\n" },
     { label: "Table", icon: "▦", insert: "| Col | Col |\n|-----|-----|\n|     |     |" },
     { label: "Wikilink", icon: "[[", insert: "[[]]" },
+    { label: "Structurize", icon: "{}", insert: "" },
   ];
 
   let slashFiltered = $derived(
@@ -136,13 +138,20 @@ import VersionHistory from "./VersionHistory.svelte";
       : slashCommands
   );
 
-  function handleSlashInsert(insert: string) {
+  function handleSlashInsert(insert: string, label?: string) {
     if (!editorView) return;
     const pos = slashLineStart;
     const line = editorView.state.doc.lineAt(pos);
     const cursorPos = editorView.state.selection.main.head;
     const filterLen = cursorPos - pos;
-    editorView.dispatch({ changes: { from: pos, to: pos + filterLen, insert } });
+    if (label === "Structurize") {
+      const { from, to } = editorView.state.selection.main;
+      const selected = editorView.state.sliceDoc(from, to);
+      structurizePreset.set(selected || null);
+      $aiPanelOpen = true;
+    } else {
+      editorView.dispatch({ changes: { from: pos, to: pos + filterLen, insert } });
+    }
     slashVisible = false;
     slashFilter = "";
     editorView.focus();
@@ -152,7 +161,7 @@ import VersionHistory from "./VersionHistory.svelte";
     if (!slashVisible) return false;
     if (e.key === "ArrowDown") { e.preventDefault(); slashSelectedIdx = (slashSelectedIdx + 1) % slashFiltered.length; return true; }
     if (e.key === "ArrowUp") { e.preventDefault(); slashSelectedIdx = (slashSelectedIdx - 1 + slashFiltered.length) % slashFiltered.length; return true; }
-    if (e.key === "Enter") { e.preventDefault(); if (slashFiltered[slashSelectedIdx]) handleSlashInsert(slashFiltered[slashSelectedIdx].insert); return true; }
+    if (e.key === "Enter") { e.preventDefault(); if (slashFiltered[slashSelectedIdx]) handleSlashInsert(slashFiltered[slashSelectedIdx].insert, slashFiltered[slashSelectedIdx].label); return true; }
     if (e.key === "Escape") { e.preventDefault(); slashVisible = false; return true; }
     return false;
   }
@@ -323,6 +332,17 @@ import VersionHistory from "./VersionHistory.svelte";
             return true;
           },
         },
+        {
+          // Ctrl+Shift+S: open AI panel in structurize mode with current selection.
+          key: "Ctrl-Shift-s",
+          run: (view) => {
+            const { from, to } = view.state.selection.main;
+            const selected = view.state.sliceDoc(from, to);
+            structurizePreset.set(selected || null);
+            $aiPanelOpen = true;
+            return true;
+          },
+        },
       ])
     );
 
@@ -475,6 +495,17 @@ import VersionHistory from "./VersionHistory.svelte";
                 hour12: false,
               });
               view.dispatch({ changes: { from: pos, insert: stamp } });
+              return true;
+            },
+          },
+          {
+            // Ctrl+Shift+S: open AI panel in structurize mode with current selection.
+            key: "Ctrl-Shift-s",
+            run: (view) => {
+              const { from, to } = view.state.selection.main;
+              const selected = view.state.sliceDoc(from, to);
+              structurizePreset.set(selected || null);
+              $aiPanelOpen = true;
               return true;
             },
           },
@@ -808,7 +839,7 @@ import VersionHistory from "./VersionHistory.svelte";
           role="option"
           aria-selected={i === slashSelectedIdx}
           onmouseenter={() => slashSelectedIdx = i}
-          onclick={() => handleSlashInsert(cmd.insert)}
+          onclick={() => handleSlashInsert(cmd.insert, cmd.label)}
         >
           <span class="slash-icon">{cmd.icon}</span>
           <span class="slash-label">{cmd.label}</span>

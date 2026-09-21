@@ -192,7 +192,7 @@
 
   // Apply the Settings → General theme to the document root.
   $effect(() => {
-    document.documentElement.dataset.theme = $settings.theme === "light" ? "light" : "dark";
+    document.documentElement.dataset.theme = $settings.theme;
   });
 
   // Per-workspace last place: remember the open doc when leaving a
@@ -490,7 +490,7 @@
   </div>
 {:else}
   <div class="empty-state">
-    <img class="boot-logo" src={$settings.theme === "light" ? "logo.svg" : "logo-light.svg"} alt="Just Write ehis" />
+    <img class="boot-logo" src="boot-logo.png" alt="Just Write ehis" />
     <div class="message">Loading...</div>
   </div>
 {/if}

@@ -415,7 +415,12 @@
         </button>
         {#if $settings.ttsEnabled}
           <ReadAloudButton
-            getText={() => readerContent}
+            getText={() => {
+              // Strip HTML tags so TTS reads clean text, not <div> tags.
+              const tmp = document.createElement("div");
+              tmp.innerHTML = readerContent;
+              return tmp.textContent || tmp.innerText || "";
+            }}
             getSelection={() => {
               const selection = window.getSelection();
               return selection && selection.rangeCount > 0 ? selection.toString() : '';

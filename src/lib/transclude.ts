@@ -12,25 +12,25 @@ interface TranscludeResult {
 }
 
 /** Simple in-memory cache for transclusions */
-const transcludeCache = new Map<string, { content: string; error: string | null; timestamp: number }>();
+const transcludeCache = new Map<string, { content: string; docId: string | null; error: string | null; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function getCacheKey(target: string): string {
   return target;
 }
 
-function getCached(target: string): { content: string; error: string | null } | null {
+function getCached(target: string): { content: string; docId: string | null; error: string | null } | null {
   const cached = transcludeCache.get(getCacheKey(target));
   if (!cached) return null;
   if (Date.now() - cached.timestamp > CACHE_TTL) {
     transcludeCache.delete(getCacheKey(target));
     return null;
   }
-  return { content: cached.content, error: cached.error };
+  return { content: cached.content, docId: cached.docId, error: cached.error };
 }
 
-function setCache(target: string, content: string, error: string | null): void {
-  transcludeCache.set(getCacheKey(target), { content, error, timestamp: Date.now() });
+function setCache(target: string, content: string, docId: string | null, error: string | null): void {
+  transcludeCache.set(getCacheKey(target), { content, docId, error, timestamp: Date.now() });
 }
 
 function parseTarget(target: string): { title: string; heading?: string; isId: boolean } {
@@ -41,13 +41,13 @@ function parseTarget(target: string): { title: string; heading?: string; isId: b
 }
 
 /** Load transclusion content for a single target */
-export async function loadTransclusion(target: string): Promise<{ content: string; error: string | null }> {
+export async function loadTransclusion(target: string): Promise<{ content: string; docId: string | null; error: string | null }> {
   const cached = getCached(target);
   if (cached) return cached;
 
   try {
     const { title, heading, isId } = parseTarget(target);
-    if (!title) return { content: "", error: "Empty transclusion target" };
+    if (!title) return { content: "", docId: null, error: "Empty transclusion target" };
 
     let doc;
     if (isId) {
@@ -60,11 +60,11 @@ export async function loadTransclusion(target: string): Promise<{ content: strin
     }
 
     if (doc.locked) {
-      return { content: "", error: "Locked document — cannot transclude" };
+      return { content: "", docId: null, error: "Locked document — cannot transclude" };
     }
 
     let text = doc.content || "";
-    setCache(target, text, null);
+    setCache(target, text, doc.id, null);
 
     // Extract heading section if specified
     if (heading) {
@@ -81,7 +81,7 @@ export async function loadTransclusion(target: string): Promise<{ content: strin
         }
       }
       if (startIdx === -1) {
-        return { content: "", error: `Heading "${heading}" not found` };
+        return { content: "", docId: doc.id, error: `Heading "${heading}" not found` };
       }
       let endIdx = lines.length;
       for (let i = startIdx + 1; i < lines.length; i++) {
@@ -92,14 +92,14 @@ export async function loadTransclusion(target: string): Promise<{ content: strin
         }
       }
       text = lines.slice(startIdx, endIdx).join("\n");
-      setCache(target, text, null);
+      setCache(target, text, doc.id, null);
     }
 
-    return { content: text, error: null };
+    return { content: text, docId: doc.id, error: null };
   } catch (e) {
     const error = e instanceof Error ? e.message : "Failed to load transclusion";
-    setCache(target, "", error);
-    return { content: "", error };
+    setCache(target, "", null, error);
+    return { content: "", docId: null, error };
   }
 }
 
@@ -107,6 +107,12 @@ export async function loadTransclusion(target: string): Promise<{ content: strin
 export async function processTransclusions(markdown: string): Promise<string> {
   const matches = [...markdown.matchAll(TRANSCLUDE_REGEX)];
   if (matches.length === 0) return markdown;
+
+  // Clear stale entries (max 5 minutes old) so edits propagate.
+  const now = Date.now();
+  for (const [key, cached] of transcludeCache) {
+    if (now - cached.timestamp > CACHE_TTL) transcludeCache.delete(key);
+  }
 
   let result = markdown;
   const processed = new Set<string>();
@@ -116,7 +122,7 @@ export async function processTransclusions(markdown: string): Promise<string> {
     if (processed.has(target)) continue;
     processed.add(target);
 
-    const { content, error } = await loadTransclusion(target);
+    const { content, docId, error } = await loadTransclusion(target);
     const placeholder = `\n\n::transclude::${target}::\n\n`;
 
     if (error) {
@@ -130,7 +136,7 @@ export async function processTransclusions(markdown: string): Promise<string> {
         <div class="transclude-content">${escapeHtml(content).replace(/\n/g, "<br>")}</div>
         <div class="transclude-footer">
           <span class="transclude-source">← [[${escapeHtml(target)}]]</span>
-          <span class="transclude-open" data-doc-id="">↗ Open</span>
+          <span class="transclude-open" data-doc-id="${docId ? escapeHtml(docId) : ''}">↗ Open</span>
         </div>
       </div>`;
       result = result.replace(match[0], placeholder + transcludeHtml + placeholder);
@@ -142,10 +148,10 @@ export async function processTransclusions(markdown: string): Promise<string> {
 
 function escapeHtml(text: string): string {
   return text
-    .replace(/&/g, "&")
-    .replace(/</g, "<")
-    .replace(/>/g, ">")
-    .replace(/"/g, '"')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
 

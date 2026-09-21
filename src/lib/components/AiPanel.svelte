@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type ChatMessage, type Conversation } from "$lib/api";
-  import { currentDoc, currentWorkspace, aiPanelOpen } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, aiPanelOpen, structurizePreset } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { writeBack } from "$lib/stores/writeBack";
   import { splitTarget } from "$lib/stores/split";
@@ -13,6 +13,15 @@
   import { testProvider } from "$lib/providerTest";
   import { markUsed } from "$lib/features";
   import Icon from "$lib/components/Icon.svelte";
+
+  function cancelGeneration() {
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+    generating = false;
+    globalLoading.set(false);
+  }
 
   /**
    * Memory + scrub gate for outgoing prompts (non-blank mode only).
@@ -64,8 +73,19 @@
     }
   }
 
-  let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat");  let blankMode = $state(false);
+let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let blankMode = $state(false);
   let minimized = $state(false);
+
+  // Initialize blankMode from settings
+  $effect(() => {
+    blankMode = $settings.blankModeDefault;
+  });
+
+  // Persist blankMode toggle to settings
+  function toggleBlank() {
+    blankMode = !blankMode;
+    settings.update(s => ({ ...s, blankModeDefault: blankMode }));
+  }
 
   $effect(() => {
     try {
@@ -79,6 +99,16 @@
       localStorage.setItem("jwe-ai-min", minimized ? "1" : "0");
     } catch {}
   });
+
+  // Inline structurize: consume preset from editor selection.
+  $effect(() => {
+    const preset = $structurizePreset;
+    if (preset !== null) {
+      structurizeInput = preset;
+      mode = "structurize";
+      structurizePreset.set(null);
+    }
+  });
   let input = $state("");
   let messages = $state<ChatMessage[]>([]);
   let conversation = $state<Conversation | null>(null);
@@ -88,6 +118,9 @@
   let hoveredMsgIdx = $state<number | null>(null);
   let sidecarRunning = $state(false);
   let sidecarConfidence = $state<number | null>(null);
+  let abortController = $state<AbortController | null>(null);
+  let lastSendTime = $state(0);
+  let lastUserMessage = $state("");
 
   let endpointUnreachable = $state(false);
 
@@ -191,10 +224,6 @@
   let structurizeAccepted = $state(false);
   const structurizePlaceholder = "Paste raw text here. Wrap instructions in {braces}. Example: {make this a table}, {expand each bullet to 2 paragraphs}, {draw a timeline}...";
 
-  function toggleBlank() {
-    blankMode = !blankMode;
-  }
-
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
@@ -234,6 +263,13 @@
 
   async function handleStructurize() {
     if (!structurizeInput.trim() || generating) return;
+
+    const now = Date.now();
+    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
+      showToast("Wait a moment before sending again", "warning");
+      return;
+    }
+
     generating = true;
     globalLoading.set(true);
     structurizeOutput = "";
@@ -254,10 +290,18 @@
       });
       structurizeOutput = response.result;
     } catch (e) {
-      structurizeOutput = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      const msg = e instanceof Error ? e.message : String(e);
+      let friendly = msg;
+      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
+      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
+      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
+      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      showToast(`Structurize failed: ${friendly}`, "error");
+      structurizeOutput = `Error: ${friendly}`;
     } finally {
       generating = false;
       globalLoading.set(false);
+      lastSendTime = Date.now();
     }
   }
 
@@ -277,6 +321,13 @@
   async function sendMessage() {
     if (!input.trim() || generating) return;
 
+    // Rate limit: minimum 3s between sends
+    const now = Date.now();
+    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
+      showToast("Wait a moment before sending again", "warning");
+      return;
+    }
+
     if (!blankMode) {
       try {
         assertAiAllowedForDoc($currentDoc);
@@ -295,6 +346,7 @@
 
     const userContent = input.trim();
     input = "";
+    lastUserMessage = userContent;
 
     if (!conversation) {
       conversation = await api.conversationCreate(
@@ -358,6 +410,7 @@
       };
       messages = [...messages, placeholder];
       let streamed = "";
+      abortController = new AbortController();
       const full = await api.aiGenerateStream(
         {
           prompt: prepared.prompt,
@@ -369,6 +422,7 @@
           api_key: $settings.apiKey || undefined,
         },
         (token) => {
+          if (abortController?.signal.aborted) return;
           streamed += token;
           messages = messages.map((m) => (m.id === placeholder.id ? { ...m, content: streamed } : m));
         }
@@ -382,21 +436,35 @@
         api.memoryLearn(`User: ${userContent}\nAssistant: ${full.slice(0, 1000)}`).catch(() => {});
       }
     } catch (e) {
-      console.error("AI generation failed:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      let friendly = msg;
+      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
+      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
+      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
+      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      showToast(`AI generation failed: ${friendly}`, "error");
       const errorMsg = await api.conversationAddMessage(
         conversation.id,
         "assistant",
-        `Error: ${e instanceof Error ? e.message : String(e)}`
+        `Error: ${friendly}`
       );
       messages = [...messages.filter((m) => !m.id.startsWith("stream-")), errorMsg];
     } finally {
+      abortController = null;
       generating = false;
       globalLoading.set(false);
+      lastSendTime = Date.now();
     }
   }
 
   async function handleComposerGenerate() {
     if (!composerPrompt.trim() || generating) return;
+
+    const now = Date.now();
+    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
+      showToast("Wait a moment before sending again", "warning");
+      return;
+    }
 
     try {
       assertAiAllowedForDoc($currentDoc);
@@ -408,6 +476,7 @@
     generating = true;
     globalLoading.set(true);
     composerOutput = "";
+    abortController = new AbortController();
     try {
       const prepared = await preparePrompt(
         composerPrompt,
@@ -424,14 +493,24 @@
           api_key: $settings.apiKey || undefined,
         },
         (token) => {
+          if (abortController?.signal.aborted) return;
           composerOutput += token;
         }
       );
     } catch (e) {
-      composerOutput = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      const msg = e instanceof Error ? e.message : String(e);
+      let friendly = msg;
+      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
+      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
+      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
+      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      showToast(`Composer failed: ${friendly}`, "error");
+      composerOutput = `Error: ${friendly}`;
     } finally {
+      abortController = null;
       generating = false;
       globalLoading.set(false);
+      lastSendTime = Date.now();
     }
   }
 
@@ -450,6 +529,13 @@
 
   function handleCopy(content: string) {
     writeBack.copy(content);
+  }
+
+  function retryLastMessage() {
+    if (!lastUserMessage || generating) return;
+    input = lastUserMessage;
+    lastUserMessage = "";
+    sendMessage();
   }
 </script>
 
@@ -649,6 +735,11 @@
           >
             <div class="role">{msg.role === "user" ? "You" : "AI"}</div>
             <div class="content">{msg.content}</div>
+            {#if msg.content.startsWith("Error:")}
+              <button class="retry-btn" onclick={retryLastMessage} disabled={generating} aria-label="Retry last message">
+                <Icon name="refresh" size={12} /> Retry
+              </button>
+            {/if}
             {#if msg.role === "assistant" && hoveredMsgIdx === idx}
               <div class="writeback-bar">
                 <button class="icon-btn" onclick={() => handleWriteBack("insert", msg.content)} title="Insert at cursor (Ctrl+Enter)" aria-label="Insert at cursor">
@@ -671,6 +762,9 @@
           <div class="message generating">
             <div class="role">AI</div>
             <div class="content">Thinking...</div>
+            <button class="icon-btn cancel-btn" onclick={cancelGeneration} title="Cancel generation" aria-label="Cancel generation">
+              <Icon name="x" size={14} />
+            </button>
           </div>
         {/if}
       {/if}
@@ -935,7 +1029,35 @@
   .message.generating {
     opacity: 0.7;
     animation: pulse 1.5s infinite;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
+
+  .cancel-btn {
+    opacity: 0.5;
+    flex-shrink: 0;
+  }
+  .cancel-btn:hover {
+    opacity: 1;
+    color: #ef4444;
+  }
+
+  .retry-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .retry-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+  .retry-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   @keyframes pulse {
     0%, 100% { opacity: 0.7; }

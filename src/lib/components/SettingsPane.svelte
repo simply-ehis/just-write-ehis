@@ -374,6 +374,7 @@
           <select id="setting-theme" bind:value={$settings.theme}>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
+            <option value="brutalist">Brutalist</option>
           </select>
         </div>
         <div class="setting-row">

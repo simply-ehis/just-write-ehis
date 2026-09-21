@@ -40,7 +40,7 @@
   <div class="onboarding-card">
     {#if step === 0}
       <div class="step">
-        <img class="welcome-logo" src={$settings.theme === "light" ? "logo.svg" : "logo-light.svg"} alt="Just Write ehis logo" />
+        <img class="welcome-logo" src="boot-logo.png" alt="Just Write ehis logo" />
         <h1>Welcome to Just Write ehis</h1>
         <p class="step-desc">A personal writing super app. Let's get you set up.</p>
         <div class="step-actions">

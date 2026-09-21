@@ -7,7 +7,7 @@
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
-  import { currentDoc, aiPanelOpen, currentWorkspace, inspectorOpen } from "$lib/stores/app";
+  import { currentDoc, aiPanelOpen, currentWorkspace, inspectorOpen, structurizePreset } from "$lib/stores/app";
   import { api, type Doc } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
@@ -88,6 +88,14 @@
   let previewDocId = $state("");
   let previewDocTitle = $state("");
 
+  function triggerStructurize() {
+    if (!editorView) return;
+    const { from, to } = editorView.state.selection.main;
+    const selected = editorView.state.sliceDoc(from, to);
+    structurizePreset.set(selected || null);
+    $aiPanelOpen = true;
+  }
+
   const slashCommands = [
     { label: "Heading 1", icon: "H1", insert: "# " },
     { label: "Heading 2", icon: "H2", insert: "## " },
@@ -100,6 +108,7 @@
     { label: "Horizontal Rule", icon: "—", insert: "---\n" },
     { label: "Table", icon: "▦", insert: "| Col | Col |\n|-----|-----|\n|     |     |" },
     { label: "Wikilink", icon: "[[", insert: "[[]]" },
+    { label: "Structurize", icon: "{}", insert: "" },
   ];
 
   let slashFiltered = $derived(
@@ -108,7 +117,7 @@
       : slashCommands
   );
 
-  function handleSlashInsert(insert: string) {
+  function handleSlashInsert(insert: string, label?: string) {
     if (!editorView) return;
     const view = editorView;
     const pos = slashLineStart;
@@ -116,9 +125,17 @@
     const line = view.state.doc.lineAt(pos);
     const cursorPos = view.state.selection.main.head;
     const filterLen = cursorPos - pos;
-    view.dispatch({
-      changes: { from: pos, to: pos + filterLen, insert },
-    });
+    if (label === "Structurize") {
+      // Special: open AI panel in structurize mode with selection
+      const { from, to } = view.state.selection.main;
+      const selected = view.state.sliceDoc(from, to);
+      structurizePreset.set(selected || null);
+      $aiPanelOpen = true;
+    } else {
+      view.dispatch({
+        changes: { from: pos, to: pos + filterLen, insert },
+      });
+    }
     slashVisible = false;
     slashFilter = "";
     view.focus();
@@ -139,7 +156,7 @@
     if (e.key === "Enter") {
       e.preventDefault();
       if (slashFiltered[slashSelectedIdx]) {
-        handleSlashInsert(slashFiltered[slashSelectedIdx].insert);
+        handleSlashInsert(slashFiltered[slashSelectedIdx].insert, slashFiltered[slashSelectedIdx].label);
       }
       return true;
     }
@@ -402,6 +419,17 @@
               return true;
             },
           },
+          {
+            // Ctrl+Shift+S: open AI panel in structurize mode with current selection.
+            key: "Ctrl-Shift-s",
+            run: (view) => {
+              const { from, to } = view.state.selection.main;
+              const selected = view.state.sliceDoc(from, to);
+              structurizePreset.set(selected || null);
+              $aiPanelOpen = true;
+              return true;
+            },
+          },
         ]),
         markdown(),
         darkTheme,
@@ -520,6 +548,7 @@
       provider: $settings.smallModelEndpoint || undefined,
       model: $settings.smallModelName || undefined,
       apiKey: $settings.apiKey || undefined,
+      useLocalLlm: $settings.llmEnabled,
     });
     if (suggestion) {
       ghostSuggestion = suggestion;
@@ -856,7 +885,7 @@
           role="option"
           aria-selected={i === slashSelectedIdx}
           onmouseenter={() => slashSelectedIdx = i}
-          onclick={() => handleSlashInsert(cmd.insert)}
+          onclick={() => handleSlashInsert(cmd.insert, cmd.label)}
         >
           <span class="slash-icon">{cmd.icon}</span>
           <span class="slash-label">{cmd.label}</span>

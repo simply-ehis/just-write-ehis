@@ -4,6 +4,18 @@ A personal super app for **writing and everything around writing** — docs, fic
 
 > Spec: the canonical `canonical-spec-v1.11.md` (Amendments 1–11 + deltas in `docs/SPEC-STATUS.md`). Deviations need a spec amendment, not a chat message.
 
+## Recent Production Readiness Additions (v0.2.1)
+
+- **AI Generation Controls** — Cancel button for in-flight generations, 3-second configurable cooldown between sends (`aiRateLimitCooldown` setting), request timeouts (90s chat / 120s stream / 180s structurize).
+- **Error Handling Polish** — Friendly error messages (401→API key, 429→rate limited, 408→timeout, network→can't reach server), retry button after failed generation, toast notifications for AI failures.
+- **Toast System** — Click-to-dismiss, explicit close button, max 3 visible (queues rest), error toasts persist until dismissed.
+- **Sidecar Lifecycle** — `is_running()` now detects crashed processes (non-zero exit codes), proper crash logging for STT/TTS/LLM sidecars.
+- **XSS Fix** — HTML sanitization via `ammonia` crate for published output (replaced incomplete custom escape).
+- **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
+- **Settings** — `aiRateLimitCooldown` (ms, default 3000), `blankModeDefault` now initializes AI panel state and persists toggle.
+- **Default STT Model** — Moonshine-base (GGUF) now the default (`sttModel: "moonshine-base"`).
+- **Brutalist Theme** — Third theme option alongside Dark/Light: zero border-radius, thick borders, hard offset shadows, Archivo Black headers, Space Mono body.
+
 ## Stack
 
 | Layer | Choice |

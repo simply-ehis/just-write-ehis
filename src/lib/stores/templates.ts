@@ -188,12 +188,12 @@ const builtinTemplates: Template[] = [
 ];
 
 const builtinSnippets: Snippet[] = [
-  { id: "sig", trigger: ";;sig", expansion: "\n---\n{{author}}\n{{date}}", description: "Signature with date", workspace: "global", createdAt: Date.now() },
+  { id: "sig", trigger: ";;sig", expansion: "\n---\n{{date}}", description: "Signature with date", workspace: "global", createdAt: Date.now() },
   { id: "todo", trigger: ";;todo", expansion: "- [ ] ", description: "Checkbox", workspace: "global", createdAt: Date.now() },
   { id: "date", trigger: ";;date", expansion: "{{date}}", description: "Current date", workspace: "global", createdAt: Date.now() },
   { id: "time", trigger: ";;time", expansion: "{{time}}", description: "Current time", workspace: "global", createdAt: Date.now() },
-  { id: "link", trigger: ";;link", expansion: "[[{{title}}]]", description: "Wikilink", workspace: "global", createdAt: Date.now() },
-  { id: "tag", trigger: ";;tag", expansion: "#{{tag}}", description: "Hashtag", workspace: "global", createdAt: Date.now() },
+  { id: "link", trigger: ";;link", expansion: "[[]]", description: "Wikilink", workspace: "global", createdAt: Date.now() },
+  { id: "tag", trigger: ";;tag", expansion: "#", description: "Hashtag", workspace: "global", createdAt: Date.now() },
 ];
 
 const TEMPLATES_KEY = "jw-templates";

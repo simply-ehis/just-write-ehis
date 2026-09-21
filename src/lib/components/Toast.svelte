@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { toasts } from "$lib/stores/notifications";
+  import { toasts, dismissToast } from "$lib/stores/notifications";
 
   function iconFor(kind: string): string {
     switch (kind) {
@@ -13,10 +13,11 @@
 
 <div class="toast-stack">
   {#each $toasts as toast (toast.id)}
-    <div class="toast toast-{toast.kind}">
+    <button class="toast toast-{toast.kind}" onclick={() => dismissToast(toast.id)} aria-label="Dismiss notification">
       <span class="toast-icon">{iconFor(toast.kind)}</span>
       <span class="toast-msg">{toast.message}</span>
-    </div>
+      <span class="toast-close" aria-hidden="true">&times;</span>
+    </button>
   {/each}
 </div>
 
@@ -45,7 +46,12 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     pointer-events: auto;
     animation: slideIn 0.2s ease-out;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
   }
+
+  .toast:hover { opacity: 0.85; }
 
   .toast-success { border-left: 3px solid var(--success); }
   .toast-error { border-left: 3px solid var(--error); }
@@ -56,6 +62,15 @@
     font-size: 14px;
     flex-shrink: 0;
   }
+
+  .toast-msg { flex: 1; }
+
+  .toast-close {
+    font-size: 16px;
+    opacity: 0.4;
+    flex-shrink: 0;
+  }
+  .toast:hover .toast-close { opacity: 1; }
 
   .toast-success .toast-icon { color: var(--success); }
   .toast-error .toast-icon { color: var(--error); }

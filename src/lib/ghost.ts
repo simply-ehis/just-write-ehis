@@ -4,6 +4,9 @@
  * Gating (enabled flag, lock, workspace privacy) stays with the caller.
  */
 import { api } from "$lib/api";
+import { ensureLlm } from "$lib/stores/audio";
+import { settings } from "$lib/stores/settings";
+import { get } from "svelte/store";
 
 export interface GhostConfig {
   workspace?: string;
@@ -11,6 +14,7 @@ export interface GhostConfig {
   model?: string;
   maxTokens?: number;
   apiKey?: string;
+  useLocalLlm?: boolean;
 }
 
 /** Last substantial sentence of the recent text, or "" when unusable. */
@@ -27,6 +31,20 @@ export async function requestGhostContinuation(
   config: GhostConfig = {}
 ): Promise<string | null> {
   try {
+    // If useLocalLlm is requested and enabled in settings, ensure LLM is running
+    if (config.useLocalLlm && get(settings).llmEnabled) {
+      const ok = await ensureLlm();
+      if (ok) {
+        const text = await api.llmCompletion(
+          `Continue this text naturally. Do not repeat what came before. Write only the continuation, no quotes or explanation:\n\n${lastSentence}`,
+          config.maxTokens ?? 100,
+          0.7
+        );
+        return text.trim() || null;
+      }
+      // Fall through to external API if local LLM fails
+    }
+
     const response = await api.aiGenerate({
       prompt: `Continue this text naturally. Do not repeat what came before. Write only the continuation, no quotes or explanation:\n\n${lastSentence}`,
       system_prompt:

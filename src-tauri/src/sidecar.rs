@@ -68,7 +68,21 @@ impl SidecarManager {
     }
 
     pub fn is_running(&self) -> bool {
-        self.process.lock().map(|p| p.is_some()).unwrap_or(false)
+        self.process.lock().map(|mut p| {
+            match *p {
+                Some(ref mut child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            eprintln!("[sidecar] SidecarManager process exited with error: {:?}", status.code());
+                        }
+                        false
+                    }
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+                None => false,
+            }
+        }).unwrap_or(false)
     }
 
     pub fn set_endpoint(&self, endpoint: &str) -> Result<(), String> {
@@ -135,7 +149,12 @@ impl SttManager {
     }
 
     pub fn is_running(&self) -> bool {
-        self.process.lock().map(|p| p.is_some()).unwrap_or(false)
+        self.process.lock().map(|mut p| {
+            match *p {
+                Some(ref mut child) => child.try_wait().ok().flatten().is_none(),
+                None => false,
+            }
+        }).unwrap_or(false)
     }
 
     pub fn port(&self) -> u16 { self.port }
@@ -209,7 +228,6 @@ pub struct TtsSynthResponse {
     pub format: Option<String>,
     pub error: Option<String>,
 }
-
 impl TtsManager {
     pub fn new(port: u16) -> Self {
         Self {
@@ -223,6 +241,7 @@ impl TtsManager {
         if proc.is_some() { return Ok(()); }
 
         let script = std::path::PathBuf::from(sidecars_dir).join("tts_server.py");
+
         let mut cmd = Command::new(python_path);
         cmd.arg(script.to_string_lossy().to_string())
             .arg(self.port.to_string());
@@ -248,7 +267,21 @@ impl TtsManager {
     }
 
     pub fn is_running(&self) -> bool {
-        self.process.lock().map(|p| p.is_some()).unwrap_or(false)
+        self.process.lock().map(|mut p| {
+            match *p {
+                Some(ref mut child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            eprintln!("[tts] Process exited with error: {:?}", status.code());
+                        }
+                        false
+                    }
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+                None => false,
+            }
+        }).unwrap_or(false)
     }
 
     pub fn port(&self) -> u16 { self.port }
@@ -460,7 +493,21 @@ impl LlmManager {
     }
 
     pub fn is_running(&self) -> bool {
-        self.process.lock().map(|p| p.is_some()).unwrap_or(false)
+        self.process.lock().map(|mut p| {
+            match *p {
+                Some(ref mut child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            eprintln!("[llm] Process exited with error: {:?}", status.code());
+                        }
+                        false
+                    }
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+                None => false,
+            }
+        }).unwrap_or(false)
     }
 
     pub fn port(&self) -> u16 { self.port }

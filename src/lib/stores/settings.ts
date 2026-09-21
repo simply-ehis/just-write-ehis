@@ -26,7 +26,7 @@ export interface SavedView {
 }
 
 export interface AppSettings {
-  theme: "dark" | "light";
+  theme: "dark" | "light" | "brutalist";
   iconSet: "phosphor" | "tabler";
   streakGoal: number;
   /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */
@@ -50,6 +50,8 @@ export interface AppSettings {
   smallModelName: string;
   mainModelEndpoint: string;
   mainModelName: string;
+  /** Minimum milliseconds between AI sends (0 = no limit). */
+  aiRateLimitCooldown: number;
   apiKey: string;
   /** Working dir of the small-model harness server (sidecar toggle needs it). */
   sidecarHarnessDir: string;
@@ -135,6 +137,7 @@ const defaultSettings: AppSettings = {
   smallModelName: "lfm2.5-350m",
   mainModelEndpoint: "http://localhost:11434/v1",
   mainModelName: "llama3.2",
+  aiRateLimitCooldown: 3000,
   apiKey: "",
   sidecarHarnessDir: "",
   blankModeDefault: false,
@@ -187,7 +190,7 @@ const defaultSettings: AppSettings = {
   autoCheckUpdates: true,
 
   sttEnabled: true,
-  sttModel: "",
+  sttModel: "moonshine-base",
   ttsModel: "",
   ttsEnabled: true,
   ttsVoice: "af_heart",

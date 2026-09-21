@@ -215,7 +215,7 @@ async function modelWiring() {
   check("provider test buttons exist", settings.includes("testSlot") && settings.includes("Test Main Slot"));
   check("voice model fields exist", settings.includes("sttModel") && settings.includes("ttsModel"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
-  check("voice model defaults set", stores.includes('sttModel: ""') && stores.includes('ttsModel: ""'));
+  check("voice model defaults set", stores.includes('sttModel: "moonshine-base"') && stores.includes('ttsModel: ""'));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust passes model to sidecars", commands.includes("model: Option<String>"));
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");

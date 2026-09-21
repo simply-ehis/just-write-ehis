@@ -129,6 +129,73 @@
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
+:root[data-theme="brutalist"] {
+  /* brutalist — same palette as dark, structural overhaul */
+  --bg: #1B1A15;
+  --surface: #221F19;
+  --surface-2: #2A2721;
+  --ink: #ECE7D8;
+  --ink-muted: #9C9686;
+  --border: #332F26;
+  --accent: #8FC7A9;
+  --accent-soft: #263229;
+  --accent-ink: #16211B;
+
+  color-scheme: dark;
+
+  --bg-primary: var(--bg);
+  --bg-secondary: var(--surface);
+  --bg-tertiary: var(--surface-2);
+  --bg-surface: var(--surface);
+  --bg-hover: var(--surface-2);
+  --bg-active: var(--accent-soft);
+
+  --surface-base: var(--bg);
+  --surface-raised: var(--surface);
+  --surface-overlay: var(--surface-2);
+  --surface-pressed: var(--accent-soft);
+  --surface-hover: var(--surface-2);
+
+  --text-primary: var(--ink);
+  --text: var(--ink);
+  --text-secondary: var(--ink-muted);
+  --text-muted: var(--ink-muted);
+  --text-on-accent: var(--accent-ink);
+
+  --border-strong: #4A4436;
+  --border-subtle: #29251E;
+
+  --accent-hover: #A5D6BC;
+  --accent-primary: var(--accent);
+  --accent-write: var(--accent);
+  --accent-green: var(--accent);
+  --accent-semantic-green: var(--accent);
+  --accent-semantic-purple: #A79BC9;
+  --accent-semantic-red: #E08A7A;
+  --success: var(--accent);
+  --warning: #D9A441;
+  --error: #E08A7A;
+
+  --ws-logs: #D9A441;
+  --ws-write: #9C9686;
+  --ws-map: #8FC7A9;
+  --ws-canvas: #E09A5A;
+  --ws-novel: #A79BC9;
+  --ws-script: #E08A7A;
+  --ws-projects: #9AA1AD;
+  --ws-reader: #7FBF9A;
+  --ws-home: #8FC7A9;
+  --ws-inbox: #D9A35A;
+  --ws-files: #A39E93;
+  --ws-properties: #93A985;
+
+  /* Brutalist structural tokens */
+  --brutalist-shadow: 4px 4px 0 var(--ink);
+  --brutalist-shadow-lg: 6px 6px 0 var(--ink);
+  --brutalist-border: 3px solid var(--ink);
+  --brutalist-radius: 0px;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     /* dark — ink well (system fallback before Settings loads) */
@@ -945,4 +1012,225 @@ input:focus, textarea:focus, select:focus {
   .bulk-bar {
     font-size: 12px;
   }
+}
+
+/* ============================================
+   BRUTALIST THEME — structural overrides
+   Same colors, different bones.
+   ============================================ */
+
+[data-theme="brutalist"] body,
+[data-theme="brutalist"] #app {
+  font-family: "Space Mono", var(--font-mono);
+}
+
+/* Zero border-radius everywhere */
+[data-theme="brutalist"] * {
+  border-radius: 0 !important;
+}
+
+/* Thick borders on panels and dividers */
+[data-theme="brutalist"] .sidebar {
+  border-right: 3px solid var(--ink);
+}
+
+[data-theme="brutalist"] .ai-panel,
+[data-theme="brutalist"] .inspector-panel {
+  border-left: 3px solid var(--ink);
+}
+
+[data-theme="brutalist"] .tab-bar {
+  border-bottom: 3px solid var(--ink);
+}
+
+[data-theme="brutalist"] .breadcrumb-bar {
+  border-bottom: 3px solid var(--ink);
+}
+
+[data-theme="brutalist"] .status-bar {
+  border-top: 3px solid var(--ink);
+}
+
+[data-theme="brutalist"] .sidebar-footer {
+  border-top: 3px solid var(--ink);
+}
+
+/* Workspace top bars — thicker */
+[data-theme="brutalist"] .content-pane[data-workspace] {
+  border-top-width: 3px;
+}
+
+/* Tabs — thick borders, hard shadows */
+[data-theme="brutalist"] .tab-bar .tab {
+  border: 2px solid transparent;
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+[data-theme="brutalist"] .tab-bar .tab.active {
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+[data-theme="brutalist"] .tab-bar .tab:hover {
+  border-color: var(--border-strong);
+}
+
+/* Nav items — thick, uppercase, monospace */
+[data-theme="brutalist"] .workspace-nav .nav-item {
+  border: 2px solid transparent;
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 0 !important;
+}
+
+[data-theme="brutalist"] .workspace-nav .nav-item:hover {
+  border-color: var(--border-strong);
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: translate(-1px, -1px);
+}
+
+[data-theme="brutalist"] .workspace-nav .nav-item.active {
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  transform: translate(-2px, -2px);
+}
+
+/* Buttons — hard shadows, hover shift */
+[data-theme="brutalist"] .btn-primary {
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+[data-theme="brutalist"] .btn-primary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+[data-theme="brutalist"] .btn-primary:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+[data-theme="brutalist"] .btn-secondary {
+  border: 3px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink);
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+[data-theme="brutalist"] .btn-secondary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+[data-theme="brutalist"] .btn-secondary:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+/* Icon buttons — hard shadows */
+[data-theme="brutalist"] .icon-btn {
+  border: 2px solid transparent;
+}
+
+[data-theme="brutalist"] .icon-btn:hover {
+  border-color: var(--border-strong);
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: translate(-1px, -1px);
+}
+
+[data-theme="brutalist"] .icon-btn.active {
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  transform: translate(-2px, -2px);
+}
+
+/* Inputs — thick borders, no radius */
+[data-theme="brutalist"] input,
+[data-theme="brutalist"] textarea,
+[data-theme="brutalist"] select {
+  border: 3px solid var(--ink);
+  background: var(--bg);
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 12px;
+}
+
+[data-theme="brutalist"] input:focus,
+[data-theme="brutalist"] textarea:focus,
+[data-theme="brutalist"] select:focus {
+  box-shadow: 3px 3px 0 var(--accent);
+  border-color: var(--accent);
+}
+
+/* Headings — Archivo Black, uppercase, tight */
+[data-theme="brutalist"] h1,
+[data-theme="brutalist"] h2,
+[data-theme="brutalist"] h3,
+[data-theme="brutalist"] h4 {
+  font-family: "Archivo Black", var(--font-heading);
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 0.92;
+}
+
+[data-theme="brutalist"] h1 { font-size: clamp(28px, 5vw, 48px); }
+[data-theme="brutalist"] h2 { font-size: clamp(20px, 3vw, 32px); }
+[data-theme="brutalist"] h3 { font-size: clamp(16px, 2vw, 22px); }
+
+/* Cards / panels — visible compartmentalization */
+[data-theme="brutalist"] .beat-dock,
+[data-theme="brutalist"] .inbox-dock,
+[data-theme="brutalist"] .project-dock {
+  border: 3px solid var(--ink);
+}
+
+/* Scrollbar — brutalist chunky */
+[data-theme="brutalist"] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  border: 2px solid var(--ink);
+}
+
+/* Selection — bold accent */
+[data-theme="brutalist"] ::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Focus ring — thick, offset */
+[data-theme="brutalist"] button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Settings panel — brutalist grid lines */
+[data-theme="brutalist"] .settings-nav .nav-item {
+  border: 2px solid transparent;
+  font-family: "Space Mono", var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+[data-theme="brutalist"] .settings-nav .nav-item:hover {
+  border-color: var(--border-strong);
+}
+
+[data-theme="brutalist"] .settings-nav .nav-item.active {
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
 }

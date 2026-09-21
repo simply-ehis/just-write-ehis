@@ -46,7 +46,7 @@ async function aiChatCompletions(provider: string | undefined, model: string | u
   return text;
 }
 
-/** Deterministic local structurize: headings from {directives}, content preserved. */
+/** Deterministic local structurize: best-effort formatting without an LLM. */
 function localStructurize(text: string): string {
   const directiveRe = /\{([^}]+)\}/g;
   const directives: string[] = [];
@@ -56,13 +56,45 @@ function localStructurize(text: string): string {
   if (directives.length === 0) {
     return ["# Structured Draft", "", ...body].join("\n");
   }
-  const lines: string[] = ["# Structured Draft", ""];
+  const lines: string[] = [];
   let bi = 0;
   for (const d of directives) {
+    const dl = d.toLowerCase();
     lines.push(`## ${d.charAt(0).toUpperCase()}${d.slice(1)}`, "");
-    // Deal one content chunk per directive so nothing is silently dropped.
+    // Best-effort: detect common directive types and format accordingly.
+    if (dl.includes("table")) {
+      // Try to render body lines as a markdown table.
+      const rows = body.slice(bi, bi + Math.max(1, Math.ceil(body.length / directives.length)));
+      if (rows.length > 0) {
+        const cols = rows[0].split(/\t|,\s*/).length;
+        const header = rows[0].split(/\t|,\s*/).map((c: string) => c.trim());
+        lines.push("| " + header.join(" | ") + " |");
+        lines.push("| " + header.map(() => "---").join(" | ") + " |");
+        for (const row of rows.slice(1)) {
+          const cells = row.split(/\t|,\s*/).map((c: string) => c.trim());
+          while (cells.length < cols) cells.push("");
+          lines.push("| " + cells.join(" | ") + " |");
+        }
+        bi += rows.length;
+        lines.push("");
+        continue;
+      }
+    } else if (dl.includes("list") || dl.includes("bullet")) {
+      const rows = body.slice(bi, bi + Math.max(1, Math.ceil(body.length / directives.length)));
+      for (const row of rows) lines.push(`- ${row}`);
+      bi += rows.length;
+      lines.push("");
+      continue;
+    } else if (dl.includes("number")) {
+      const rows = body.slice(bi, bi + Math.max(1, Math.ceil(body.length / directives.length)));
+      rows.forEach((row: string, i: number) => lines.push(`${i + 1}. ${row}`));
+      bi += rows.length;
+      lines.push("");
+      continue;
+    }
+    // Fallback: just dump the content chunk.
+    const take = Math.max(1, Math.ceil(body.length / directives.length));
     if (bi < body.length) {
-      const take = Math.max(1, Math.ceil(body.length / directives.length));
       lines.push(...body.slice(bi, bi + take), "");
       bi += take;
     }

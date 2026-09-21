@@ -13,8 +13,8 @@
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
   import Icon from "$lib/components/Icon.svelte";
 
-  // Black master artwork on light theme, white variant on dark.
-  let markSrc = $derived($settings.theme === "light" ? "logo.svg" : "logo-light.svg");
+  // New logo mark — same for all themes.
+  let markSrc = "mark.png";
 
   const wsIcons: Record<string, string> = {
     home: "home",
