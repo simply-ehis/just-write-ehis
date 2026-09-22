@@ -13,25 +13,35 @@
 
   let pin = $state("");
   let error = $state("");
+  let busy = $state(false);
   let inputEl = $state<HTMLInputElement | null>(null);
 
   $effect(() => {
+    // Depend on doc.id: switching locked docs resets stale PIN/error.
+    void doc.id;
     pin = "";
     error = "";
+    busy = false;
     setTimeout(() => inputEl?.focus(), 50);
   });
 
   async function unlock() {
-    if (!(await hasPin())) {
-      error = "No PIN set. Set one in Settings → Privacy & Security.";
-      return;
-    }
-    if (await verifyPin(pin)) {
-      markUnlocked(doc.id);
-      showToast(`Unlocked "${doc.title}" for this session`, "success");
-    } else {
-      error = "Wrong PIN. Try again.";
-      pin = "";
+    if (busy) return;
+    busy = true;
+    try {
+      if (!(await hasPin())) {
+        error = "No PIN set. Set one in Settings → Privacy & Security.";
+        return;
+      }
+      if (await verifyPin(pin)) {
+        markUnlocked(doc.id);
+        showToast(`Unlocked "${doc.title}" for this session`, "success");
+      } else {
+        error = "Wrong PIN. Try again.";
+        pin = "";
+      }
+    } finally {
+      busy = false;
     }
   }
 </script>
@@ -48,9 +58,10 @@
       bind:value={pin}
       placeholder="Enter PIN"
       aria-label="Document PIN"
+      disabled={busy}
       onkeydown={(e) => { if (e.key === "Enter") unlock(); }}
     />
-    <button class="unlock-btn" onclick={unlock}>Unlock</button>
+    <button class="unlock-btn" onclick={unlock} disabled={busy}>{busy ? "…" : "Unlock"}</button>
   </div>
   {#if error}
     <p class="lock-error">{error}</p>

@@ -28,19 +28,32 @@ export function markLocked(id: string): void {
   });
 }
 
+/**
+ * Never hang the UI on the keychain: after 5s proceed with whatever is
+ * in memory. Fails closed — an unhydrated PIN reads as "no PIN".
+ */
+function readySoon(): Promise<void> {
+  return Promise.race([
+    secretsReady,
+    new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+  ]);
+}
+
 export async function hasPin(): Promise<boolean> {
-  await secretsReady;
+  await readySoon();
   return get(settings).appLockPin.trim().length > 0;
 }
 
 export async function verifyPin(pin: string): Promise<boolean> {
-  await secretsReady;
-  const expected = get(settings).appLockPin;
-  return expected.trim().length > 0 && pin === expected;
+  await readySoon();
+  const expected = get(settings).appLockPin.trim();
+  return expected.length > 0 && pin.trim() === expected;
 }
 
-/** Locked docs never reach any model — not even the current one. */
+/** Locked docs never reach any model — not even the current one.
+ * No-op while the Document Locking switch is off in Settings. */
 export function assertAiAllowedForDoc(doc: Doc | null | undefined): void {
+  if (!get(settings).lockEnabled) return;
   if (doc?.locked && !isUnlocked(doc.id)) {
     throw new Error(`"${doc.title}" is locked and excluded from AI. Unlock it first.`);
   }

@@ -4,6 +4,7 @@
   import { currentDoc, openTabs } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { fetchPlaceStamp } from "$lib/stamp";
+  import { showToast } from "$lib/stores/notifications";
   import MicButton from "$lib/components/MicButton.svelte";
   import EditorPane from "$lib/components/EditorPane.svelte";
   import DeleteButton from "$lib/components/DeleteButton.svelte";
@@ -18,12 +19,27 @@
   let navCollapsed = $state(false);
   let touchedCollapsed = $state(false);
 
+  /** The day list + calendar dots. Reloaded after every mutation so a
+   * newly created day appears immediately instead of after a restart. */
+  async function refreshEntries() {
+    try {
+      logEntries = await api.logListEntries(60);
+    } catch (e) {
+      console.error("Failed to list log entries:", e);
+      showToast("Couldn't load past logs — check the vault backend", "error");
+    }
+  }
+
   /** Docs touched today (derived, never stored) for the daily-note footer. */
   async function loadTouchedToday() {
     try {
       const recent = await api.dashboardRecentDocs(50);
-      const prefix = new Date().toISOString().slice(0, 10);
-      touchedToday = recent.filter(([, , updatedAt]) => updatedAt.slice(0, 10) >= prefix);
+      // Local date, not UTC: toISOString is a day off near midnight.
+      const prefix = formatDate(new Date());
+      touchedToday = recent.filter(([, , updatedAt]) => {
+        const day = updatedAt.slice(0, 10);
+        return day >= prefix && day <= formatDate(new Date(Date.now() + 86400000));
+      });
     } catch {
       touchedToday = [];
     }

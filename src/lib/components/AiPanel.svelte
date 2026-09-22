@@ -263,8 +263,18 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     }
   }
 
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function highlightDirectives(text: string): string {
-    return text.replace(/\{([^}]+)\}/g, '<span class="directive">{$1}</span>');
+    // Escape FIRST: this renders via {@html}, so raw input must never
+    // reach the DOM. Braces survive escaping, directives still wrap.
+    return escapeHtml(text).replace(/\{([^}]+)\}/g, '<span class="directive">{$1}</span>');
   }
 
   async function handleStructurize() {

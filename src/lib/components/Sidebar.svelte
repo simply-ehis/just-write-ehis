@@ -36,6 +36,7 @@
     home: "dashboard & recent work",
     logs: "daily notes & journal",
     write: "distraction-free writing",
+    inbox: "untriaged captures",
     map: "link graph of your vault",
     canvas: "freeform visual board",
     novel: "Novel Studio",
@@ -44,6 +45,9 @@
     reader: "books & reading",
     files: "vault file browser",
     properties: "library database & views",
+    craft: "writing craft",
+    stats: "writing stats",
+    skills: "AI skills",
   };
 
   let { class: className = '' } = $props();

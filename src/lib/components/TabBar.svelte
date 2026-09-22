@@ -6,7 +6,7 @@
   import type { Doc } from "$lib/api";
   import Icon from "$lib/components/Icon.svelte";
   import { settings } from "$lib/stores/settings";
-  import { hasPin, markLocked } from "$lib/stores/lock";
+  import { hasPin, isUnlocked, markLocked } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import { onMount } from "svelte";
 
@@ -102,8 +102,21 @@
   }
 
   async function toggleLock(doc: Doc) {
+    if (!$settings.lockEnabled) {
+      showToast("Document locking is turned off — enable it in Settings → Privacy & Security", "warning");
+      contextMenu = null;
+      return;
+    }
     if (!doc.locked && !(await hasPin())) {
       showToast("Set a PIN in Settings → Privacy & Security first", "warning");
+      contextMenu = null;
+      return;
+    }
+    // Unlocking here must not bypass the PIN: the flag may only be
+    // cleared after this session proved the PIN (via the LockScreen).
+    // Otherwise anyone with the open app could permanently unlock a doc.
+    if (doc.locked && !isUnlocked(doc.id)) {
+      showToast("Enter the PIN in the document view first", "warning");
       contextMenu = null;
       return;
     }

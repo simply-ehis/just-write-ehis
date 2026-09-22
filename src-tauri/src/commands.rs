@@ -881,7 +881,7 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
         let ws_docs: Vec<_> = all_docs.iter().filter(|d| d.workspace == *ws).collect();
         if ws_docs.is_empty() { continue; }
         
-        html_parts.push(format!("<section id=\"{}\"><h2>{}</h2>", ws, ws));
+        html_parts.push(format!("<section id=\"{}\"><h2>{}</h2>", html_escape(ws), html_escape(ws)));
         
         for doc in ws_docs {
             let content = doc.content.as_str();
@@ -892,13 +892,15 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
             // Build TOC
             let toc = build_toc(&processed, toc_depth);
 
-            // Convert markdown to HTML
+            // Convert markdown to HTML, then sanitize: pulldown-cmark
+            // passes raw inline HTML (script/img-onerror) straight through.
             let parser = Parser::new(&processed);
-            let mut body = String::new();
-            html::push_html(&mut body, parser);
+            let mut body_raw = String::new();
+            html::push_html(&mut body_raw, parser);
+            let body = sanitize_body(&body_raw);
 
             html_parts.push(format!("<article><h1 id=\"{}\">{}{}</h1>{}</article>",
-                doc.id,
+                html_escape(&doc.id),
                 html_escape(&doc.title),
                 toc,
                 body
@@ -990,8 +992,21 @@ fn build_toc(content: &str, max_depth: usize) -> String {
     toc
 }
 
+/// True entity escape for TEXT and double-quoted-attribute contexts
+/// (titles, TOC entries, ids). Never a sanitizer: `A < B` must render
+/// as text, not vanish. Raw markdown HTML bodies use `sanitize_body`.
 fn html_escape(s: &str) -> String {
-    ammonia::clean(s)
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+/// Sanitizer for rendered-markdown HTML bodies: keeps formatting,
+/// strips script/iframe/event-handlers. (ammonia, already a dep.)
+fn sanitize_body(html: &str) -> String {
+    ammonia::clean(html)
 }
 
 fn render_publish_html(
@@ -1105,8 +1120,8 @@ fn render_publish_html(
 </html>"#, 
         html_escape(title),
         html_escape(description),
-        theme,
-        &nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", w, w)).collect::<Vec<_>>().join(""),
+        html_escape(theme),
+        &nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", html_escape(w), html_escape(w))).collect::<Vec<_>>().join(""),
         body,
         chrono::Utc::now().format("%B %d, %Y")
     )
@@ -1595,10 +1610,12 @@ pub fn atlas_get_stars(db: State<'_, Database>) -> Result<Vec<AtlasStar>, String
 const KEYCHAIN_SERVICE: &str = "com.just-write-ehis.app";
 
 fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
+    // Static error: never echo the caller-supplied key (log/forgery surface).
     if key != "apiKey" && key != "appLockPin" {
-        return Err(format!("unknown secret key: {}", key));
+        return Err("unknown secret key".to_string());
     }
-    keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|e| format!("keychain entry: {}", e))
+    // Static error: keyring internals (paths, backends) stay out of the UI.
+    keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|_| "keychain unavailable".to_string())
 }
 
 #[tauri::command]
@@ -1607,10 +1624,10 @@ pub fn secret_set(key: String, value: String) -> Result<(), String> {
     if value.is_empty() {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("keychain delete: {}", e)),
+            Err(_) => Err("keychain delete failed".to_string()),
         }
     } else {
-        entry.set_password(&value).map_err(|e| format!("keychain set: {}", e))
+        entry.set_password(&value).map_err(|_| "keychain write failed".to_string())
     }
 }
 
@@ -1620,6 +1637,6 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
     match entry.get_password() {
         Ok(v) => Ok(Some(v)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keychain get: {}", e)),
+        Err(_) => Err("keychain read failed".to_string()),
     }
 }

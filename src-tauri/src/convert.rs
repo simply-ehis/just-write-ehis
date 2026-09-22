@@ -140,8 +140,10 @@ fn strip_links(s: &str) -> String {
 pub fn markdown_to_html_doc(title: &str, md: &str) -> String {
     use pulldown_cmark::{html, Parser};
     let parser = Parser::new(md);
-    let mut body = String::new();
-    html::push_html(&mut body, parser);
+    let mut body_raw = String::new();
+    html::push_html(&mut body_raw, parser);
+    // pulldown-cmark passes raw inline HTML through: sanitize the body.
+    let body = ammonia::clean(&body_raw);
     format!(
         "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>{}</title>\n<style>body{{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:20px;line-height:1.8;color:#333}}\nh1,h2,h3{{margin-top:2em}}pre{{background:#f5f5f5;padding:12px;overflow-x:auto}}</style>\n</head><body>{}</body></html>",
         html_escape(title),

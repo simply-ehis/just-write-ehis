@@ -63,6 +63,9 @@ export interface AppSettings {
   aiMemoryEnabled: boolean;
 
   appLockPin: string;
+  /** Master switch for per-doc PIN locking. Off = no LockScreen,
+   * no lock menus, no AI exclusion; locked flags stay stored. */
+  lockEnabled: boolean;
   craftProfilingEnabled: boolean;
 
   vaultPath: string;
@@ -146,6 +149,7 @@ const defaultSettings: AppSettings = {
   aiMemoryEnabled: true,
 
   appLockPin: "",
+  lockEnabled: true,
   craftProfilingEnabled: true,
 
   vaultPath: "~/WritingVault",
@@ -206,6 +210,17 @@ const defaultSettings: AppSettings = {
 
 const SECRET_KEYS = ["apiKey", "appLockPin"] as const;
 type SecretKey = (typeof SECRET_KEYS)[number];
+
+/**
+ * Keys a settings file may overwrite. Everything else (secrets,
+ * unknown/future keys) is dropped on import — a settings file must
+ * never smuggle credentials or keys this version doesn't know.
+ */
+export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(defaultSettings).filter(
+    (k) => !(SECRET_KEYS as readonly string[]).includes(k)
+  )
+);
 
 /** Resolves once keychain hydration + legacy migration finished. */
 let resolveSecretsReady!: () => void;
@@ -274,13 +289,14 @@ function scheduleSecretSync(s: AppSettings) {
 async function initSecrets(): Promise<void> {
   try {
     const { api } = await apiLazy();
-    const s = get(settings);
     for (const k of SECRET_KEYS) {
       try {
         const v = await api.secretGet(k);
-        if (v != null && v !== "" && s[k] === "") {
+        // Emptiness is checked INSIDE the updater: s was snapshotted
+        // before the await, and the user may have typed since.
+        if (v != null && v !== "") {
           lastSynced[k] = v;
-          settings.update((st) => ({ ...st, [k]: v }));
+          settings.update((st) => (st[k] === "" ? { ...st, [k]: v } : st));
         }
       } catch (e) {
         console.warn(`keychain read failed for ${k}:`, e);

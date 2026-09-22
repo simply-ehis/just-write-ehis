@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings, settingsCategory, type SettingsCategory } from "$lib/stores/settings";
+  import { settings, settingsCategory, IMPORTABLE_SETTINGS_KEYS, type SettingsCategory } from "$lib/stores/settings";
   import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
@@ -680,9 +680,26 @@
       <div class="settings-section">
         <h3>Privacy & Security</h3>
         <div class="setting-row">
-          <label for="setting-app-lock-pin">App Lock PIN</label>
-          <input id="setting-app-lock-pin" type="password" bind:value={$settings.appLockPin} placeholder="Set PIN..." />
+          <label for="setting-lock-enabled">Document Locking</label>
+          <input id="setting-lock-enabled" type="checkbox" bind:checked={$settings.lockEnabled} />
         </div>
+        <p class="setting-desc">Master switch. Off = no PIN gates, no lock menus, locked docs stop being excluded from AI/search. Locked flags stay stored and apply again if re-enabled.</p>
+        {#if $settings.lockEnabled}
+          <div class="setting-row">
+            <label for="setting-app-lock-pin">App Lock PIN</label>
+            <input id="setting-app-lock-pin" type="password" bind:value={$settings.appLockPin} placeholder="Set PIN..." />
+          </div>
+          <div class="setting-row">
+            <label for="remove-app-lock-pin">Remove PIN</label>
+            <button
+              id="remove-app-lock-pin"
+              class="clear-btn"
+              disabled={!$settings.appLockPin}
+              onclick={() => { $settings = { ...$settings, appLockPin: "" }; }}
+            >Remove</button>
+          </div>
+          <p class="setting-desc">Type a new PIN to change it — it saves automatically and syncs to the OS keychain. Removing the PIN unlocks nothing by itself; clear per-doc locks from each doc.</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-craft-profiling-enabled">Craft/Skills Profiling</label>
           <input id="setting-craft-profiling-enabled" type="checkbox" bind:checked={$settings.craftProfilingEnabled} />
@@ -1035,9 +1052,16 @@
               try {
                 const text = await file.text();
                 const imported = JSON.parse(text);
-                delete imported.apiKey;
-                delete imported.appLockPin;
-                $settings = { ...$settings, ...imported };
+                if (typeof imported !== "object" || imported === null) {
+                  throw new Error("not a settings object");
+                }
+                // Allowlist: known keys only, never secrets. A settings
+                // file must not smuggle credentials or unknown keys.
+                const safe: Record<string, unknown> = {};
+                for (const [k, v] of Object.entries(imported)) {
+                  if (IMPORTABLE_SETTINGS_KEYS.has(k)) safe[k] = v;
+                }
+                $settings = { ...$settings, ...safe };
                 showToast('Settings imported', 'success');
               } catch (err) {
                 showToast('Failed to import settings', 'error');

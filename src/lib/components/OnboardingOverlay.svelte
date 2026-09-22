@@ -9,6 +9,9 @@
   let aiEndpoint = $state($settings.smallModelEndpoint);
   let aiModel = $state($settings.smallModelName);
   let aiApiKey = $state($settings.apiKey);
+  // Snapshot for change detection: the store value above may predate the
+  // OS-keychain hydration, so only write back when the user edited the field.
+  const initialApiKey = $settings.apiKey;
 
   function next() {
     if (step < 3) step++;
@@ -26,7 +29,7 @@
       smallModelName: aiModel,
       mainModelEndpoint: aiEndpoint,
       mainModelName: aiModel,
-      apiKey: aiApiKey,
+      apiKey: aiApiKey !== initialApiKey ? aiApiKey : $settings.apiKey,
     };
     onComplete();
   }

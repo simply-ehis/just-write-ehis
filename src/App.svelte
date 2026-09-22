@@ -64,6 +64,7 @@
   // covers the pane with the PIN gate (lists/graphs show titles only).
   const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files", "inbox", "projects", "craft", "properties", "canvas"];
   let lockCover = $derived(
+    $settings.lockEnabled &&
     !$showSettings &&
     !!$currentDoc?.locked &&
     !$unlockedDocs.has($currentDoc.id) &&

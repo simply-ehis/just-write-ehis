@@ -224,14 +224,19 @@ function buildToc(content: string, maxDepth: number): string {
 function processMarkdown(md: string): string {
   // Use a simple markdown processor for static generation
   // In production, this would use the same pulldown-cmark logic
+  const slug = (t: string) =>
+    escapeHtml(t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+  // javascript: URIs execute with no quotes to break out of — never emit them.
+  const safeHref = (src: string) =>
+    /^\s*javascript:/i.test(src) ? "#" : escapeHtml(src);
   return md
-    .replace(/^### (.+)$/gm, '<h3 id="$1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 id="$1">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 id="$1">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/!?\[([^\]]*)\]\(([^)]*)\)/g, (m, alt, src) => m.startsWith("!") ? `<img src="${src}" alt="${alt}">` : `<a href="${src}">${alt}</a>`)
+    .replace(/^### (.+)$/gm, (_, t) => `<h3 id="${slug(t)}">${escapeHtml(t)}</h3>`)
+    .replace(/^## (.+)$/gm, (_, t) => `<h2 id="${slug(t)}">${escapeHtml(t)}</h2>`)
+    .replace(/^# (.+)$/gm, (_, t) => `<h1 id="${slug(t)}">${escapeHtml(t)}</h1>`)
+    .replace(/\*\*(.+?)\*\*/g, (_, t) => `<strong>${escapeHtml(t)}</strong>`)
+    .replace(/\*(.+?)\*/g, (_, t) => `<em>${escapeHtml(t)}</em>`)
+    .replace(/`(.+?)`/g, (_, t) => `<code>${escapeHtml(t)}</code>`)
+    .replace(/!?\[([^\]]*)\]\(([^)]*)\)/g, (m, alt, src) => m.startsWith("!") ? `<img src="${safeHref(src)}" alt="${escapeHtml(alt)}">` : `<a href="${safeHref(src)}">${escapeHtml(alt)}</a>`)
     .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
     .replace(/^\- \[ \] (.+)$/gm, '<label><input type="checkbox" disabled> $1</label>')
     .replace(/^\- \[x\] (.+)$/gm, '<label><input type="checkbox" checked disabled> $1</label>')
@@ -259,7 +264,8 @@ export async function publishStaticSite(config: Partial<PublishConfig> = {}): Pr
     const allDocs: any[] = [];
     for (const ws of fullConfig.includeWorkspaces) {
       const docs = await api.docListByWorkspace(ws);
-      allDocs.push(...docs.filter(d => fullConfig.includeDrafts || d.status !== "draft"));
+      // Locked docs never publish — mirrors the Rust backend filter.
+      allDocs.push(...docs.filter(d => (fullConfig.includeDrafts || d.status !== "draft") && !d.locked));
     }
 
     let html = "";
@@ -278,7 +284,7 @@ export async function publishStaticSite(config: Partial<PublishConfig> = {}): Pr
         const content = await processDocForPublish(doc, fullConfig);
         const processed = processMarkdown(content);
         const toc = buildToc(content, fullConfig.tocDepth);
-        html += `<article><h1 id="${doc.id}">${escapeHtml(doc.title)}${toc}${processed}</article>`;
+        html += `<article><h1 id="${escapeHtml(doc.id)}">${escapeHtml(doc.title)}${toc}${processed}</article>`;
       }
       html += "</section>";
     }

@@ -345,6 +345,24 @@ async function auditBatchWiring() {
   check("Rust streams SSE deltas", commands.includes("ai_generate_stream") && commands.includes("delta"));
 }
 
+async function secretsWiring() {
+  const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
+  check("settings export strips secrets", pane.includes("apiKey, appLockPin, ...exportable"));
+  check("settings import uses allowlist", pane.includes("IMPORTABLE_SETTINGS_KEYS"));
+  const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
+  check("import allowlist excludes secrets", stores.includes("IMPORTABLE_SETTINGS_KEYS") && stores.includes('"apiKey", "appLockPin"'));
+  check("lock can be disabled in settings", stores.includes("lockEnabled") && pane.includes("setting-lock-enabled"));
+  const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
+  check("preview secret bucket has allowlist", backend.includes('payload.key !== "apiKey"'));
+  const tab = await readFile(join(root, "src/lib/components/TabBar.svelte"), "utf8");
+  check("tab unlock requires session PIN", tab.includes("isUnlocked(doc.id)"));
+  const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
+  check("Rust keychain errors are static", commands.includes('"unknown secret key"') && !commands.includes("unknown secret key: {}"));
+  check("Rust publish escapes + sanitizes", commands.includes("sanitize_body(&body_raw)") && commands.includes("html_escape(ws)") && commands.includes("fn sanitize_body"));
+  const publish = await readFile(join(root, "src/lib/stores/publish.ts"), "utf8");
+  check("TS publish guards URIs + locked docs", publish.includes("javascript:") && publish.includes("!d.locked"));
+}
+
 async function canvasWiring() {
   const canvas = await readFile(join(root, "src/lib/components/CanvasWorkspace.svelte"), "utf8");
   check("canvas board renders cards+edges", canvas.includes("canvasUpsertNode") && canvas.includes("canvasConnect") && canvas.includes("edgePath"));
@@ -470,6 +488,7 @@ await canvasWiring();
 await integrityWiring();
 await noNativeDialogs();
 await auditBatchWiring();
+await secretsWiring();
 await recentWiring();
 await splitHardeningWiring();
 await themeAndReaderWiring();

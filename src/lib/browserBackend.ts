@@ -1308,15 +1308,23 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     // OS keychain secrets — browser preview fallback is a separate
     // localStorage bucket (the desktop shell uses the real keychain).
+    // Same allowlist as Rust keychain_entry: no arbitrary bucket writes.
     case "secret_set": {
+      if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
+        throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
+      }
       const k = `jwe-secret-${String(payload.key)}`;
       const v = String(payload.value ?? "");
       if (v) localStorage.setItem(k, v);
       else localStorage.removeItem(k);
       return undefined as T;
     }
-    case "secret_get":
+    case "secret_get": {
+      if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
+        throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
+      }
       return localStorage.getItem(`jwe-secret-${String(payload.key)}`) as T;
+    }
 
     default:
       throw new Error(`Unknown command in browser preview: ${cmd}`);
