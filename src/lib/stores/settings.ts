@@ -26,7 +26,7 @@ export interface SavedView {
 }
 
 export interface AppSettings {
-  theme: "dark" | "light" | "brutalist";
+  theme: "dark" | "light" | "brutalist" | "glass";
   iconSet: "phosphor" | "tabler";
   streakGoal: number;
   /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */

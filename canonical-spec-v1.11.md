@@ -743,3 +743,57 @@ All four sidecar managers (`SidecarManager`, `SttManager`, `TtsManager`, `LlmMan
 ---
 
 **Version after amendments: 1.12**
+
+---
+
+## Amendment 13 — Glass Theme: Frosted Glass, Apple Feel · 2026-09-21
+
+### A13.1 Glass Theme
+Fourth theme option alongside Dark, Light, and Brutalist: `theme: "dark" | "light" | "brutalist" | "glass"`.
+
+Structural design language — Apple-inspired frosted glass:
+
+- **Background**: OLED deep black (`#0a0a0a`), same warm accent palette as Dark/Brutalist.
+- **Surfaces**: Translucent panels — `rgba(255,255,255,0.03)` base, `0.07` raised, `0.08` overlay. All panels use `backdrop-filter: blur(16px)` for frosted glass effect.
+- **Borders**: 1px hairlines — `rgba(255,255,255,0.08)` subtle, `0.14` strong. Never thick. Inset highlight via `inset 0 1px 0 rgba(255,255,255,0.06)` on all glass surfaces.
+- **Radius**: 14px globally (panels, cards, inputs), 10px for smaller elements (tabs, nav items), pill-shaped buttons (`border-radius: 999px`). Opposite of Brutalist's zero-radius.
+- **Shadows**: Soft, diffused — `0 8px 32px rgba(0,0,0,0.4)` for elevated panels, `0 2px 8px` for subtle lifts. No hard offset shadows.
+- **Typography**: System font stack (`-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif`). Clean, native feel. Headings use font-weight 600-700, negative letter-spacing (`-0.02em`).
+- **Interactions**: Gentle — hover raises brightness slightly, buttons shift `translateY(-1px)` on hover, inputs get a 3px accent glow ring on focus. All transitions use `cubic-bezier(0.25, 0.1, 0.25, 1)` over 200ms.
+- **Scrollbars**: Thin, rounded, translucent — `rgba(255,255,255,0.12)` thumb with `background-clip: content-box` for a polished inset look.
+- **Selection**: Accent-tinted — `rgba(143,199,169,0.3)` with ink text.
+
+### A13.2 Glass Structural Tokens
+New CSS custom properties for glass-specific values:
+
+| Variable | Value |
+|---|---|
+| `--glass-bg` | `rgba(255,255,255,0.03)` |
+| `--glass-bg-hover` | `rgba(255,255,255,0.06)` |
+| `--glass-border` | `rgba(255,255,255,0.08)` |
+| `--glass-border-strong` | `rgba(255,255,255,0.14)` |
+| `--glass-blur` | `16px` |
+| `--glass-radius` | `14px` |
+| `--glass-radius-sm` | `10px` |
+| `--glass-shadow` | `0 8px 32px rgba(0,0,0,0.4)` |
+| `--glass-shadow-sm` | `0 2px 8px rgba(0,0,0,0.3)` |
+| `--glass-inset` | `inset 0 1px 0 rgba(255,255,255,0.06)` |
+
+### A13.3 Glass vs Brutalist — Design Philosophy
+The two custom themes represent opposite ends of the same palette:
+
+| Aspect | Brutalist | Glass |
+|---|---|---|
+| Radius | 0px (sharp) | 14px (soft) |
+| Borders | 3px thick, ink-colored | 1px hairline, translucent white |
+| Shadows | Hard offset (4px 4px 0) | Soft diffused (0 8px 32px) |
+| Typography | Archivo Black + Space Mono | SF Pro / system stack |
+| Surfaces | Solid, opaque | Translucent, frosted |
+| Interactions | Translate-shift + shadow grow | Brightness shift + translateY |
+| Feel | Industrial, raw, physical | Polished, native, ethereal |
+
+Both share the same warm color palette (`#ECE7D8` ink, `#8FC7A9` accent, `#1B1A15` base tones).
+
+---
+
+**Version after amendments: 1.13**

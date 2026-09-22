@@ -375,6 +375,7 @@
             <option value="dark">Dark</option>
             <option value="light">Light</option>
             <option value="brutalist">Brutalist</option>
+            <option value="glass">Glass</option>
           </select>
         </div>
         <div class="setting-row">
