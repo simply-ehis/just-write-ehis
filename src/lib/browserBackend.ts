@@ -1306,6 +1306,18 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
           embedding: [],
         })) as T;
 
+    // OS keychain secrets — browser preview fallback is a separate
+    // localStorage bucket (the desktop shell uses the real keychain).
+    case "secret_set": {
+      const k = `jwe-secret-${String(payload.key)}`;
+      const v = String(payload.value ?? "");
+      if (v) localStorage.setItem(k, v);
+      else localStorage.removeItem(k);
+      return undefined as T;
+    }
+    case "secret_get":
+      return localStorage.getItem(`jwe-secret-${String(payload.key)}`) as T;
+
     default:
       throw new Error(`Unknown command in browser preview: ${cmd}`);
   }

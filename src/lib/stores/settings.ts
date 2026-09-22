@@ -1,4 +1,4 @@
-import { writable } from "svelte/store";
+import { writable, get } from "svelte/store";
 
 export type SettingsCategory =
   | "general"
@@ -204,6 +204,24 @@ const defaultSettings: AppSettings = {
   rhythmHeatmapInStatusBar: false,
 };
 
+const SECRET_KEYS = ["apiKey", "appLockPin"] as const;
+type SecretKey = (typeof SECRET_KEYS)[number];
+
+/** Resolves once keychain hydration + legacy migration finished. */
+let resolveSecretsReady!: () => void;
+export const secretsReady = new Promise<void>((resolve) => {
+  resolveSecretsReady = resolve;
+});
+
+let secretsMigrated = false;
+let lastSynced: Record<SecretKey, string> = { apiKey: "", appLockPin: "" };
+let secretSyncTimer: ReturnType<typeof setTimeout> | null = null;
+/** Deferred to avoid a settings ↔ api.ts circular-import TDZ at module init. */
+let apiPromise: Promise<typeof import("$lib/api")> | null = null;
+function apiLazy() {
+  return (apiPromise ??= import("$lib/api"));
+}
+
 function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem("writing-app-settings");
@@ -216,11 +234,87 @@ function loadSettings(): AppSettings {
   return { ...defaultSettings };
 }
 
-function saveSettings(settings: AppSettings) {
+function saveSettings(s: AppSettings) {
   try {
-    localStorage.setItem("writing-app-settings", JSON.stringify(settings));
+    const payload = { ...s };
+    if (secretsMigrated) {
+      payload.apiKey = "";
+      payload.appLockPin = "";
+    }
+    localStorage.setItem("writing-app-settings", JSON.stringify(payload));
   } catch (e) {
     console.warn("Failed to save settings to localStorage:", e);
+  }
+  if (secretsMigrated) scheduleSecretSync(s);
+}
+
+function scheduleSecretSync(s: AppSettings) {
+  if (secretSyncTimer) clearTimeout(secretSyncTimer);
+  secretSyncTimer = setTimeout(() => {
+    void (async () => {
+      const { api } = await apiLazy();
+      for (const k of SECRET_KEYS) {
+        const v = s[k];
+        if (v === lastSynced[k]) continue;
+        try {
+          await api.secretSet(k, v);
+          lastSynced[k] = v;
+        } catch (e) {
+          console.warn(`Failed to sync ${k} to OS keychain:`, e);
+        }
+      }
+    })();
+  }, 300);
+}
+
+/**
+ * Pull secrets from the OS keychain, migrate any legacy localStorage
+ * values into it, then strip them from localStorage for good.
+ */
+async function initSecrets(): Promise<void> {
+  try {
+    const { api } = await apiLazy();
+    const s = get(settings);
+    for (const k of SECRET_KEYS) {
+      try {
+        const v = await api.secretGet(k);
+        if (v != null && v !== "" && s[k] === "") {
+          lastSynced[k] = v;
+          settings.update((st) => ({ ...st, [k]: v }));
+        }
+      } catch (e) {
+        console.warn(`keychain read failed for ${k}:`, e);
+      }
+    }
+    let allOk = true;
+    for (const k of SECRET_KEYS) {
+      const v = get(settings)[k];
+      if (v !== lastSynced[k]) {
+        try {
+          await api.secretSet(k, v);
+          lastSynced[k] = v;
+        } catch (e) {
+          console.warn(`keychain write failed for ${k}:`, e);
+          allOk = false;
+        }
+      }
+    }
+    if (allOk) {
+      secretsMigrated = true;
+      try {
+        localStorage.setItem("writing-app-settings", JSON.stringify({
+          ...get(settings),
+          apiKey: "",
+          appLockPin: "",
+        }));
+      } catch (e) {
+        console.warn("Failed to strip secrets from localStorage:", e);
+      }
+    }
+  } catch (e) {
+    console.warn("Secret hydration failed — secrets stay in localStorage until next launch:", e);
+  } finally {
+    resolveSecretsReady();
   }
 }
 
@@ -229,6 +323,8 @@ export const settings = writable<AppSettings>(loadSettings());
 settings.subscribe((value) => {
   saveSettings(value);
 });
+
+void initSecrets();
 
 /** Global Settings nav: lets palette/sidebar deep-link into a category. */
 export const settingsCategory = writable<SettingsCategory>("general");

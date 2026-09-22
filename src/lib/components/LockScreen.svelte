@@ -21,12 +21,12 @@
     setTimeout(() => inputEl?.focus(), 50);
   });
 
-  function unlock() {
-    if (!hasPin()) {
+  async function unlock() {
+    if (!(await hasPin())) {
       error = "No PIN set. Set one in Settings → Privacy & Security.";
       return;
     }
-    if (verifyPin(pin)) {
+    if (await verifyPin(pin)) {
       markUnlocked(doc.id);
       showToast(`Unlocked "${doc.title}" for this session`, "success");
     } else {

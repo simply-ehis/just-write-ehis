@@ -102,7 +102,7 @@
   }
 
   async function toggleLock(doc: Doc) {
-    if (!doc.locked && !hasPin()) {
+    if (!doc.locked && !(await hasPin())) {
       showToast("Set a PIN in Settings → Privacy & Security first", "warning");
       contextMenu = null;
       return;

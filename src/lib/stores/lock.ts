@@ -7,7 +7,7 @@
  * secrecy is the encrypted Private Vault's job, not this flag's.)
  */
 import { writable, get } from "svelte/store";
-import { settings } from "$lib/stores/settings";
+import { settings, secretsReady } from "$lib/stores/settings";
 import type { Doc } from "$lib/api";
 
 export const unlockedDocs = writable<Set<string>>(new Set());
@@ -28,11 +28,13 @@ export function markLocked(id: string): void {
   });
 }
 
-export function hasPin(): boolean {
+export async function hasPin(): Promise<boolean> {
+  await secretsReady;
   return get(settings).appLockPin.trim().length > 0;
 }
 
-export function verifyPin(pin: string): boolean {
+export async function verifyPin(pin: string): Promise<boolean> {
+  await secretsReady;
   const expected = get(settings).appLockPin;
   return expected.trim().length > 0 && pin === expected;
 }

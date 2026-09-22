@@ -1589,3 +1589,37 @@ pub fn ghost_dismiss(db: State<'_, Database>, ghost_id: String) -> Result<(), St
 pub fn atlas_get_stars(db: State<'_, Database>) -> Result<Vec<AtlasStar>, String> {
     db.atlas_get_stars()
 }
+
+// ── OS keychain secrets (apiKey, appLockPin) ────────────────────
+
+const KEYCHAIN_SERVICE: &str = "com.just-write-ehis.app";
+
+fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
+    if key != "apiKey" && key != "appLockPin" {
+        return Err(format!("unknown secret key: {}", key));
+    }
+    keyring::Entry::new(KEYCHAIN_SERVICE, key).map_err(|e| format!("keychain entry: {}", e))
+}
+
+#[tauri::command]
+pub fn secret_set(key: String, value: String) -> Result<(), String> {
+    let entry = keychain_entry(&key)?;
+    if value.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("keychain delete: {}", e)),
+        }
+    } else {
+        entry.set_password(&value).map_err(|e| format!("keychain set: {}", e))
+    }
+}
+
+#[tauri::command]
+pub fn secret_get(key: String) -> Result<Option<String>, String> {
+    let entry = keychain_entry(&key)?;
+    match entry.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("keychain get: {}", e)),
+    }
+}

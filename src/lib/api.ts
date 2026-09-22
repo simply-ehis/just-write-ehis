@@ -751,4 +751,11 @@ export const api = {
   atlasGetStars: () =>
     safeInvoke<AtlasStar[]>("atlas_get_stars"),
 
+  // ── OS keychain secrets (never persisted to localStorage) ──────
+  secretSet: (key: "apiKey" | "appLockPin", value: string) =>
+    safeInvoke<void>("secret_set", { key, value }),
+
+  secretGet: (key: "apiKey" | "appLockPin") =>
+    safeInvoke<string | null>("secret_get", { key }),
+
 };

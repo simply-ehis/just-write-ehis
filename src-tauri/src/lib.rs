@@ -250,6 +250,8 @@ pub fn run() {
             commands::ghost_merge,
             commands::ghost_dismiss,
             commands::atlas_get_stars,
+            commands::secret_set,
+            commands::secret_get,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| eprintln!("Tauri application error: {}", e));

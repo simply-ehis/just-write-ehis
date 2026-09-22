@@ -1014,7 +1014,8 @@
         <p class="setting-desc">Export your settings bundle (theme, keybindings, AI persona, templates) or import from a file.</p>
         <div class="export-import-row">
           <button class="primary-btn" onclick={() => {
-            const data = JSON.stringify($settings, null, 2);
+            const { apiKey, appLockPin, ...exportable } = $settings;
+            const data = JSON.stringify(exportable, null, 2);
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -1034,6 +1035,8 @@
               try {
                 const text = await file.text();
                 const imported = JSON.parse(text);
+                delete imported.apiKey;
+                delete imported.appLockPin;
                 $settings = { ...$settings, ...imported };
                 showToast('Settings imported', 'success');
               } catch (err) {
