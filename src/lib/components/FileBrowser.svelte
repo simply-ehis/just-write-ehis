@@ -32,7 +32,7 @@
     }
     api.getVaultPath().then((p) => {
       if (p) {
-        try { localStorage.setItem("vault-path", p); } catch {}
+        try { localStorage.setItem("vault-path", p); } catch (e) { console.warn("Failed to save vault path:", e); }
         navigateTo(p);
       }
     }).catch(() => {});

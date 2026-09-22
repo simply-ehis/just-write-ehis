@@ -34,7 +34,9 @@
     try {
       const v = parseFloat(localStorage.getItem(storageKey) ?? "");
       if (Number.isFinite(v)) return Math.min(MAX, Math.max(MIN, v));
-    } catch {}
+    } catch (e) {
+      console.warn(`Failed to load split position for ${storageKey}:`, e);
+    }
     return Math.min(MAX, Math.max(MIN, defaultPct));
   }
 
@@ -50,7 +52,9 @@
   function save() {
     try {
       localStorage.setItem(storageKey, String(Math.round(topPct)));
-    } catch {}
+    } catch (e) {
+      console.warn(`Failed to save split position for ${storageKey}:`, e);
+    }
   }
 
   function onPointerDown(e: PointerEvent) {

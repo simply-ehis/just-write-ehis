@@ -53,7 +53,9 @@
         sentenceTrend = s;
         filterTrend = f;
       })
-      .catch(() => {})
+      .catch((e) => {
+        console.warn("Skills power features load failed:", e);
+      })
       .finally(() => {
         if ($currentDoc?.id === docId) loading = false;
       });

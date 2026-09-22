@@ -62,7 +62,9 @@
           };
         }
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.warn("Skill nudge load failed:", e);
+      });
   });
 
   function dismiss(id: string) {

@@ -208,7 +208,9 @@
       try {
         const group = await api.ghostList(beat.doc.id);
         if (group.ghosts.length > 0) counts[beat.doc.id] = group.ghosts.length;
-      } catch {}
+      } catch (e) {
+        console.warn(`Failed to load ghost count for ${beat.doc.id}:`, e);
+      }
     }
     ghostCounts = counts;
   }

@@ -210,14 +210,18 @@ function loadSettings(): AppSettings {
     if (stored) {
       return { ...defaultSettings, ...JSON.parse(stored) };
     }
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to load settings from localStorage:", e);
+  }
   return { ...defaultSettings };
 }
 
 function saveSettings(settings: AppSettings) {
   try {
     localStorage.setItem("writing-app-settings", JSON.stringify(settings));
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to save settings to localStorage:", e);
+  }
 }
 
 export const settings = writable<AppSettings>(loadSettings());

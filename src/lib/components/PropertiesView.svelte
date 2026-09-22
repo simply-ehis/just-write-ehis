@@ -90,7 +90,9 @@
         try {
           const docs = await api.docListByWorkspace(ws);
           results.push(...docs);
-        } catch {}
+        } catch (e) {
+          console.warn(`Failed to list docs in workspace ${ws}:`, e);
+        }
       }
       allDocs = results;
       applyFilters();

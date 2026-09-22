@@ -91,13 +91,17 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     try {
       const raw = localStorage.getItem("jwe-ai-min");
       if (raw === "1") minimized = true;
-    } catch {}
+    } catch (e) {
+      console.warn("Failed to load AI panel state:", e);
+    }
   });
 
   $effect(() => {
     try {
       localStorage.setItem("jwe-ai-min", minimized ? "1" : "0");
-    } catch {}
+    } catch (e) {
+      console.warn("Failed to save AI panel state:", e);
+    }
   });
 
   // Inline structurize: consume preset from editor selection.
@@ -209,7 +213,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   onMount(async () => {
     try {
       sidecarRunning = await api.sidecarIsRunning();
-    } catch {}
+    } catch (e) {
+      console.warn("Sidecar status check failed:", e);
+    }
     // Surface a dead endpoint the moment the panel opens — not mid-sentence.
     try {
       const probe = await testProvider($settings.mainModelEndpoint, $settings.mainModelName);

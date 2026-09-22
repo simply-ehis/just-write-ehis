@@ -376,7 +376,21 @@ impl MemoryManager {
     }
 
     pub fn is_running(&self) -> bool {
-        self.process.lock().map(|p| p.is_some()).unwrap_or(false)
+        self.process.lock().map(|mut p| {
+            match *p {
+                Some(ref mut child) => match child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            eprintln!("[sidecar] MemoryManager process exited with error: {:?}", status.code());
+                        }
+                        false
+                    }
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+                None => false,
+            }
+        }).unwrap_or(false)
     }
 
     fn base_url(&self) -> String {

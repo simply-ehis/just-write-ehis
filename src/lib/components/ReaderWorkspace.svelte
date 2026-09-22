@@ -417,9 +417,9 @@
           <ReadAloudButton
             getText={() => {
               // Strip HTML tags so TTS reads clean text, not <div> tags.
-              const tmp = document.createElement("div");
-              tmp.innerHTML = readerContent;
-              return tmp.textContent || tmp.innerText || "";
+              // Use DOMParser to avoid executing scripts from untrusted book content.
+              const doc = new DOMParser().parseFromString(readerContent, "text/html");
+              return doc.body.textContent || "";
             }}
             getSelection={() => {
               const selection = window.getSelection();

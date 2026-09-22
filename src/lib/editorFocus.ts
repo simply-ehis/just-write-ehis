@@ -60,7 +60,9 @@ export function loadFocusPrefs(
         focus: p.focus ?? defaults.focus,
       };
     }
-  } catch {}
+  } catch (e) {
+    console.warn(`Failed to load focus prefs for ${docId}:`, e);
+  }
   return { ...defaults };
 }
 
@@ -70,7 +72,9 @@ export function saveFocusPrefs(docId: string, prefs: FocusPrefs): void {
       `jwe-focus-${docId}`,
       JSON.stringify({ typewriter: prefs.typewriter, focus: prefs.focus })
     );
-  } catch {}
+  } catch (e) {
+    console.warn(`Failed to save focus prefs for ${docId}:`, e);
+  }
 }
 
 /** Keep the cursor vertically centered while typewriter mode is on. */

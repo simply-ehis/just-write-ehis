@@ -5,9 +5,9 @@
 
 ## Must (blocks "production ready" honesty)
 
-- [x] **First `tauri build` on a maintainer machine** — done 2026-09-19:
-  `Just Write ehis_0.2.0_x64-setup.exe` (317MB, all models bundled) +
-  `.sig`, NSIS-only, signed with `~/.tauri/just-write-ehis.key`.
+- [ ] **Move secrets to OS keychain** — spec requires it; `apiKey` +
+  `appLockPin` still live in localStorage (`settings.ts`). Audit
+  2026-09-22 CRITICAL #3.
 - [ ] **Updater one-time setup** — keypair, pubkey, endpoint
   (`docs/UPDATES.md`); UI reports "not configured" until then.
   Update 2026-09-19: keypair generated (password in
@@ -15,6 +15,13 @@
   `tauri.conf.json` + `.sig` artifacts produced by the build. Still
   yours: replace the `YOUR_USER/YOUR_REPO` endpoint with the real
   releases URL, then publish artifacts + `latest.json` per release.
+- [x] **First `tauri build` on a maintainer machine** — done 2026-09-19:
+  `Just Write ehis_0.2.0_x64-setup.exe` (317MB, all models bundled) +
+  `.sig`, NSIS-only, signed with `~/.tauri/just-write-ehis.key`.
+- [x] **Audit fixes 2026-09-22** — CSP shipped, MemoryManager crash
+  detection fixed, DOMParser for reader TTS, startup errors are
+  contextual (no panics), empty catches log, CI added
+  (`.github/workflows/ci.yml`), svelte-check 0/0.
 
 ## Next slices (spec/audit-backed)
 

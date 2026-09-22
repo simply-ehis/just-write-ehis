@@ -117,9 +117,7 @@
   ];
 
   onMount(() => {
-    coldStartTime = performance.timing
-      ? performance.timing.domContentLoadedEventEnd - performance.timing.navigationStart
-      : 0;
+    coldStartTime = performance.now();
     getAppVersion("0.2.1").then((v) => (appVersion = v));
     loadMemoryFactCount();
     api.appUpdateStatus()

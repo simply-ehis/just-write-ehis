@@ -25,20 +25,25 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            let app_dir = app.path().app_data_dir().expect("failed to get app data dir");
-            std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
+            let app_dir = app.path().app_data_dir()
+                .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
+            std::fs::create_dir_all(&app_dir)
+                .map_err(|e| format!("Failed to create app data directory {:?}: {}", app_dir, e))?;
 
             let db_path = app_dir.join("writing.db");
-            let conn = Connection::open(db_path).expect("failed to open database");
+            let conn = Connection::open(&db_path)
+                .map_err(|e| format!("Failed to open database {:?}: {}", db_path, e))?;
 
             // Vault path: use ~/WritingVault as default
             let vault_path = dirs::home_dir()
                 .unwrap_or_else(|| app_dir.clone())
                 .join("WritingVault");
-            std::fs::create_dir_all(&vault_path).expect("failed to create vault dir");
+            std::fs::create_dir_all(&vault_path)
+                .map_err(|e| format!("Failed to create vault directory {:?}: {}", vault_path, e))?;
 
             let db = database::Database::new(conn, vault_path);
-            db.initialize().expect("failed to initialize database");
+            db.initialize()
+                .map_err(|e| format!("Failed to initialize database schema: {}", e))?;
 
             app.manage(db);
             app.manage(sidecar::SidecarManager::new());
@@ -46,7 +51,8 @@ pub fn run() {
             app.manage(sidecar::TtsManager::new(8091));
             app.manage(sidecar::LlmManager::new(8093));
             let memory_dir = app_dir.join("ai-memory");
-            std::fs::create_dir_all(&memory_dir).expect("failed to create ai-memory dir");
+            std::fs::create_dir_all(&memory_dir)
+                .map_err(|e| format!("Failed to create AI memory directory {:?}: {}", memory_dir, e))?;
             app.manage(sidecar::MemoryManager::new(8092, memory_dir.to_string_lossy().to_string()));
 
             // System-tray quick capture (§4.8): works app-closed on desktop.
@@ -246,5 +252,5 @@ pub fn run() {
             commands::atlas_get_stars,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| eprintln!("Tauri application error: {}", e));
 }

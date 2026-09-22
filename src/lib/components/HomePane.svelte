@@ -61,7 +61,9 @@
       if (atlasEligible) {
         atlasStars = await api.atlasGetStars().catch(() => []);
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Home dashboard load failed:", e);
+    }
   });
 
   /**
@@ -271,7 +273,9 @@
                   $currentDoc = doc;
                   if (!$openTabs.find(t => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
                   $currentWorkspace = doc.workspace;
-                } catch {}
+                } catch (e) {
+                  console.warn(`Failed to open recent doc ${id}:`, e);
+                }
               }}>
                 <span class="recent-title">{title}</span>
                 <span class="recent-date">{formatDate(updatedAt)}</span>

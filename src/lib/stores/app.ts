@@ -17,7 +17,9 @@ function loadPanels(): { sidebar: boolean; ai: boolean; inspector: boolean } {
         inspector: p.inspector === true,
       };
     }
-  } catch {}
+  } catch (e) {
+    console.warn("Failed to load panel prefs:", e);
+  }
   return { sidebar: true, ai: false, inspector: false };
 }
 
@@ -40,7 +42,9 @@ if (typeof localStorage !== "undefined") {
     panelTimer = setTimeout(() => {
       try {
         localStorage.setItem("jwe-ui-panels", JSON.stringify({ sidebar, ai, inspector }));
-      } catch {}
+      } catch (e) {
+        console.warn("Failed to save panel prefs:", e);
+      }
     }, 300);
   };
   let latest = { sidebar: initialPanels.sidebar, ai: initialPanels.ai, inspector: initialPanels.inspector };

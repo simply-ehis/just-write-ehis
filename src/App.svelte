@@ -251,7 +251,9 @@
             );
             $settings = { ...$settings, lastTriageShown: new Date().toISOString() };
           }
-        } catch {}
+        } catch (e) {
+          console.warn("Inbox triage banner failed:", e);
+        }
       }
     }
 
@@ -266,7 +268,9 @@
             $settings = { ...$settings, lastStreakShown: new Date().toISOString() };
           }
         }
-      } catch {}
+      } catch (e) {
+        console.warn("Streak nudge failed:", e);
+      }
     }
 
     // Automatic backup per Vaults → Backup Frequency (desktop shell only:
@@ -316,7 +320,9 @@
               document.querySelector<HTMLInputElement>(".quick-capture input")?.focus();
             }, 350);
           });
-        } catch {}
+        } catch (e) {
+          console.warn("Failed to register tray-capture listener:", e);
+        }
       }
 
       // Show onboarding on first launch
@@ -350,12 +356,16 @@
           () => {
             try {
               localStorage.setItem("jwe-last-decay", todayKey);
-            } catch {}
+            } catch (e) {
+              console.warn("Failed to record decay key:", e);
+            }
           },
           () => {}
         );
       }
-    } catch {}
+    } catch (e) {
+      console.warn("Activity decay check failed:", e);
+    }
 
       // Restore pre-restart tabs before first paint of the shell.
       await restoreTabs();

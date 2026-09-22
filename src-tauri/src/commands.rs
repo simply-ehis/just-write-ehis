@@ -920,7 +920,7 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
 }
 
 fn process_transclusions(content: &str, db: &crate::database::Database) -> Result<String, String> {
-    let re = regex::Regex::new(r"!\[\[([^\]]+)\]\]").unwrap();
+    let re = regex::Regex::new(r"!\[\[([^\]]+)\]\]").map_err(|e| format!("Invalid transclusion regex: {}", e))?;
     let mut result = content.to_string();
     for cap in re.captures_iter(content) {
         let target = &cap[1];

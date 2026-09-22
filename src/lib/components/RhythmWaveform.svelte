@@ -86,6 +86,8 @@
       viewBox="0 0 {W} {H}"
       preserveAspectRatio="none"
       class="waveform-svg"
+      role="img"
+      aria-label="Paragraph rhythm waveform"
       onmousemove={handleMouseMove}
       onmouseleave={() => (hoveredIdx = null)}
     >

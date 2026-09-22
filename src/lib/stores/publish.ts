@@ -123,14 +123,14 @@ function renderHtml(title: string, content: string, config: PublishConfig): stri
     @media (max-width: 600px) { body { font-size: 16px; padding: var(--space-3); } header h1 { font-size: 1.8rem; } }
     ${config.customCss || ""}
   </style>
-  ${config.customJs ? `<script>${config.customJs}</script>` : ""}
+    ${config.customJs ? `<script>${config.customJs}</script>` : ""}
 </head>
-<body data-theme="${config.theme}">
+  <body data-theme="${escapeHtml(config.theme)}">
   <header>
     <h1>${escapeHtml(config.title)}</h1>
     <div class="meta">${escapeHtml(config.description)}</div>
   </header>
-  <nav><ul>${config.includeWorkspaces.map(w => `<li><a href="#${w}">${w}</a></li>`).join("")}</ul></nav>
+  <nav><ul>${config.includeWorkspaces.map(w => `<li><a href="#${escapeHtml(w)}">${escapeHtml(w)}</a></li>`).join("")}</ul></nav>
   <article>${content}</article>
   <footer>Published from Just Write · ${new Date().toLocaleDateString()}</footer>
   <script>
@@ -273,7 +273,7 @@ export async function publishStaticSite(config: Partial<PublishConfig> = {}): Pr
     }
 
     for (const [ws, docs] of byWs) {
-      html += `<section id="${ws}"><h2>${ws}</h2>`;
+      html += `<section id="${escapeHtml(ws)}"><h2>${escapeHtml(ws)}</h2>`;
       for (const doc of docs) {
         const content = await processDocForPublish(doc, fullConfig);
         const processed = processMarkdown(content);

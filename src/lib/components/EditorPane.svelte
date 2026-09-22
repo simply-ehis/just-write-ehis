@@ -692,7 +692,9 @@
       ]);
       dialogueTrend = d;
       sentenceTrend = s;
-    } catch {}
+    } catch (e) {
+      console.warn("Craft metrics trend load failed:", e);
+    }
   }
 
   $effect(() => {

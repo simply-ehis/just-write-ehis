@@ -15,7 +15,7 @@ impl Database {
     }
 
     pub fn initialize(&self) -> SqlResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch("PRAGMA vec_enable=ON;")?;
