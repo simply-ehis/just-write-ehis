@@ -41,6 +41,22 @@ npm run test:e2e   # 50+ end-to-end checks, exit 0 required
 The desktop shell additionally needs Rust + `npm run tauri build`
 (see `docs/UPDATES.md` for signing, `docs/DEVELOPMENT.md` for the full flow).
 
+## Install (Windows)
+
+The release artifact is `Just Write ehis_<version>_x64-setup.exe` (~416MB —
+it bundles everything offline: Moonshine STT, Kokoro int8 TTS voices, and the
+local LLM, so no downloads happen at runtime).
+
+> **Windows Defender SmartScreen warning is normal and expected.** The app has
+> no paid code-signing certificate, so Windows shows a blue
+> "Windows protected your PC / Unknown publisher" dialog on first run. Click
+> **More info → Run anyway**. The installer is built from this repo and every
+> release artifact carries an updater signature (`.sig`) verifiable against
+> the pinned public key in `src-tauri/tauri.conf.json`.
+
+Uninstall anytime via **Settings → Apps → Just Write ehis → Uninstall**
+(the installer registers a standard uninstaller — no leftover services).
+
 ## Layout
 
 ```
