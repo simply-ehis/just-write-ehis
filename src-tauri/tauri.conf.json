@@ -50,7 +50,7 @@
       "sidecars/tts_server.py",
       "sidecars/memory_server.py",
       "sidecars/harness/*",
-      "sidecars/models/*"
+      "sidecars/models/**/*"
     ]
   },
   "plugins": {
