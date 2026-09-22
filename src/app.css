@@ -653,10 +653,18 @@ input:focus, textarea:focus, select:focus {
 
 .content-pane {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+/* Global scroll fix: workspace roots (height:100% + internal scroll)
+   are flex items — without min-height:0 they refuse to shrink, overflow
+   the clipped pane, and their inner scrollbars never engage. */
+.content-pane > * {
+  min-height: 0;
 }
 
 .breadcrumb-bar {

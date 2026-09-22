@@ -31,6 +31,21 @@
     properties: "table",
   };
 
+  // Tooltips describe the workspace; drag-reorder needs no announcement.
+  const wsTips: Record<string, string> = {
+    home: "dashboard & recent work",
+    logs: "daily notes & journal",
+    write: "distraction-free writing",
+    map: "link graph of your vault",
+    canvas: "freeform visual board",
+    novel: "Novel Studio",
+    script: "screenplays (Fountain)",
+    projects: "tasks, boards & deadlines",
+    reader: "books & reading",
+    files: "vault file browser",
+    properties: "library database & views",
+  };
+
   let { class: className = '' } = $props();
 
   // Sidebar auto-sort: home pinned first, the rest by most recently
@@ -189,7 +204,7 @@
         ondragover={(e) => e.preventDefault()}
         ondrop={(e) => handleWsDrop(ws.id, e)}
         ondragend={() => (dragWsId = null)}
-        title={ws.id === "home" ? ws.label : ws.id === "inbox" ? `${ws.label} — untriaged captures` : `${ws.label} — drag to reorder`}
+        title={ws.id === "home" ? ws.label : ws.id === "inbox" ? `${ws.label} — untriaged captures` : `${ws.label} — ${wsTips[ws.id] ?? "workspace"}`}
         aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
       >
         <span class="nav-icon">

@@ -4,8 +4,8 @@
   "description": "A personal writing super app.",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#1a1a2e",
+  "background_color": "#1B1A15",
+  "theme_color": "#1B1A15",
   "icons": [
     { "src": "icon-72.png", "sizes": "72x72", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any maskable" },
