@@ -4,6 +4,7 @@
     currentDoc,
     openTabs,
     sidebarOpen,
+    aiPanelOpen,
     workspaces,
     showSettings,
   } from "$lib/stores/app";
@@ -44,7 +45,7 @@
     projects: "tasks, boards & deadlines",
     reader: "books & reading",
     files: "vault file browser",
-    properties: "library database & views",
+    properties: "library views & files",
     craft: "writing craft",
     stats: "writing stats",
     skills: "AI skills",
@@ -74,8 +75,23 @@
     refreshInboxCount();
   });
 
+  // Hidden from the sidebar (still reachable via command palette Ctrl+K
+  // and direct navigation): Inbox + Canvas are power-user surfaces, and
+  // Files lives inside Library's Files tab.
+  const HIDDEN_IDS = ["inbox", "canvas", "files"];
+
+  // Sidebar sections. Headers render when the group changes along the
+  // (possibly user-sorted) list, so drag-reorder and auto-sort keep working.
+  function wsGroup(id: string): string | null {
+    if (id === "home") return null;
+    if (id === "write" || id === "novel" || id === "script") return "Create";
+    if (id === "logs") return "Capture";
+    if (id === "projects" || id === "properties") return "Organize";
+    return "Explore";
+  }
+
   let displayWorkspaces = $derived.by(() => {
-    const all = [...workspaces];
+    const all = [...workspaces].filter((w) => !HIDDEN_IDS.includes(w.id));
     if (!$sidebarAutoSort && $sidebarOrder.length > 0) {
       const rank = new Map($sidebarOrder.map((id, i) => [id, i]));
       return all.sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999));
@@ -197,7 +213,10 @@
   </div>
 
   <nav class="workspace-nav" aria-label="Workspaces">
-    {#each displayWorkspaces as ws}
+    {#each displayWorkspaces as ws, i}
+      {#if wsGroup(ws.id) && wsGroup(ws.id) !== wsGroup(displayWorkspaces[i - 1]?.id ?? "")}
+        <div class="nav-group-label" aria-hidden="true">{wsGroup(ws.id)}</div>
+      {/if}
       <button
         class="nav-item"
         class:active={$currentWorkspace === ws.id && !$showSettings}
@@ -224,6 +243,16 @@
         {/if}
       </button>
     {/each}
+    <button
+      class="nav-item"
+      class:active={$showSettings}
+      onclick={toggleSettings}
+      title="Settings"
+      aria-label="Settings"
+    >
+      <span class="nav-icon"><Icon name="settings" size={17} /></span>
+      <span>Settings</span>
+    </button>
   </nav>
 
   <div class="sidebar-footer">
@@ -242,9 +271,9 @@
       <span class="nav-icon"><Icon name="plus" size={15} /></span>
       <span>New Doc</span>
     </button>
-    <button class="footer-item" class:active={$showSettings} onclick={toggleSettings} title="Settings" aria-label="Settings">
-      <span class="nav-icon"><Icon name="settings" size={15} /></span>
-      <span>Settings</span>
+    <button class="footer-item" class:active={$aiPanelOpen} onclick={() => ($aiPanelOpen = !$aiPanelOpen)} title="AI panel (Ctrl+J)" aria-label="Toggle AI panel" aria-pressed={$aiPanelOpen}>
+      <span class="nav-icon"><Icon name="sparkle" size={15} /></span>
+      <span>AI Panel</span>
     </button>
     <div
       class="footer-stats"
@@ -290,6 +319,15 @@
   .home-mark {
     width: 20px;
     height: auto;
+  }
+
+  .nav-group-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 10px 12px 2px;
   }
 
   .nav-badge {

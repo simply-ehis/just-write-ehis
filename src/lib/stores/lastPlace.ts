@@ -50,3 +50,38 @@ export function placeFor(workspace: string): string | null {
   if (!RESTORED_WORKSPACES.includes(workspace)) return null;
   return get(store)[workspace] ?? null;
 }
+
+// ── Global back navigation ──────────────────────────────────────
+// Linear history of {workspace, doc} visits. App pushes on every
+// user-driven navigation; the breadcrumb Back button pops. Going back
+// sets `suppressPush` so the return trip isn't re-recorded.
+
+export interface NavEntry {
+  workspace: string;
+  docId: string | null;
+}
+
+export const navControl = { suppressPush: false };
+
+const backStack: NavEntry[] = [];
+export const navDepth = writable(0);
+
+export function pushNavHistory(entry: NavEntry): void {
+  if (navControl.suppressPush) return;
+  const top = backStack[backStack.length - 1];
+  if (top && top.workspace === entry.workspace && top.docId === entry.docId) return;
+  backStack.push(entry);
+  if (backStack.length > 50) backStack.shift();
+  navDepth.set(backStack.length);
+}
+
+export function popNavHistory(): NavEntry | null {
+  const entry = backStack.pop() ?? null;
+  navDepth.set(backStack.length);
+  return entry;
+}
+
+export function clearNavHistory(): void {
+  backStack.length = 0;
+  navDepth.set(0);
+}

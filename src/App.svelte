@@ -206,6 +206,12 @@
     if (ws === prevWorkspace) return;
     const outgoing = prevWorkspace;
     prevWorkspace = ws;
+    // Record where we came from for the global Back button. If the doc
+    // moved with the workspace, the remembered per-workspace doc is the
+    // right return target; popNavHistory's suppressPush skips re-recording.
+    const leavingDoc =
+      $currentDoc?.workspace === outgoing ? $currentDoc.id : placeFor(outgoing);
+    pushNavHistory({ workspace: outgoing, docId: leavingDoc });
     if ($currentDoc) rememberPlace(outgoing, $currentDoc.id);
     if ($currentDoc?.workspace === ws || $showSettings) return;
     const id = placeFor(ws);
@@ -228,7 +234,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { checkForUpdate } from "$lib/updates";
   import { showBanner, showToast } from "$lib/stores/notifications";
-  import { forgetPlace, placeFor, rememberPlace } from "$lib/stores/lastPlace";
+  import { forgetPlace, placeFor, rememberPlace, pushNavHistory } from "$lib/stores/lastPlace";
 
   const DAY_MS = 86400000;
 
@@ -463,7 +469,7 @@
         {:else if $currentWorkspace === "inbox"}
           <InboxWorkspace />
         {:else if $currentWorkspace === "properties"}
-          <LazyWorkspace loader={() => import("$lib/components/PropertiesView.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/LibraryWorkspace.svelte")} />
         {:else if $currentWorkspace === "files"}
           {#if viewedFile}
             <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />
