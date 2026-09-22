@@ -108,10 +108,13 @@ def _download(url: str, dest: Path, label: str, expected_sha: str = "") -> None:
                 f"[{label}] retrieval incomplete: got {dest.stat().st_size} "
                 f"out of {total} bytes")
         print(f"[{label}] Saved -> {dest} ({dest.stat().st_size:,} bytes)", flush=True)
-        actual = _sha256(dest)
-        if actual != expected_sha:
-            dest.unlink()
-            raise RuntimeError(f"[{label}] SHA mismatch: expected {expected_sha}, got {actual}")
+        if expected_sha:
+            actual = _sha256(dest)
+            if actual != expected_sha:
+                dest.unlink()
+                raise RuntimeError(f"[{label}] SHA mismatch: expected {expected_sha}, got {actual}")
+        else:
+            print(f"[{label}] No pinned SHA — skipping checksum verify.", flush=True)
     print(f"[{label}] Saved -> {dest} ({dest.stat().st_size:,} bytes)", flush=True)
 
 
