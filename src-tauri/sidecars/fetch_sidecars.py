@@ -33,9 +33,11 @@ STT_GGUF_URL = (
 )
 STT_GGUF_PATH = MODELS_DIR / "moonshine-base-Q8_0.gguf"
 
+# int8 quantization (Q8): ~82MB model instead of ~310MB fp32.
+# Same voices/tokens/espeak bundle, same sherpa-onnx API.
 TTS_BUNDLE_URL = (
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
-    "kokoro-multi-lang-v1_0.tar.bz2"
+    "kokoro-int8-multi-lang-v1_0.tar.bz2"
 )
 TTS_BUNDLE_DIR = MODELS_DIR / "kokoro-multi-lang-v1_0"
 
@@ -184,8 +186,11 @@ def fetch_tts() -> None:
         inner.rmdir()
         print(f"[TTS] Flattened bundle root → {TTS_BUNDLE_DIR}", flush=True)
 
-    # Verify expected files
-    for req in ("model.onnx", "voices.bin", "tokens.txt"):
+    # Verify expected files (int8 model expected; fp32 accepted)
+    if not any((TTS_BUNDLE_DIR / n).exists()
+               for n in ("model.int8.onnx", "model.onnx")):
+        print("[TTS] WARNING: missing model.int8.onnx in bundle", flush=True)
+    for req in ("voices.bin", "tokens.txt"):
         if not (TTS_BUNDLE_DIR / req).exists():
             print(f"[TTS] WARNING: missing {req} in bundle", flush=True)
     espeak_dir = next(TTS_BUNDLE_DIR.rglob("espeak-ng-data"), None)

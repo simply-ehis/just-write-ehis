@@ -4,8 +4,8 @@ Kokoro TTS Server (torch-free)
 Kokoro v1.0 multi-lang (53 speakers) via sherpa-onnx — no PyTorch, no
 HuggingFace download at runtime. The model bundle is vendored locally.
 
-  Bundle: kokoro-multi-lang-v1_0 (model.onnx + voices.bin + tokens.txt
-          + espeak-ng-data), fetched with:
+  Bundle: kokoro-multi-lang-v1_0 (model.int8.onnx Q8 + voices.bin
+          + tokens.txt + espeak-ng-data), fetched with:
             python src-tauri/sidecars/fetch_sidecars.py --tts
 
 Lazy-loads on first synthesis call (A7.6).
@@ -148,7 +148,9 @@ class _TtsEngine:
         self.pipelines: dict[str, object] = {}
         self.sample_rate = 24000
         self.ready_error: str | None = None
-        self.onnx = _find(self.model_dir, ["model.onnx", "*.onnx"])
+        # int8 first: the vendored bundle is the Q8-quantized model
+        # (model.int8.onnx); fp32 model.onnx only as a fallback.
+        self.onnx = _find(self.model_dir, ["model.int8.onnx", "model.onnx", "*.onnx"])
         self.voices = _find(self.model_dir, ["voices.bin"])
         self.tokens = _find(self.model_dir, ["tokens.txt"])
         self.data_dir = next(
