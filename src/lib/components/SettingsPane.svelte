@@ -79,6 +79,7 @@
   }
 
   let activeCategory = $derived($settingsCategory);
+  let aboutLogo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
   let benchResults = $state<Record<string, number> | null>(null);
   let benchRunning = $state(false);
   let coldStartTime = $state(0);
@@ -419,6 +420,10 @@
         <div class="setting-row">
           <label for="setting-autohide-chrome">Auto-hide tabs while typing</label>
           <input id="setting-autohide-chrome" type="checkbox" bind:checked={$settings.autoHideChrome} />
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Setup flow</span>
+          <button class="secondary-btn" onclick={() => window.dispatchEvent(new CustomEvent("replay-onboarding"))}>Replay onboarding</button>
         </div>
       </div>
 
@@ -927,6 +932,7 @@
 
     {:else if activeCategory === "about"}
       <div class="settings-section">
+        <img class="about-logo" src={aboutLogo} alt="Just Write ehis — pen wrote 'this' with E-tick" />
         <h3>About & Diagnostics</h3>
         <div class="setting-row">
           <span class="setting-label">Version</span>
@@ -1202,6 +1208,14 @@
     margin-bottom: 20px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
+  }
+
+  .about-logo {
+    display: block;
+    width: 168px;
+    max-width: 60%;
+    height: auto;
+    margin: 4px 0 16px;
   }
 
   .setting-row {

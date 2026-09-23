@@ -221,5 +221,73 @@ for (const theme of THEMES) {
   console.error = (..._) => {};
 }
 
+// ── Phase F: per-workspace boot loop (dark theme) ─────────────────────
+// Eager workspaces (Write, Home, Logs) must render real content under every
+// theme's tokens. Lazy ones (Novel, Script, Map, Reader, Projects, Library,
+// Settings) can't resolve their chunks under jsdom (injected stylesheet
+// <link> never fires load — see tests/lazy-load-probe.mjs), so each must
+// reach either real content or the retryable lazy-failed state within the
+// 9s loadWithTimeout — never bare "Loading…" forever.
+{
+  const dom = new JSDOM(
+    `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
+    { url: "http://localhost/", pretendToBeVisual: true }
+  );
+  delete globalThis.CustomEvent;
+  delete globalThis.Event;
+  for (const key of KEYS) {
+    if (!(key in dom.window)) continue;
+    try {
+      globalThis[key] = dom.window[key];
+    } catch {
+      try {
+        Object.defineProperty(globalThis, key, {
+          value: dom.window[key], writable: true, configurable: true,
+        });
+      } catch { /* keep Node's */ }
+    }
+  }
+  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  if (dom.window.Range) {
+    if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [];
+    if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
+  }
+  if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
+  dom.window.innerWidth = 1280;
+  dom.window.innerHeight = 800;
+  dom.window.localStorage.setItem("writing-app-settings", JSON.stringify({ theme: "dark" }));
+  const errors = [];
+  console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 200));
+
+  await import(`${bundleUrl}?boot=workspace-loop`);
+  await new Promise((r) => setTimeout(r, 2500));
+
+  const qa = (s) => [...dom.window.document.querySelectorAll(s)];
+  const appHtml = () => dom.window.document.getElementById("app")?.innerHTML ?? "";
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  for (const label of ["Write", "Home", "Logs"]) {
+    const btn = qa(".workspace-nav .nav-item").find((b) => (b.getAttribute("aria-label") || "").trim() === label);
+    check(`[workspaces] nav has "${label}"`, !!btn);
+    btn?.click();
+    await sleep(800);
+    check(`[workspaces] "${label}" renders content (no lazy shell)`, !appHtml().includes("lazy-state"));
+  }
+  for (const label of ["Novel", "Script", "Map", "Reader", "Projects", "Library", "Settings"]) {
+    const btn = qa(".workspace-nav .nav-item").find((b) => (b.getAttribute("aria-label") || "").trim() === label);
+    check(`[workspaces] nav has "${label}"`, !!btn);
+    btn?.click();
+    await sleep(11000);
+    const html = appHtml();
+    const settled = !html.includes("lazy-state") || html.includes("lazy-failed");
+    check(`[workspaces] "${label}" settles (content or retryable failure)`, settled);
+    if (html.includes("lazy-failed")) {
+      check(`[workspaces] "${label}" failure offers retry`, html.includes("lazy-retry"));
+    }
+  }
+  console.error = (..._) => {};
+}
+
 console.log(failures === 0 ? "THEME-SWEEP ALL PASS" : `THEME-SWEEP ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -50,6 +50,7 @@
         source_id: $currentDoc?.id ?? "",
         target_id: title,
         context_snippet: line.trim().slice(0, 140) || `[[${title}]]`,
+        source_title: $currentDoc?.title ?? "",
       });
     }
     return out;
@@ -286,7 +287,8 @@
         <div class="backlinks-list">
           {#each outgoingBacklinks as out}
             <button class="backlink-item" onclick={() => openOutgoing(out.target_id)} title="Open {out.target_id}">
-              <span class="backlink-context">→ {out.target_id}</span>
+              <span class="backlink-title">→ {out.target_id}</span>
+              <span class="backlink-context">{out.context_snippet}</span>
             </button>
           {/each}
         </div>
@@ -297,7 +299,8 @@
         <div class="unlinked-header">Linked from elsewhere</div>
         <div class="backlinks-list">
           {#each backlinks as bl}
-            <button class="backlink-item" onclick={() => openBacklink(bl.source_id)}>
+            <button class="backlink-item" onclick={() => openBacklink(bl.source_id)} title="Open {bl.source_title || bl.source_id}">
+              {#if bl.source_title}<span class="backlink-title">{bl.source_title}</span>{/if}
               <span class="backlink-context">{bl.context_snippet}</span>
             </button>
           {/each}
@@ -513,6 +516,17 @@
     -webkit-box-orient: vertical;
     line-clamp: 3;
     overflow: hidden;
+  }
+
+  .backlink-title {
+    display: block;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .unlinked-header {

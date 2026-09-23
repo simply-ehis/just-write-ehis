@@ -44,6 +44,7 @@
   --accent-green: var(--accent);
   --accent-semantic-green: var(--accent);
   --accent-semantic-purple: #7A6F9B;
+  --accent-semantic-blue: #2563EB;
   --accent-semantic-red: #B54434;
   --accent-semantic-yellow: #9A6B1A;
   --success: var(--accent);
@@ -114,6 +115,7 @@
   --accent-semantic-purple: #A79BC9;
   --accent-semantic-red: #E08A7A;
   --accent-semantic-yellow: #D9A441;
+  --accent-semantic-blue: #8AB4F8;
   --success: var(--accent);
   --warning: #D9A441;
   --error: #E08A7A;
@@ -182,6 +184,7 @@
   --accent-semantic-green: #8FD694;
   --accent-semantic-purple: #C4B5E3;
   --accent-semantic-red: #F0857A;
+  --accent-semantic-blue: #6EA8FE;
   --accent-semantic-yellow: #FFB000;
   --success: var(--accent);
   --warning: #FFB000;
@@ -262,6 +265,7 @@
     --accent-semantic-purple: #A79BC9;
     --accent-semantic-red: #E08A7A;
     --accent-semantic-yellow: #D9A441;
+    --accent-semantic-blue: #8AB4F8;
     --accent-on: var(--text-on-accent);
     --success: var(--accent);
     --warning: #D9A441;
@@ -1330,6 +1334,7 @@ input:focus, textarea:focus, select:focus {
   --accent-semantic-green: var(--accent);
   --accent-semantic-purple: #B9A8DC;
   --accent-semantic-red: #E89A8B;
+  --accent-semantic-blue: #8AB4F8;
   --accent-semantic-yellow: #D9A441;
   --success: var(--accent);
   --warning: #D9A441;

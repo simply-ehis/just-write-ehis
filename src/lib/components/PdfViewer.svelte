@@ -132,7 +132,7 @@
     {:else if error}
       <div class="pdf-status error">{error}</div>
     {/if}
-    <canvas bind:this={canvas} class="pdf-canvas" class:hidden={loading || !!error}></canvas>
+    <canvas bind:this={canvas} class="pdf-canvas" class:hidden={loading || !!error} title="Themed preview only — the PDF file itself is unchanged"></canvas>
   </div>
 </div>
 
@@ -210,10 +210,19 @@
   }
 
   .pdf-canvas {
+    /* The page itself is white paper (correct for documents). On dark
+      surfaces the render is dimmed for viewing comfort only — the
+      source PDF is never modified. */
     background: #fff;
     border-radius: var(--radius-sm);
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
     max-width: none;
+  }
+
+  :global(:root[data-theme="dark"]) .pdf-canvas,
+  :global(:root[data-theme="glass"]) .pdf-canvas,
+  :global(:root[data-theme="brutalist"]) .pdf-canvas {
+    filter: brightness(0.86) contrast(0.96);
   }
 
   .pdf-canvas.hidden {

@@ -3,6 +3,7 @@
  * Returns processed HTML with transclusions rendered as inline components.
  */
 import { api } from "$lib/api";
+import { markdownToHtmlFragment } from "$lib/markdown";
 
 const TRANSCLUDE_REGEX = /!\[\[([^\]]+)\]\]/g;
 
@@ -132,8 +133,10 @@ export async function processTransclusions(markdown: string): Promise<string> {
       </div>`;
       result = result.replace(match[0], placeholder + errorHtml + placeholder);
     } else if (content) {
+      // Render the transcluded doc as markdown (headings/lists survive);
+      // the embed is visually quarantined by .transclude styling.
       const transcludeHtml = `<div class="transclude" data-transclude-target="${escapeHtml(target)}">
-        <div class="transclude-content">${escapeHtml(content).replace(/\n/g, "<br>")}</div>
+        <div class="transclude-content">${markdownToHtmlFragment(content)}</div>
         <div class="transclude-footer">
           <span class="transclude-source">← [[${escapeHtml(target)}]]</span>
           <span class="transclude-open" data-doc-id="${docId ? escapeHtml(docId) : ''}">↗ Open</span>

@@ -139,9 +139,9 @@ import {
     background: var(--surface-hover, #2a2a2a);
   }
   .tts-btn.playing {
-    background: #2563eb;
-    color: white;
-    border-color: #2563eb;
+    background: var(--accent-semantic-blue);
+    color: var(--text-on-accent);
+    border-color: var(--accent-semantic-blue);
   }
   .tts-btn.loading {
     opacity: 0.6;
@@ -166,7 +166,7 @@ import {
   }
   .tts-error {
     font-size: 11px;
-    color: #dc2626;
+    color: var(--error);
     margin-top: 2px;
   }
 </style>

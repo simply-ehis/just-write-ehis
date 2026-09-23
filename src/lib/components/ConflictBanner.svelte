@@ -134,9 +134,11 @@
     align-items: center;
     gap: 12px;
     padding: 8px 16px;
-    background: #78350f;
-    border-bottom: 1px solid #92400e;
-    color: #fef3c7;
+    /* Warning tint that follows the theme; flat overlay if color-mix is unavailable. */
+    background: var(--surface-overlay);
+    background: color-mix(in srgb, var(--warning) 22%, var(--bg-primary));
+    border-bottom: 1px solid var(--warning);
+    color: var(--text-primary);
     font-size: 13px;
     min-height: 40px;
   }
@@ -180,12 +182,12 @@
     background: rgba(255,255,255,0.1);
   }
   .conflict-btn.mine {
-    border-color: #22c55e;
-    color: #86efac;
+    border-color: var(--accent-semantic-green);
+    color: var(--accent-semantic-green);
   }
   .conflict-btn.theirs {
-    border-color: #3b82f6;
-    color: #93c5fd;
+    border-color: var(--accent-semantic-blue);
+    color: var(--accent-semantic-blue);
   }
   .conflict-btn.dismiss {
     padding: 4px 8px;
@@ -239,8 +241,8 @@
     padding: 1px 6px;
     border-radius: 3px;
   }
-  .diff-line.del { background: rgba(255, 107, 107, 0.12); color: #fca5a5; }
-  .diff-line.add { background: rgba(78, 205, 196, 0.12); color: #5eead4; }
+  .diff-line.del { background: rgba(255, 107, 107, 0.12); color: var(--accent-semantic-red); }
+  .diff-line.add { background: rgba(78, 205, 196, 0.12); color: var(--accent-semantic-green); }
   .diff-line.same { color: var(--text-muted); }
   .diff-empty { color: var(--text-muted); font-family: inherit; }
 </style>

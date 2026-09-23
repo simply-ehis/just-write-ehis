@@ -57,6 +57,18 @@ impl Database {
                 FOREIGN KEY (target_id) REFERENCES docs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS entity_occurrences (
+                entity_norm TEXT NOT NULL,
+                display TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                doc_id TEXT NOT NULL,
+                span_start INTEGER NOT NULL,
+                span_end INTEGER NOT NULL,
+                PRIMARY KEY (entity_norm, doc_id, span_start),
+                FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_entity_norm ON entity_occurrences(entity_norm);
+
             CREATE TABLE IF NOT EXISTS snapshots (
                 id TEXT PRIMARY KEY,
                 doc_id TEXT NOT NULL,

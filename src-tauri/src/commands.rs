@@ -234,6 +234,21 @@ pub fn unlinked_mentions(db: State<'_, Database>, doc_id: String) -> Result<Vec<
 }
 
 #[tauri::command]
+pub fn entities_list(db: State<'_, Database>) -> Result<Vec<EntitySummary>, String> {
+    db.entity_list()
+}
+
+#[tauri::command]
+pub fn entity_occurrences(db: State<'_, Database>, entity_norm: String) -> Result<Vec<EntityHit>, String> {
+    db.entity_occurrences(&entity_norm)
+}
+
+#[tauri::command]
+pub fn entities_backfill(db: State<'_, Database>) -> Result<i64, String> {
+    db.entities_backfill()
+}
+
+#[tauri::command]
 pub fn reader_update_position(db: State<'_, Database>, doc_id: String, position: f64) -> Result<(), String> {
     db.update_reading_position(&doc_id, position)
 }

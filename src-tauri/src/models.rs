@@ -32,6 +32,10 @@ pub struct Backlink {
     pub source_id: String,
     pub target_id: String,
     pub context_snippet: String,
+    /// Source doc title (joined at query time) so link lists read
+    /// without an N+1 title lookup.
+    #[serde(default)]
+    pub source_title: String,
 }
 
 // ── Implicit links (auto-detected mentions) ─────────────────────
@@ -40,6 +44,31 @@ pub struct LinkImplicit {
     pub source_id: String,
     pub target_id: String,
     pub match_type: String,
+}
+
+// ── Entity summaries + hits (auto-extracted names/places) ─────────
+// Rows are written with raw SQL in refresh_entities; these two shape the
+// list and occurrence queries. The TS preview mirror (entities.ts)
+// documents the same algorithm — keep the two in sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntitySummary {
+    pub entity_norm: String,
+    pub display: String,
+    pub kind: String,
+    pub doc_count: i64,
+    pub occ_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityHit {
+    pub entity_norm: String,
+    pub display: String,
+    pub kind: String,
+    pub doc_id: String,
+    pub doc_title: String,
+    pub span_start: i64,
+    pub span_end: i64,
+    pub snippet: String,
 }
 
 // ── Usage tracking ──────────────────────────────────────────────

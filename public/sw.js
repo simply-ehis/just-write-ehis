@@ -1,4 +1,4 @@
-const CACHE_NAME = 'just-write-ehis-v1';
+const CACHE_NAME = 'just-write-ehis-v2';
 const STATIC_ASSETS = [
   './',
   './index.html',

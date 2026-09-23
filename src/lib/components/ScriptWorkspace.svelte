@@ -8,7 +8,7 @@
   import DeleteButton from '$lib/components/DeleteButton.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import { downloadConvertOutput } from '$lib/download';
-  import { parseBookFile } from '$lib/bookparse';
+  import { readImportFile } from '$lib/importFile';
 
   let scripts = $state<Doc[]>([]);
   let selectedScript = $state<Doc | null>(null);
@@ -299,31 +299,18 @@
     input.value = "";
     if (!file) return;
     try {
-      const ext = file.name.split(".").pop()?.toLowerCase();
-      const fallbackTitle = file.name.replace(/\.[^.]+$/, "");
-      if (ext === "md" || ext === "txt" || ext === "fountain") {
-        const text = await file.text();
-        if (text.includes("\0")) {
-          showToast("That file looks binary, not text — import refused.", "error");
-          return;
-        }
-        const doc = await api.docCreate("script", "fountain", fallbackTitle, undefined, text);
-        scripts.unshift(doc);
-        selectScript(doc);
-        showToast(`Imported "${fallbackTitle}"`, "success");
-        return;
-      }
-      if (ext === "epub" || ext === "pdf" || ext === "docx") {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
         showToast(`Extracting text from ${file.name}…`, "info");
-        const data = new Uint8Array(await file.arrayBuffer());
-        const book = await parseBookFile(file.name, data, ext === "pdf" ? (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default : undefined);
-        const doc = await api.docCreate("script", "fountain", book.title, undefined, book.text);
-        scripts.unshift(doc);
-        selectScript(doc);
-        showToast(`Imported "${book.title}"`, "success");
-        return;
       }
-      showToast(`.${ext ?? "?"} isn't importable — use .fountain, .md, .txt, .epub, .pdf, or .docx.`, "warning");
+      const res = await readImportFile(file);
+      if (res.encodingNote) showToast(res.encodingNote, "warning");
+      // Scripts stay fountain docs; book text lands as fountain body
+      // (same as before — structure comes from .fountain sources).
+      const doc = await api.docCreate("script", "fountain", res.title, undefined, res.text);
+      scripts.unshift(doc);
+      selectScript(doc);
+      showToast(`Imported "${res.title}"`, "success");
     } catch (err) {
       showToast(`Import failed: ${err instanceof Error ? err.message : err}`, "error");
     }

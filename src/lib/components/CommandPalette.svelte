@@ -45,6 +45,7 @@
     { id: 'close-tab', label: 'Close Current Tab', icon: 'x', action: () => { closeCurrentTab(); close(); } },
     { id: 'ai-panel', label: 'Toggle AI Panel (Ctrl+J)', icon: 'sparkle', action: () => { $aiPanelOpen = !$aiPanelOpen; close(); } },
     { id: 'sidebar', label: 'Toggle Sidebar (Ctrl+B)', icon: 'menu', action: () => { $sidebarOpen = !$sidebarOpen; close(); } },
+    { id: 'replay-onboarding', label: 'Replay Onboarding Setup', icon: 'sparkle', action: () => { window.dispatchEvent(new CustomEvent('replay-onboarding')); close(); } },
     { id: 'inspector', label: 'Toggle Outline & Links (Ctrl+I)', icon: 'panel', action: () => { $inspectorOpen = !$inspectorOpen; close(); } },
     { id: 'zen', label: 'Toggle Zen Mode (F11)', icon: 'eye', action: () => { $zenMode = !$zenMode; close(); } },
     { id: 'vault-rename', label: 'Vault-Wide Rename', icon: 'edit', action: () => { showRename = true; close(); } },

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact } from '$lib/api';
+  import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact, type EntitySummary, type EntityHit } from '$lib/api';
   import { currentDoc, currentWorkspace, openTabs } from '$lib/stores/app';
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
@@ -11,6 +11,84 @@
   import DocForkPanel from './DocForkPanel.svelte';
 
   import ForkBadge from './ForkBadge.svelte';
+  import { readImportFile, contentHash } from '$lib/importFile';
+  let splitMode = $state<'chapters' | 'scenes'>('chapters');
+  let castEntities = $state<EntitySummary[]>([]);
+  let castLoading = $state(false);
+  let castSelected = $state<string | null>(null);
+  let castHits = $state<EntityHit[]>([]);
+  let castBackfilling = $state(false);
+
+  /** Cover ref from the current project's frontmatter (EPUB import art). */
+  let projectCover = $derived.by(() => {
+    const current = projects.find((p) => p.id === projectId);
+    try {
+      return (JSON.parse(current?.frontmatter_json ?? "{}") as { cover?: string }).cover ?? null;
+    } catch {
+      return null;
+    }
+  });
+
+  /** Load the entity index (auto-built on every save; backfill covers older docs). */
+  async function loadCast() {
+    castLoading = true;
+    try {
+      castEntities = await api.entitiesList();
+    } catch (e) {
+      console.warn("Cast load failed:", e instanceof Error ? e.message : e);
+      castEntities = [];
+    } finally {
+      castLoading = false;
+    }
+  }
+
+  async function selectEntity(norm: string) {
+    if (castSelected === norm) {
+      castSelected = null;
+      castHits = [];
+      return;
+    }
+    castSelected = norm;
+    try {
+      castHits = await api.entityOccurrences(norm);
+    } catch (e) {
+      console.warn("Occurrences load failed:", e instanceof Error ? e.message : e);
+      castHits = [];
+    }
+  }
+
+  async function backfillCast() {
+    castBackfilling = true;
+    try {
+      const n = await api.entitiesBackfill();
+      showToast(`Indexed ${n} document${n === 1 ? "" : "s"}`, "success");
+      await loadCast();
+      if (castSelected) castHits = await api.entityOccurrences(castSelected);
+    } catch (e) {
+      showToast(`Backfill failed: ${e instanceof Error ? e.message : e}`, "error");
+    } finally {
+      castBackfilling = false;
+    }
+  }
+
+  /** Open an occurrence: the doc, or its beat in the editor when it's a scene. */
+  async function openEntityHit(hit: EntityHit) {
+    try {
+      const doc = await api.docGet(hit.doc_id);
+      $currentDoc = doc;
+      if (!$openTabs.find((t) => t.id === doc.id)) {
+        $openTabs = [doc, ...$openTabs];
+      }
+      const scene = board.scenes.find((s) => s.doc.id === hit.doc_id);
+      if (scene) {
+        viewMode = 'board';
+        selectBeat(scene);
+      }
+      await api.usageRecord(doc.id, "open").catch(() => {});
+    } catch (e) {
+      showToast(`Couldn't open: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
   let projectId = $state<string | null>(null);
   let projects = $state<Doc[]>([]);
   let board = $state<BeatBoard>({ acts: [], sequences: [], scenes: [] });
@@ -18,7 +96,7 @@
   let bibleNewKey = $state<Record<string, string>>({});
   let bibleNewVal = $state<Record<string, string>>({});
   let selectedBeat = $state<BeatNode | null>(null);
-  let viewMode = $state<'board' | 'bible'>('board');
+  let viewMode = $state<'board' | 'bible' | 'cast'>('board');
   let compiledOutput = $state('');
   let compileFormat = $state('md');
   let compileFormats = $state<string[]>(['md', 'txt', 'html']);
@@ -26,6 +104,12 @@
   let loading = $state(false);
   let boardCollapsed = $state(false);
   let importing = $state(false);
+  let importProgress = $state("");
+  let importCancelled = $state(false);
+  // Duplicate-import acknowledge: first Import click only warns, the
+  // second (same bytes) proceeds. Native dialogs are banned app-wide
+  // (headless + mobile have no dialog chrome), hence the two-tap flow.
+  let dupeAckHash = $state<string | null>(null);
   let startingWriting = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
   let ghostCounts = $state<Record<string, number>>({});
@@ -33,15 +117,17 @@
   let activeGhostParentId = $state<string | null>(null);
 
   /**
-   * Split imported prose into chapters: markdown headings first,
-   * chapter/part markers second, one chapter as fallback. Marker lines
-   * stay in the body so nothing is lost.
+   * Split imported prose into chapters (or scenes): markdown headings
+   * first, chapter/part markers second, screenplay scene headers
+   * (INT./EXT.) and *** rules in scenes mode, one chapter as fallback.
+   * Marker lines stay in the body so nothing is lost.
    */
-  function splitChapters(text: string): { title: string; body: string }[] {
+  function splitChapters(text: string, mode: 'chapters' | 'scenes' = 'chapters'): { title: string; body: string }[] {
     const lines = text.split("\n");
     const cuts: { index: number; title: string }[] = [];
+    const depth = mode === "scenes" ? 6 : 3;
     lines.forEach((line, i) => {
-      const m = line.match(/^#{1,3}\s+(.+?)\s*$/);
+      const m = line.match(new RegExp(`^#{1,${depth}}\\s+(.+?)\\s*$`));
       if (m && m[1]) cuts.push({ index: i, title: m[1].trim() });
     });
     if (cuts.length === 0) {
@@ -52,7 +138,23 @@
         }
       });
     }
-    const cleanTitle = (t: string) => t.slice(0, 80) || "Untitled";
+    if (cuts.length === 0 && mode === "scenes") {
+      lines.forEach((line, i) => {
+        const t = line.trim();
+        // Fountain/screenplay scene headers survive prose import as plain
+        // lines — split on them so .fountain lands as scenes, not mush.
+        if (t.length > 0 && t.length <= 70 && /^(INT\.|EXT\.|EST\.|INT\.\/EXT\.)/i.test(t)) {
+          cuts.push({ index: i, title: t });
+        } else if (/^(\*\*\*|---|\.\.\.)\s*$/.test(t)) {
+          cuts.push({ index: i, title: "Scene" });
+        }
+      });
+    }
+    // "chapter 1" vs "CHAPTER 1" vs "Chapter One" → one numbering voice.
+    const cleanTitle = (t: string) => {
+      const m = t.replace(/\s+/g, " ").trim().replace(/^chapter\s+(.+)$/i, (_m, n: string) => `Chapter ${n}`);
+      return m.slice(0, 80) || "Untitled";
+    };
     if (cuts.length === 0) return [{ title: "Chapter 1", body: text.trim() }];
     const kept = cuts.slice(0, 200);
     const chapters: { title: string; body: string }[] = [];
@@ -69,36 +171,6 @@
     return chapters.length > 0 ? chapters : [{ title: "Chapter 1", body: text.trim() }];
   }
 
-  /**
-   * Read a novel file in any supported form: plain text directly,
-   * books via the shared book parser (same path as Reader import).
-   */
-  async function readNovelFile(file: File): Promise<{ title: string; text: string }> {
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    const fallbackTitle = file.name.replace(/\.[^.]+$/, "");
-    if (ext === "md" || ext === "txt" || ext === "fountain") {
-      const text = await file.text();
-      if (text.includes("\0")) {
-        throw new Error("That file looks binary, not text — import refused.");
-      }
-      if (!text.trim()) throw new Error("That file is empty.");
-      return { title: fallbackTitle, text };
-    }
-    if (ext === "epub" || ext === "pdf" || ext === "docx") {
-      showToast(`Extracting text from ${file.name}…`, "info");
-      const { parseBookFile } = await import("$lib/bookparse");
-      let worker: string | undefined;
-      if (ext === "pdf") {
-        worker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-      }
-      const data = new Uint8Array(await file.arrayBuffer());
-      const book = await parseBookFile(file.name, data, worker);
-      if (!book.text.trim()) throw new Error("No text could be extracted.");
-      return { title: book.title || fallbackTitle, text: book.text };
-    }
-    throw new Error(`.${ext ?? "?"} isn't importable — use .epub, .pdf, .docx, .md, .txt, or .fountain.`);
-  }
-
   /** Import a novel file as a project: one act, one scene per chapter. */
   async function handleImportFile(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -107,20 +179,82 @@
     if (!file || importing) return;
     importing = true;
     try {
-      const { title, text } = await readNovelFile(file);
-      const chapters = splitChapters(text);
-      const project = await api.docCreate("novel", "project", title);
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+        showToast(`Extracting text from ${file.name}…`, "info");
+      }
+      const { title, text, author, cover, encodingNote } = await readImportFile(file);
+      if (encodingNote) showToast(encodingNote, "warning");
+      // Duplicate guard: same bytes imported before → confirm, don't clone.
+      const hash = contentHash(text);
+      const dupe = projects.find((p) => {
+        try {
+          return (JSON.parse(p.frontmatter_json ?? "{}") as { importHash?: string }).importHash === hash;
+        } catch {
+          return false;
+        }
+      });
+      if (dupe) {
+        if (dupeAckHash !== hash) {
+          dupeAckHash = hash;
+          showToast(`"${title}" looks already imported as "${dupe.title}" — click Import again to duplicate it`, "warning");
+          return;
+        }
+        dupeAckHash = null;
+      }
+      const chapters = splitChapters(text, splitMode);
+      const unit = splitMode === "scenes" ? "scene" : "chapter";
+      const fm: Record<string, unknown> = { importHash: hash };
+      if (author) fm.author = author;
+      const project = await api.docCreate("novel", "project", title, undefined, "", JSON.stringify(fm));
+      // EPUB cover art → vault attachment, referenced from the project.
+      if (cover?.b64) {
+        try {
+          const ext = cover.mime.includes("png") ? "png" : "jpg";
+          const ref = await api.attachmentSave(`cover.${ext}`, cover.b64);
+          await api.docSave(project.id, undefined, undefined, undefined, JSON.stringify({ ...fm, cover: ref }));
+        } catch (e) {
+          console.warn("Cover attach failed (import continues):", e instanceof Error ? e.message : e);
+        }
+      }
       projects = [...projects, project];
       projectId = project.id;
       $currentDoc = project;
       await api.docCreate("novel", "act", "Part One", project.id, "", JSON.stringify({ status: "draft", act: 1, order: 1024 }));
+      // Chapters go in small parallel batches (6-way): a 200-chapter
+      // novel was 200 serialized round trips with no feedback. Progress
+      // counts up; Cancel stops after the in-flight batch and keeps
+      // what's already created (no half-project rollback games).
       let order = 2048;
-      for (const ch of chapters) {
-        await api.docCreate("novel", "scene", ch.title, project.id, ch.body, JSON.stringify({ status: "draft", act: 1, order }));
-        order += 1024;
+      let created = 0;
+      importCancelled = false;
+      const BATCH = 6;
+      for (let i = 0; i < chapters.length && !importCancelled; i += BATCH) {
+        const slice = chapters.slice(i, i + BATCH);
+        await Promise.all(
+          slice.map((ch) => {
+            const o = order;
+            order += 1024;
+            return api
+              .docCreate("novel", "scene", ch.title, project.id, ch.body, JSON.stringify({ status: "draft", act: 1, order: o }))
+              .then(() => {
+                created++;
+                importProgress = `Importing ${unit} ${created}/${chapters.length}…`;
+              });
+          })
+        );
       }
+      if (importCancelled) {
+        await loadProject();
+        showToast(`Import stopped — kept ${created} of ${chapters.length} ${unit}s`, "warning");
+        const firstKept = board.scenes[0];
+        if (firstKept) selectBeat(firstKept);
+        return;
+      }
+      importProgress = "";
       await loadProject();
-      showToast(`Imported "${title}" — ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}`, "success");
+      const byline = author ? ` by ${author}` : "";
+      showToast(`Imported "${title}"${byline} — ${chapters.length} ${unit}${chapters.length === 1 ? "" : "s"}`, "success");
       // Land in the editor on the first imported chapter, not back on
       // the beat board — otherwise a good import still feels broken.
       const firstScene = board.scenes[0];
@@ -129,6 +263,8 @@
       showToast(`Import failed: ${err instanceof Error ? err.message : err}`, "error");
     } finally {
       importing = false;
+      importProgress = "";
+      importCancelled = false;
     }
   }
 
@@ -484,6 +620,9 @@
   <div class="novel-header">
     <h1>Novel Studio</h1>
     <div class="project-picker">
+      {#if projectCover}
+        <img class="project-cover" src={projectCover} alt="Project cover art" />
+      {/if}
       <select
         bind:value={projectId}
         title="Novel project"
@@ -500,8 +639,17 @@
     <div class="view-toggle">
       <button class:active={viewMode === 'board'} onclick={() => viewMode = 'board'}>Beat Board</button>
       <button class:active={viewMode === 'bible'} onclick={() => viewMode = 'bible'}>Story Bible</button>
+      <button class:active={viewMode === 'cast'} onclick={() => { viewMode = 'cast'; loadCast(); }}>Cast & Places</button>
       <button onclick={() => (boardCollapsed = !boardCollapsed)} title={boardCollapsed ? "Show board" : "Focus editor — hide board"} aria-pressed={boardCollapsed}>{boardCollapsed ? "Show board" : "Focus editor"}</button>
       <button class="import-btn" onclick={() => importInput?.click()} title="Import novel (.epub .pdf .docx .md .txt .fountain)" aria-label="Import novel" disabled={importing}>Import</button>
+      {#if importing}
+        <span class="import-progress" aria-live="polite">{importProgress || "Importing…"}</span>
+        <button class="import-cancel" onclick={() => (importCancelled = true)} aria-label="Cancel import">Cancel</button>
+      {/if}
+      <select class="split-select" bind:value={splitMode} title="Split imports by chapter headings or by scenes" aria-label="Import split mode">
+        <option value="chapters">Chapters</option>
+        <option value="scenes">Scenes</option>
+      </select>
       <input
         bind:this={importInput}
         type="file"
@@ -703,6 +851,52 @@
       {/each}
     </div>
       {/if}
+      {#if viewMode === 'cast'}
+    <div class="cast-view">
+      <h2>Cast & Places</h2>
+      <p class="cast-sub">Auto-extracted on every save — Story Bible names first, then capitalized names. Click an entity for every appearance.</p>
+      <div class="cast-actions">
+        <button class="bible-add-btn" onclick={loadCast} disabled={castLoading}>{castLoading ? "Loading…" : "Refresh"}</button>
+        <button class="bible-add-btn" onclick={backfillCast} disabled={castBackfilling} title="Index every existing document (older docs predate auto-indexing)">
+          {castBackfilling ? "Indexing…" : "Index all docs"}
+        </button>
+      </div>
+      {#if castLoading}
+        <p class="cast-empty">Reading the index…</p>
+      {:else if castEntities.length === 0}
+        <p class="cast-empty">No names yet — write or import something with characters in it, then Refresh.</p>
+      {:else}
+        <div class="cast-list">
+          {#each castEntities as ent}
+            <button
+              class="cast-item"
+              class:selected={castSelected === ent.entity_norm}
+              onclick={() => selectEntity(ent.entity_norm)}
+              aria-expanded={castSelected === ent.entity_norm}
+            >
+              <span class="cast-kind cast-kind-{ent.kind}">{ent.kind}</span>
+              <span class="cast-name">{ent.display}</span>
+              <span class="cast-counts">{ent.doc_count} doc{ent.doc_count === 1 ? "" : "s"} · {ent.occ_count} mention{ent.occ_count === 1 ? "" : "s"}</span>
+            </button>
+            {#if castSelected === ent.entity_norm}
+              <div class="cast-hits">
+                {#if castHits.length === 0}
+                  <p class="cast-empty">No appearances found.</p>
+                {:else}
+                  {#each castHits as hit}
+                    <button class="cast-hit" onclick={() => openEntityHit(hit)}>
+                      <span class="cast-hit-doc">{hit.doc_title}</span>
+                      <span class="cast-hit-snippet">{hit.snippet}</span>
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    </div>
+      {/if}
         {/snippet}
         {#snippet bottom()}
       {#if selectedBeat}
@@ -778,6 +972,20 @@
     font-weight: var(--font-weight-bold);
   }
 
+  .project-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .project-cover {
+    height: 40px;
+    width: auto;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    object-fit: cover;
+  }
+
   .view-toggle {
     display: flex;
     gap: var(--space-1);
@@ -817,6 +1025,33 @@
   .import-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .split-select {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+  }
+
+  .import-progress {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    align-self: center;
+    white-space: nowrap;
+  }
+
+  .import-cancel {
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--accent-semantic-red);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--accent-semantic-red);
+    font-size: var(--font-size-sm);
+    cursor: pointer;
   }
 
   .project-select {
@@ -1100,6 +1335,129 @@
     overflow-y: auto;
     flex: 1;
     min-height: 0;
+  }
+
+  .cast-view {
+    padding: var(--space-4);
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .cast-view h2 {
+    font-family: var(--font-heading);
+    margin-bottom: var(--space-1);
+  }
+
+  .cast-sub {
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
+    margin: 0 0 var(--space-3);
+  }
+
+  .cast-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+
+  .cast-empty {
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  .cast-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .cast-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .cast-item.selected {
+    border-color: var(--accent-primary);
+  }
+
+  .cast-kind {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-overlay);
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .cast-kind-person {
+    color: var(--accent-semantic-green);
+  }
+
+  .cast-kind-place {
+    color: var(--accent-semantic-blue);
+  }
+
+  .cast-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .cast-counts {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+  }
+
+  .cast-hits {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: 0 0 var(--space-2) var(--space-4);
+  }
+
+  .cast-hit {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--surface-overlay);
+    border: none;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .cast-hit:hover {
+    background: var(--surface-raised);
+  }
+
+  .cast-hit-doc {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-primary);
+  }
+
+  .cast-hit-snippet {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: var(--line-height-relaxed);
   }
 
   .bible-view h2 {

@@ -4,6 +4,7 @@
   import { showToast } from '$lib/stores/notifications';
   import { settings } from '$lib/stores/settings';
   import { processTransclusions } from '$lib/transclude';
+  import { readImportFile } from '$lib/importFile';
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
   import PdfViewer from '$lib/components/PdfViewer.svelte';
   import { downloadConvertOutput } from '$lib/download';
@@ -230,35 +231,20 @@
     const file = input.files?.[0];
     if (!file) return;
 
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const fallbackTitle = file.name.replace(/\.[^.]+$/, '');
-
     try {
-      let title = fallbackTitle;
-      let content: string;
-      let kind: string;
-      if (ext === 'md' || ext === 'txt' || ext === 'fountain') {
-        content = await file.text();
-        if (content.includes('\0')) {
-          showToast('That file looks binary, not text — import refused.', 'error');
-          if (importInput) importInput.value = '';
-          return;
-        }
-        kind = ext === 'fountain' ? 'fountain' : 'md';
-      } else if (ext === 'epub' || ext === 'pdf' || ext === 'docx') {
-        const data = new Uint8Array(await file.arrayBuffer());
-        await importBookBytes(ext, file.name, data);
-        if (importInput) importInput.value = '';
-        return;
-      } else {
-        showToast(`.${ext ?? '?'} isn't importable — use .epub, .pdf, .docx, .md, .txt, or .fountain.`, 'warning');
-        if (importInput) importInput.value = '';
-        return;
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+        showToast(`Extracting text from ${file.name}…`, "info");
       }
-      const doc = await api.readerImportBook(title, content, kind);
+      const res = await readImportFile(file);
+      if (res.encodingNote) showToast(res.encodingNote, "warning");
+      // Fountain keeps its kind so Script-style structure survives the
+      // round trip; everything else shelves as md text.
+      const kind = res.ext === "fountain" ? "fountain" : "md";
+      const doc = await api.readerImportBook(res.title, res.text, kind);
       const entry: BookshelfEntry = { doc, shelf_status: 'to-read', rating: null };
       books.unshift(entry);
-      showToast(`Imported "${title}"`, 'success');
+      showToast(`Imported "${res.title}"`, 'success');
     } catch (err) {
       console.error('Import failed:', err);
       showToast(`Import failed: ${err instanceof Error ? err.message : err}`, 'error');

@@ -93,6 +93,20 @@ export interface AppSettings {
   aiPersona: string;
   templates: { name: string; content: string; workspace: string }[];
 
+  // First-run onboarding (Area 5): explicit versioned flag replaces the
+  // old featuresUsed.length===0 proxy. Veterans (featuresUsed non-empty,
+  // flag absent) are migrated to hasOnboarded=true silently at boot.
+  hasOnboarded: boolean;
+  onboardedVersion: number;
+  onboardSkipped: boolean;
+  // Top-bar pins (desktop sidebar header + mobile BottomBar main row) and
+  // sidebar hides chosen during onboarding. [] = not customized (current
+  // behavior); null hiddenIds = default hides (inbox/canvas/files).
+  topBarIds: string[];
+  hiddenIds: string[] | null;
+  // Landing workspace on fresh boot with nothing to restore.
+  defaultWorkspace: string;
+
   // Per-workspace AI privacy: workspaceId → true = local only, no API calls
   workspacePrivacy: Record<string, boolean>;
 
@@ -191,6 +205,12 @@ const defaultSettings: AppSettings = {
   dismissedNudges: [],
   aiPersona: "",
   templates: [],
+  hasOnboarded: false,
+  onboardedVersion: 0,
+  onboardSkipped: false,
+  topBarIds: [],
+  hiddenIds: null,
+  defaultWorkspace: "home",
   workspacePrivacy: { logs: true },
   savedViews: [],
 
@@ -228,6 +248,8 @@ export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
   )
 );
 
+/** Current onboarding flow version. Bump when the steps change enough to re-prompt. */
+export const ONBOARD_VERSION = 1;
 /** Resolves once keychain hydration + legacy migration finished. */
 let resolveSecretsReady!: () => void;
 export const secretsReady = new Promise<void>((resolve) => {

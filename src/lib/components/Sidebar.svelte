@@ -15,8 +15,10 @@
   import { groupOfWorkspace, groupRankOf } from "$lib/workspaceGroups";
   import Icon from "$lib/components/Icon.svelte";
 
-  // New logo mark — same for all themes.
-  let markSrc = "mark.png";
+  // Ehis pen mark — nib crop for the 20px home icon, full wordmark for
+  // the sidebar header. Theme-aware: dark ink on paper, paper ink on dark/glass.
+  let markSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
+  let logoSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   const wsIcons: Record<string, string> = {
     home: "home",
@@ -77,9 +79,24 @@
   });
 
   // Hidden from the sidebar (still reachable via command palette Ctrl+K
-  // and direct navigation): Inbox + Canvas are power-user surfaces, and
-  // Files lives inside Library's Files tab.
-  const HIDDEN_IDS = ["inbox", "canvas", "files"];
+  // and direct navigation): null = default hides (Inbox + Canvas are
+  // power-user surfaces, Files lives inside Library's Files tab).
+  // Onboarding can override both lists; pins always win over hides.
+  const DEFAULT_HIDDEN_IDS = ["inbox", "canvas", "files"];
+  let effectiveHidden = $derived($settings.hiddenIds ?? DEFAULT_HIDDEN_IDS);
+  // Pinned top-bar ids, validated against known workspaces (pins win
+  // over hides by construction: the grouped list below excludes them).
+  let topPins = $derived(
+    $settings.topBarIds
+      .filter((id) => workspaces.some((w) => w.id === id))
+      .slice(0, 4)
+  );
+  let pinnedWorkspaces = $derived(
+    topPins.flatMap((id) => {
+      const meta = workspaces.find((w) => w.id === id);
+      return meta ? [{ ...meta }] : [];
+    })
+  );
 
   // Sidebar sections come from the shared grouping module (same categories
   // as mobile's More menu). Headers render when the group changes along the
@@ -88,7 +105,9 @@
   const groupRank = groupRankOf;
 
   let displayWorkspaces = $derived.by(() => {
-    const all = [...workspaces].filter((w) => !HIDDEN_IDS.includes(w.id));
+    const all = [...workspaces].filter(
+      (w) => !effectiveHidden.includes(w.id) && !topPins.includes(w.id)
+    );
     let ordered: typeof all;
     if (!$sidebarAutoSort && $sidebarOrder.length > 0) {
       const rank = new Map($sidebarOrder.map((id, i) => [id, i]));
@@ -206,7 +225,7 @@
 
 <aside class="sidebar {className}">
   <div class="wordmark">
-    <img class="logo" src={markSrc} alt="Just Write ehis logo" />
+    <img class="logo" src={logoSrc} alt="Just Write ehis logo" />
     <span class="name">Just Write ehis</span>
     <button class="icon-btn sidebar-collapse-btn" onclick={() => ($sidebarOpen = false)} title="Hide sidebar (Ctrl+B)" aria-label="Hide sidebar">
       <Icon name="arrow-left" size={14} />
@@ -214,6 +233,32 @@
   </div>
 
   <nav class="workspace-nav" aria-label="Workspaces">
+    {#if pinnedWorkspaces.length > 0}
+      <div class="nav-pins" role="group" aria-label="Pinned workspaces">
+        {#each pinnedWorkspaces as ws}
+          <button
+            class="nav-item nav-pin"
+            class:active={$currentWorkspace === ws.id && !$showSettings}
+            data-ws={ws.id}
+            onclick={() => selectWorkspace(ws.id)}
+            title={`${ws.label} — pinned in onboarding`}
+            aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
+          >
+            <span class="nav-icon">
+              {#if ws.id === "home"}
+                <img class="home-mark" src={markSrc} alt="" aria-hidden="true" />
+              {:else}
+                <Icon name={wsIcons[ws.id] ?? "files"} size={17} />
+              {/if}
+            </span>
+            <span>{ws.label}</span>
+            {#if ws.id === "inbox" && inboxCount != null && inboxCount > 0}
+              <span class="nav-badge" aria-hidden="true">{inboxCount > 99 ? "99+" : inboxCount}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
     {#each displayWorkspaces as ws, i}
       {#if wsGroup(ws.id) && wsGroup(ws.id) !== wsGroup(displayWorkspaces[i - 1]?.id ?? "")}
         <div class="nav-group-label" aria-hidden="true">{wsGroup(ws.id)}</div>
@@ -329,6 +374,14 @@
     letter-spacing: 0.08em;
     color: var(--text-muted);
     padding: 10px 12px 2px;
+  }
+
+  /* Onboarding pins: label-free (keeps group headers exact), separated
+    from the grouped list by a hairline. */
+  .nav-pins {
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 2px;
   }
 
   .nav-badge {

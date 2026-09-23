@@ -66,7 +66,7 @@ async function serveAndFetch() {
     check("preview serves index.html (HTTP 200)", index.status === 200, `status ${index.status}`);
     const html = index.body;
     check("bundle script referenced", /assets\/index-.*\.js/.test(html));
-    for (const asset of ["boot-logo.png", "mark.png", "manifest.webmanifest", "icon-192.png"]) {
+    for (const asset of ["ehis-logo-dark.svg", "ehis-logo-light.svg", "ehis-mark-dark.svg", "ehis-mark-light.svg", "manifest.webmanifest", "icon-192.png"]) {
       const r = await getText(port, `/${asset}`);
       check(`dist serves /${asset}`, r.status === 200);
     }

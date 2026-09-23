@@ -56,6 +56,7 @@ export interface Backlink {
   source_id: string;
   target_id: string;
   context_snippet: string;
+  source_title: string;
 }
 
 export interface SearchResult {
@@ -108,6 +109,25 @@ export interface UnlinkedMention {
   source_title: string;
   mentioned_title: string;
   context_snippet: string;
+}
+
+export interface EntitySummary {
+  entity_norm: string;
+  display: string;
+  kind: string;
+  doc_count: number;
+  occ_count: number;
+}
+
+export interface EntityHit {
+  entity_norm: string;
+  display: string;
+  kind: string;
+  doc_id: string;
+  doc_title: string;
+  span_start: number;
+  span_end: number;
+  snippet: string;
 }
 
 export interface BookshelfEntry {
@@ -311,6 +331,15 @@ export const api = {
 
   unlinkedMentions: (docId: string) =>
     safeInvoke<UnlinkedMention[]>("unlinked_mentions", { docId }),
+
+  entitiesList: () =>
+    safeInvoke<EntitySummary[]>("entities_list", {}),
+
+  entityOccurrences: (entityNorm: string) =>
+    safeInvoke<EntityHit[]>("entity_occurrences", { entityNorm }),
+
+  entitiesBackfill: () =>
+    safeInvoke<number>("entities_backfill", {}),
 
   readerUpdatePosition: (docId: string, position: number) =>
     safeInvoke<void>("reader_update_position", { docId, position }),

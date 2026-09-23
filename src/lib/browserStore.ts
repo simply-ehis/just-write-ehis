@@ -6,6 +6,7 @@
  * snapshots, tabs, conversations, bible facts, usage days) to localStorage.
  * All methods are synchronous; the async boundary lives in browserBackend.
  */
+import { extractEntities, entitySnippet, type ExtractedEntity } from "$lib/entities";
 
 export interface BrowserDoc {
   id: string;
@@ -158,6 +159,9 @@ class BrowserStore {
   rhythm: Record<string, number[]> = {};
   canvas: { nodes: BrowserCanvasNode[]; edges: BrowserCanvasEdge[] } = { nodes: [], edges: [] };
   opens: Record<string, DocOpens> = {};
+  /** Entity index (preview mirror of entity_occurrences): rebuilt on load
+    * and refreshed on create/save; dropped with the doc on delete. */
+  entityIndex = new Map<string, ExtractedEntity[]>();
 
   constructor() {
     this.docs = load<BrowserDoc[]>(DOCS_KEY, []);
@@ -173,6 +177,68 @@ class BrowserStore {
     this.canvas = load<{ nodes: BrowserCanvasNode[]; edges: BrowserCanvasEdge[] }>(CANVAS_KEY, { nodes: [], edges: [] });
     this.opens = load<Record<string, DocOpens>>(OPENS_KEY, {});
     this.purgeSeedRemnants();
+    this.rebuildEntityIndex();
+  }
+
+  private gazetteer(): { kind: string; key: string }[] {
+    return this.bible.map((b) => ({ kind: b.kind, key: b.key }));
+  }
+
+  /** Refresh one doc's entity rows (mirror of refresh_entities). */
+  refreshEntities(docId: string): void {
+    const doc = this.docs.find((d) => d.id === docId);
+    if (!doc) {
+      this.entityIndex.delete(docId);
+      return;
+    }
+    this.entityIndex.set(docId, extractEntities(doc.content || "", this.gazetteer()));
+  }
+
+  /** Full reindex (bible gazetteer changed, or backfill). Public for backend cases. */
+  rebuildEntityIndex(): void {
+    for (const doc of this.docs) {
+      try {
+        this.entityIndex.set(doc.id, extractEntities(doc.content || "", this.gazetteer()));
+      } catch {
+        this.entityIndex.delete(doc.id);
+      }
+    }
+  }
+
+  entitiesList(): { entity_norm: string; display: string; kind: string; doc_count: number; occ_count: number }[] {
+    const agg = new Map<string, { display: string; kind: string; docs: Set<string>; occ: number }>();
+    for (const [docId, rows] of this.entityIndex) {
+      if (!this.docs.some((d) => d.id === docId)) continue;
+      for (const r of rows) {
+        let a = agg.get(r.norm);
+        if (!a) {
+          a = { display: r.display, kind: r.kind, docs: new Set(), occ: 0 };
+          agg.set(r.norm, a);
+        }
+        a.docs.add(docId);
+        a.occ++;
+      }
+    }
+    return [...agg.entries()]
+      .map(([norm, a]) => ({ entity_norm: norm, display: a.display, kind: a.kind, doc_count: a.docs.size, occ_count: a.occ }))
+      .sort((x, y) => y.occ_count - x.occ_count)
+      .slice(0, 500);
+  }
+
+  entityOccurrences(norm: string): { entity_norm: string; display: string; kind: string; doc_id: string; doc_title: string; span_start: number; span_end: number; snippet: string }[] {
+    const out: { entity_norm: string; display: string; kind: string; doc_id: string; doc_title: string; span_start: number; span_end: number; snippet: string }[] = [];
+    for (const [docId, rows] of this.entityIndex) {
+      const doc = this.docs.find((d) => d.id === docId);
+      if (!doc) continue;
+      for (const r of rows) {
+        if (r.norm === norm) {
+          out.push({ entity_norm: r.norm, display: r.display, kind: r.kind, doc_id: docId, doc_title: doc.title, span_start: r.start, span_end: r.end, snippet: entitySnippet(doc.content || "", r.start, r.end) });
+        }
+      }
+    }
+    return out
+      .sort((a, b) => (a.doc_title < b.doc_title ? -1 : 1) || a.span_start - b.span_start)
+      .slice(0, 200);
   }
 
   private persistDocs(): void {
@@ -245,6 +311,7 @@ class BrowserStore {
     this.docs.push(doc);
     this.touchDay();
     this.persistDocs();
+    this.refreshEntities(doc.id);
     return { ...doc };
   }
 
@@ -255,6 +322,7 @@ class BrowserStore {
       doc.word_count = countWords(patch.content);
       // Spec 8.2: content edits weigh 2x.
       doc.activity_score = (doc.activity_score ?? 0) + 2;
+      this.refreshEntities(id);
     }
     this.touchDay();
     this.persistDocs();
@@ -263,6 +331,7 @@ class BrowserStore {
 
   deleteDoc(id: string): void {
     this.docs = this.docs.filter((d) => d.id !== id);
+    this.entityIndex.delete(id);
     this.persistDocs();
   }
 
@@ -305,6 +374,7 @@ class BrowserStore {
     }
     const gone = new Set(ids);
     this.docs = this.docs.filter((d) => !gone.has(d.id));
+    for (const id of gone) this.entityIndex.delete(id);
     this.snaps = this.snaps.filter((s) => !gone.has(s.doc_id));
     this.bible = this.bible.filter((b) => !gone.has(b.doc_id));
     this.conversations = this.conversations.filter((c) => !(c.doc_id && gone.has(c.doc_id)));
@@ -364,13 +434,13 @@ class BrowserStore {
     return out;
   }
 
-  backlinksFor(docId: string): { source_id: string; target_id: string; context_snippet: string }[] {
-    const out: { source_id: string; target_id: string; context_snippet: string }[] = [];
+  backlinksFor(docId: string): { source_id: string; target_id: string; context_snippet: string; source_title: string }[] {
+    const out: { source_id: string; target_id: string; context_snippet: string; source_title: string }[] = [];
     for (const doc of this.docs) {
       if (doc.id === docId) continue;
       for (const link of this.outgoingLinks(doc)) {
         if (link.targetId === docId) {
-          out.push({ source_id: doc.id, target_id: docId, context_snippet: link.context });
+          out.push({ source_id: doc.id, target_id: docId, context_snippet: link.context, source_title: doc.title });
         }
       }
     }

@@ -120,6 +120,32 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
+/// Context window around a byte span, snapped to char boundaries so
+/// multi-byte prose can never panic the slicer. Display only.
+fn snippet_around(content: &str, start: i64, end: i64) -> String {
+    let len = content.len() as i64;
+    let mut s = (start - 60).max(0);
+    while s > 0 && !content.is_char_boundary(s as usize) {
+        s -= 1;
+    }
+    let mut e = (end + 60).min(len);
+    while e < len && !content.is_char_boundary(e as usize) {
+        e += 1;
+    }
+    let inner = content[s as usize..e as usize]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut out = inner;
+    if s > 0 {
+        out = format!("…{out}");
+    }
+    if e < len {
+        out = format!("{out}…");
+    }
+    out
+}
+
 const EMBEDDING_DIM: usize = 256;
 
 /// Simple TF-IDF-inspired vectorizer: hashes words into a fixed-size vector
@@ -341,6 +367,7 @@ impl Database {
             // (Derived indexes stay best-effort below.)
             write_to_disk(&full_path, &doc.content)?;
             let _ = self.extract_backlinks(&req.id, &doc.content);
+            let _ = self.refresh_entities(&req.id, &doc.content);
         }
 
         self.get_doc(&req.id)
@@ -713,7 +740,7 @@ impl Database {
     pub fn get_backlinks(&self, doc_id: &str) -> Result<Vec<Backlink>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT source_id, target_id, context_snippet FROM backlinks WHERE target_id = ?1"
+            "SELECT b.source_id, b.target_id, b.context_snippet, COALESCE(d.title, '') FROM backlinks b LEFT JOIN docs d ON d.id = b.source_id WHERE b.target_id = ?1"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map(params![doc_id], |row| {
@@ -721,6 +748,7 @@ impl Database {
                 source_id: row.get(0)?,
                 target_id: row.get(1)?,
                 context_snippet: row.get(2)?,
+                source_title: row.get(3)?,
             })
         }).map_err(|e| e.to_string())?;
 
@@ -922,9 +950,16 @@ impl Database {
             }
         }
 
+        // Titles already [[linked]] anywhere in this doc must not ALSO
+        // produce implicit edges (the old whole-doc `!wiki_re.is_match`
+        // guard killed every implicit link when ANY [[link]] existed).
+        let linked_titles: std::collections::HashSet<String> = wiki_re.captures_iter(content)
+            .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
+            .collect();
         for (title, target_id) in &title_to_id {
             if target_id == doc_id { continue; }
-            if content.to_lowercase().contains(title) && !wiki_re.is_match(content) {
+            if linked_titles.contains(title) { continue; }
+            if content.to_lowercase().contains(title) {
                 conn.execute(
                     "INSERT OR IGNORE INTO links_implicit (source_id, target_id, match_type) VALUES (?1, ?2, ?3)",
                     params![doc_id, target_id, "title_mention"],
@@ -933,6 +968,156 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    /// Entity index: deterministic local name/place extraction (no AI).
+    /// Two passes — (1) Story-Bible gazetteer (every fact key, whole-phrase,
+    /// case-insensitive; kind mapped from the fact kind), then (2)
+    /// capitalized 2–4 word runs for names the Bible doesn't know yet.
+    /// Gazetteer wins span conflicts. Called best-effort from save_doc
+    /// next to extract_backlinks; the TS preview mirror (entities.ts)
+    /// documents the same algorithm — keep the two in sync.
+    pub fn refresh_entities(&self, doc_id: &str, content: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM entity_occurrences WHERE doc_id = ?1", params![doc_id])
+            .map_err(|e| e.to_string())?;
+        if content.trim().is_empty() {
+            return Ok(());
+        }
+
+        const STOPLIST: &[&str] = &[
+            "the", "a", "an", "and", "but", "or", "if", "then", "when", "while", "because",
+            "chapter", "part", "scene", "act", "prologue", "epilogue", "interlude", "appendix",
+            "book", "volume", "monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday", "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+        ];
+        fn map_kind(kind: &str) -> &'static str {
+            let k = kind.to_lowercase();
+            if k.contains("character") { "person" }
+            else if k.contains("setting") || k.contains("location") || k.contains("place") { "place" }
+            else { "term" }
+        }
+
+        // (norm, display, kind, start, end)
+        let mut rows: Vec<(String, String, String, i64, i64)> = Vec::new();
+        let mut used: Vec<(usize, usize)> = Vec::new();
+        let overlaps = |s: usize, e: usize, used: &[(usize, usize)]| {
+            used.iter().any(|(a, b)| s < *b && *a < e)
+        };
+
+        // Pass 1 — gazetteer (global across projects; cast names rarely collide).
+        let facts: Vec<(String, String)> = {
+            let mut stmt = conn.prepare("SELECT kind, key FROM bible_facts").map_err(|e| e.to_string())?;
+            let iter = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?;
+            iter.filter_map(|r| r.ok()).collect()
+        };
+        for (kind, key) in &facts {
+            let key = key.trim();
+            if key.len() < 2 { continue; }
+            let pattern = format!(r"(?i)(?:^|\W)({})(?=\W|$)", regex::escape(key));
+            let re = match regex::Regex::new(&pattern) {
+                Ok(re) => re,
+                Err(_) => continue,
+            };
+            let k = map_kind(kind);
+            for cap in re.captures_iter(content) {
+                let m = match cap.get(1) { Some(m) => m, None => continue };
+                if overlaps(m.start(), m.end(), &used) { continue; }
+                used.push((m.start(), m.end()));
+                rows.push((key.to_lowercase(), m.as_str().to_string(), k.to_string(), m.start() as i64, m.end() as i64));
+                if rows.len() >= 500 { break; }
+            }
+            if rows.len() >= 500 { break; }
+        }
+
+        // Pass 2 — capitalized runs (ASCII; non-English names come via the gazetteer).
+        if rows.len() < 500 {
+            let re = regex::Regex::new(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b")
+                .map_err(|e| e.to_string())?;
+            // First surface form wins the display name per norm.
+            let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.0.clone()).collect();
+            for cap in re.captures_iter(content) {
+                let m = match cap.get(1) { Some(m) => m, None => continue };
+                let text = m.as_str();
+                let first = text.split_whitespace().next().unwrap_or("").to_lowercase();
+                if STOPLIST.contains(&first.as_str()) { continue; }
+                if overlaps(m.start(), m.end(), &used) { continue; }
+                used.push((m.start(), m.end()));
+                let norm = text.to_lowercase();
+                if !seen.contains(&norm) {
+                    seen.insert(norm.clone());
+                    rows.push((norm, text.to_string(), "name".to_string(), m.start() as i64, m.end() as i64));
+                }
+                if rows.len() >= 500 { break; }
+            }
+        }
+
+        for (norm, display, kind, start, end) in &rows {
+            conn.execute(
+                "INSERT OR IGNORE INTO entity_occurrences (entity_norm, display, kind, doc_id, span_start, span_end) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![norm, display, kind, doc_id, start, end],
+            ).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    pub fn entity_list(&self) -> Result<Vec<EntitySummary>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT entity_norm, MAX(display), MAX(kind), COUNT(DISTINCT doc_id), COUNT(*) FROM entity_occurrences GROUP BY entity_norm ORDER BY COUNT(*) DESC LIMIT 500"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok(EntitySummary {
+                entity_norm: row.get(0)?,
+                display: row.get(1)?,
+                kind: row.get(2)?,
+                doc_count: row.get(3)?,
+                occ_count: row.get(4)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn entity_occurrences(&self, norm: &str) -> Result<Vec<EntityHit>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT e.entity_norm, e.display, e.kind, e.doc_id, COALESCE(d.title, ''), e.span_start, e.span_end, COALESCE(d.content, '') FROM entity_occurrences e LEFT JOIN docs d ON d.id = e.doc_id WHERE e.entity_norm = ?1 ORDER BY d.title, e.span_start LIMIT 200"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![norm], |row| {
+            let content: String = row.get(7)?;
+            let start: i64 = row.get(5)?;
+            let end: i64 = row.get(6)?;
+            Ok(EntityHit {
+                entity_norm: row.get(0)?,
+                display: row.get(1)?,
+                kind: row.get(2)?,
+                doc_id: row.get(3)?,
+                doc_title: row.get(4)?,
+                span_start: start,
+                span_end: end,
+                snippet: snippet_around(&content, start, end),
+            })
+        }).map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn entities_backfill(&self) -> Result<i64, String> {
+        let docs: Vec<(String, String)> = {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let mut stmt = conn.prepare("SELECT id, content FROM docs").map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let mut done = 0i64;
+        for (id, content) in &docs {
+            if self.refresh_entities(id, content).is_ok() {
+                done += 1;
+            }
+        }
+        Ok(done)
     }
 
     pub fn graph_query(&self) -> Result<GraphQueryResult, String> {

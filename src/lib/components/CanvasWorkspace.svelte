@@ -11,9 +11,13 @@
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
+  import { settings } from "$lib/stores/settings";
 
   const CARD_W = 200;
-  const COLORS: Record<string, string> = {
+  // Card accent hues keep their meaning (amber = warning, forest = done…)
+  // in every theme; only luminance shifts. Paper gets deepened shades for
+  // contrast, ink surfaces keep the bright originals.
+  const CARD_COLORS_INK: Record<string, string> = {
     slate: "#94a3b8",
     amber: "#f59e0b",
     teal: "#14b8a6",
@@ -21,6 +25,15 @@
     rose: "#fb7185",
     forest: "#4ade80",
   };
+  const CARD_COLORS_PAPER: Record<string, string> = {
+    slate: "#64748B",
+    amber: "#B45309",
+    teal: "#0F766E",
+    indigo: "#4F46E5",
+    rose: "#E11D48",
+    forest: "#15803D",
+  };
+  let COLORS = $derived($settings.theme === "light" ? CARD_COLORS_PAPER : CARD_COLORS_INK);
 
   let nodes = $state<CanvasNode[]>([]);
   let edges = $state<CanvasEdge[]>([]);

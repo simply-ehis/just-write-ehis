@@ -8,6 +8,7 @@
 
 import { browserStore, countWords, type BrowserCanvasNode, type BrowserDoc } from "$lib/browserStore";
 import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } from "$lib/aiRequest";
+import { markdownToHtmlFragment } from "$lib/markdown";
 
 function frontmatter(doc: BrowserDoc): Record<string, unknown> {
   if (!doc.frontmatter_json) return {};
@@ -144,16 +145,9 @@ function markdownToText(md: string): string {
 
 function markdownToHtmlDoc(title: string, md: string): string {
   const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const body = esc(md)
-    .replace(/^### (.+)$/gm, "<h3>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1>$1</h1>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/`(.+?)`/g, "<code>$1</code>")
-    .split("\n\n")
-    .map((p) => (/^<h\d>/.test(p.trim()) ? p : `<p>${p.replace(/\n/g, "<br>")}</p>`))
-    .join("\n");
+  // Body rendering is shared with transclusion embeds (markdown.ts) so the
+  // preview fallback and ![[]] embeds never drift apart.
+  const body = markdownToHtmlFragment(md);
   return `<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>${esc(title)}</title>\n<style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:20px;line-height:1.8;color:#333}\nh1,h2,h3{margin-top:2em}pre{background:#f5f5f5;padding:12px;overflow-x:auto}</style>\n</head><body>${body}</body></html>`;
 }
 
@@ -282,6 +276,16 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "backlinks_extract":
       return undefined as T; // links derive on read in the browser store
+
+    case "entities_list":
+      return store.entitiesList() as T;
+
+    case "entity_occurrences":
+      return store.entityOccurrences(String(payload.entityNorm)) as T;
+
+    case "entities_backfill":
+      store.rebuildEntityIndex();
+      return store.docs.length as T;
 
     case "graph_query": {
       const ws = String(payload.workspace ?? "all");

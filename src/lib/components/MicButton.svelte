@@ -308,9 +308,9 @@ import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
     background: var(--surface-hover, #2a2a2a);
   }
   .mic-btn.recording {
-    background: #dc2626;
-    color: white;
-    border-color: #dc2626;
+    background: var(--accent-semantic-red);
+    color: var(--text-on-accent);
+    border-color: var(--accent-semantic-red);
   }
   .mic-btn.processing {
     opacity: 0.6;
@@ -324,7 +324,7 @@ import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
   }
   .stt-error {
     font-size: 11px;
-    color: #dc2626;
+    color: var(--error);
     margin-top: 2px;
   }
   .stt-progress {

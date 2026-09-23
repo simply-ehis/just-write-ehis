@@ -12,7 +12,7 @@
     showSettings,
     zenMode,
   } from "$lib/stores/app";
-  import { settings } from "$lib/stores/settings";
+  import { settings, ONBOARD_VERSION } from "$lib/stores/settings";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TabBar from "$lib/components/TabBar.svelte";
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
@@ -43,6 +43,10 @@
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   let viewedFile = $state<string | null>(null);
   let showOnboarding = $state(false);
+  // Freshness snapshot at component init: mount effects (trackFeature on
+  // currentWorkspace) pollute featuresUsed before the async boot block
+  // below runs, so the check must use this, not the live store.
+  const freshInstallAtBoot = $settings.featuresUsed.length === 0;
 
   // Skills/Craft/Stats now live in Settings: old workspace ids redirect.
   $effect(() => {
@@ -72,6 +76,9 @@
   );
 
   let ready = $state(false);
+  // Boot splash logo follows the saved theme (settings load synchronously
+  // from localStorage, so this is correct on first paint).
+  let bootLogo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
   let isMobile = $state(false);
   let sidebarVisible = $state(false);
   // Typing focus: tab bar + breadcrumb collapse while prose is flowing,
@@ -303,6 +310,9 @@
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('editor-typing', handleEditorTyping);
     window.addEventListener('mousemove', handleMouseNearTop);
+    // Re-entry: Settings → General and the command palette dispatch this.
+    const replayOnboarding = () => { showOnboarding = true; };
+    window.addEventListener('replay-onboarding', replayOnboarding);
 
     // Async init (fire and forget)
     (async () => {
@@ -332,10 +342,19 @@
         }
       }
 
-      // Show onboarding on first launch
-      if ($settings.featuresUsed.length === 0) {
-        showOnboarding = true;
+      // Onboarding: explicit versioned flag. Veterans (pre-flag settings
+      // with real usage) are migrated silently — never re-prompt them.
+      // Freshness comes from the init-time snapshot: trackFeature() runs
+      // on mount and would otherwise make every fresh boot look "used".
+      if (!$settings.hasOnboarded) {
+        if (!freshInstallAtBoot) {
+          $settings = { ...$settings, hasOnboarded: true, onboardedVersion: ONBOARD_VERSION };
+        } else {
+          showOnboarding = true;
+        }
       }
+
+      // Re-entry is wired in the onMount body above (replay-onboarding).
 
       // Silent update check (desktop shell only, opt-out in Settings → About)
       if (!isBrowserPreview() && $settings.autoCheckUpdates) {
@@ -374,6 +393,11 @@
       console.warn("Activity decay check failed:", e);
     }
 
+      // Landing workspace (onboarding choice, default "home"): applies
+      // only when nothing restores over it — open tabs and launch
+      // intents below both win.
+      $currentWorkspace = $settings.defaultWorkspace || "home";
+
       // Restore pre-restart tabs before first paint of the shell.
       await restoreTabs();
 
@@ -395,6 +419,7 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('editor-typing', handleEditorTyping);
       window.removeEventListener('mousemove', handleMouseNearTop);
+      window.removeEventListener('replay-onboarding', replayOnboarding);
       if (typingIdleTimer) clearTimeout(typingIdleTimer);
     };
   });
@@ -509,7 +534,7 @@
   </div>
 {:else}
   <div class="empty-state">
-    <img class="boot-logo" src="boot-logo.png" alt="Just Write ehis" />
+    <img class="boot-logo" src={bootLogo} alt="Just Write ehis — pen wrote 'this' with E-tick" />
     <div class="message">Loading...</div>
   </div>
 {/if}

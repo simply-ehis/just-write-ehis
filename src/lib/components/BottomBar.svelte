@@ -85,12 +85,37 @@
     recordWorkspaceVisit(action);
   }
 
-  const mainItems: BottomBarItem[] = [
-    { id: "capture", label: "Write", icon: "pencil", action: handleCapture },
-    { id: "home", label: "Home", icon: "home", action: handleHome },
+  // Main row: onboarding top-bar pins (first 3) + Search + More.
+  // Default ["write","home"] reproduces the classic row exactly.
+  function navigateTo(id: string) {
+    $currentWorkspace = id;
+    recordWorkspaceVisit(id);
+    showMoreMenu = false;
+  }
+
+  let pinnedIds = $derived(
+    ($settings.topBarIds.length > 0 ? $settings.topBarIds : ["write", "home"])
+      .filter((id) => workspaces.some((w) => w.id === id))
+      .slice(0, 3)
+  );
+
+  const PIN_ICONS: Record<string, string> = {
+    home: "home", logs: "calendar", write: "pencil", inbox: "inbox",
+    map: "graph", canvas: "board", novel: "book", script: "film",
+    projects: "folder", reader: "book-open", files: "files", properties: "table",
+  };
+
+  let mainItems = $derived<BottomBarItem[]>([
+    ...pinnedIds.flatMap((id): BottomBarItem[] => {
+      const meta = workspaces.find((w) => w.id === id);
+      if (!meta) return [];
+      if (id === "write") return [{ id: "capture", label: "Write", icon: "pencil", action: handleCapture }];
+      if (id === "home") return [{ id: "home", label: "Home", icon: "home", action: handleHome }];
+      return [{ id, label: meta.label, icon: PIN_ICONS[id] ?? "files", action: () => navigateTo(id) }];
+    }),
     { id: "search", label: "Search", icon: "search", action: handleSearch },
     { id: "workspaces", label: "More", icon: "dots", action: handleWorkspaces },
-  ];
+  ]);
 </script>
 
 <nav class="bottom-bar" aria-label="Mobile navigation">

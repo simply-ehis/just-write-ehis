@@ -26,6 +26,7 @@
     "test:sidecar": "node tests/sidecar-validate.mjs",
     "test:ensure": "node tests/ensure-poll.mjs",
     "test:resolve": "python tests/sidecar-resolve.py",
+    "test:onboard": "node tests/onboard-flow.mjs",
     "test:entities": "node tests/entities-unit.mjs"
   },
   "dependencies": {

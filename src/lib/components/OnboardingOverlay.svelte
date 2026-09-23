@@ -1,51 +1,152 @@
 <script lang="ts">
-  import { settings } from "$lib/stores/settings";
+  import { settings, ONBOARD_VERSION } from "$lib/stores/settings";
+  import { workspaces } from "$lib/stores/app";
+  import { api } from "$lib/api";
+  import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
 
   let { onComplete }: { onComplete: () => void } = $props();
 
+  type UseCase = "novelist" | "notes" | "script" | "mixed";
+  const USE_CASES: { id: UseCase; label: string; desc: string }[] = [
+    { id: "novelist", label: "Novelist", desc: "Long-form fiction, chapters, story bible" },
+    { id: "notes", label: "Notes & Journal", desc: "Daily logs, captures, personal library" },
+    { id: "script", label: "Screenwriter", desc: "Fountain screenplays and projects" },
+    { id: "mixed", label: "A bit of everything", desc: "Keep the default setup" },
+  ];
+  // Workspace ids per preset (approved). [] = keep current default behavior.
+  const PRESET_TOPS: Record<UseCase, string[]> = {
+    novelist: ["write", "novel", "map", "reader"],
+    notes: ["write", "inbox", "properties", "canvas"],
+    script: ["write", "script", "projects"],
+    mixed: [],
+  };
+  const DEFAULT_HIDDEN = ["inbox", "canvas", "files"];
+
   let step = $state(0);
+  let useCase = $state<UseCase>("novelist");
+  let topBarIds = $state<string[]>([...PRESET_TOPS.novelist]);
+  let topBarDirty = $state(false);
+  let hiddenIds = $state<string[]>([...DEFAULT_HIDDEN]);
+  let theme = $state($settings.theme);
+  let defaultWorkspace = $state("home");
+  let sttOn = $state($settings.sttEnabled);
+  let ttsOn = $state($settings.ttsEnabled);
+  let llmOn = $state($settings.llmEnabled);
   let vaultPath = $state($settings.vaultPath);
-  let aiEndpoint = $state($settings.smallModelEndpoint);
-  let aiModel = $state($settings.smallModelName);
+  let seedSample = $state(true);
+  let smallEndpoint = $state($settings.smallModelEndpoint);
+  let smallModel = $state($settings.smallModelName);
+  let mainEndpoint = $state($settings.mainModelEndpoint);
+  let mainModel = $state($settings.mainModelName);
   let aiApiKey = $state($settings.apiKey);
   // Snapshot for change detection: the store value above may predate the
   // OS-keychain hydration, so only write back when the user edited the field.
   const initialApiKey = $settings.apiKey;
+  let logoSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+
+  function pickUseCase(id: UseCase) {
+    useCase = id;
+    if (!topBarDirty) topBarIds = [...PRESET_TOPS[id]];
+  }
+
+  function toggleTop(id: string) {
+    if (topBarIds.includes(id)) {
+      topBarIds = topBarIds.filter((t) => t !== id);
+    } else {
+      if (topBarIds.length >= 4) {
+        showToast("Top bar holds up to 4 — unpin one first", "warning");
+        return;
+      }
+      topBarIds = [...topBarIds, id];
+    }
+    topBarDirty = true;
+  }
+
+  function toggleHidden(id: string) {
+    hiddenIds = hiddenIds.includes(id)
+      ? hiddenIds.filter((h) => h !== id)
+      : [...hiddenIds, id];
+  }
 
   function next() {
-    if (step < 3) step++;
+    if (step < 4) step++;
   }
 
   function prev() {
     if (step > 0) step--;
   }
 
-  function finish() {
+  const TOUR_DOC = `# Welcome to Just Write ehis ✍️
+
+This is your Write tab — distraction-free, autosaved, yours.
+
+**Three things to try right now:**
+1. **Just type.** Ghost autocomplete (local, private) offers continuations — Tab accepts.
+2. **Press Ctrl+K.** The command palette reaches every workspace, even hidden ones.
+3. **Press Ctrl+J.** The AI panel chats, composes, and structurizes with RAG over your vault.
+
+Your top bar and sidebar were set up from your onboarding picks — change them
+anytime in Settings → General → Replay onboarding.
+
+Delete this doc whenever you're ready. Happy writing.
+`;
+
+  async function seedStarter() {
+    try {
+      await api.docCreate("write", "md", "Welcome to Just Write ehis", undefined, TOUR_DOC);
+      const sample = { name: "Daily log", content: "# {{date}}\n\n## Today\n\n- \n\n## Notes\n\n", workspace: "write" };
+      if (!$settings.templates.some((t) => t.name === sample.name)) {
+        $settings = { ...$settings, templates: [...$settings.templates, sample] };
+      }
+    } catch (e) {
+      console.warn("Starter seed failed (vault may be unwritable):", e instanceof Error ? e.message : e);
+    }
+  }
+
+  async function finish() {
     $settings = {
       ...$settings,
+      hasOnboarded: true,
+      onboardedVersion: ONBOARD_VERSION,
+      onboardSkipped: false,
+      topBarIds: [...topBarIds],
+      hiddenIds: [...hiddenIds],
+      theme,
+      defaultWorkspace,
+      sttEnabled: sttOn,
+      ttsEnabled: ttsOn,
+      llmEnabled: llmOn,
       vaultPath,
-      smallModelEndpoint: aiEndpoint,
-      smallModelName: aiModel,
-      mainModelEndpoint: aiEndpoint,
-      mainModelName: aiModel,
+      smallModelEndpoint: smallEndpoint,
+      smallModelName: smallModel,
+      mainModelEndpoint: mainEndpoint,
+      mainModelName: mainModel,
       apiKey: aiApiKey !== initialApiKey ? aiApiKey : $settings.apiKey,
     };
+    if (seedSample) await seedStarter();
+    showToast("Setup saved — change anytime in Settings", "success");
     onComplete();
   }
 
   function skip() {
+    $settings = {
+      ...$settings,
+      hasOnboarded: true,
+      onboardedVersion: ONBOARD_VERSION,
+      onboardSkipped: true,
+    };
     onComplete();
   }
 </script>
 
 <div class="onboarding-overlay">
-  <div class="onboarding-card">
+  <div class="onboarding-card" role="dialog" aria-label="Setup">
     {#if step === 0}
       <div class="step">
-        <img class="welcome-logo" src="boot-logo.png" alt="Just Write ehis logo" />
+        <img class="welcome-logo" src={logoSrc} alt="Just Write ehis — pen wrote 'this' with E-tick" />
         <h1>Welcome to Just Write ehis</h1>
-        <p class="step-desc">A personal writing super app. Let's get you set up.</p>
+        <p class="step-desc">A personal writing super app. Let's set it up your way — under a minute. Use <kbd>Ctrl+K</kbd> anytime to jump anywhere.</p>
         <div class="step-actions">
           <button class="primary-btn" onclick={next}>Get Started</button>
           <button class="skip-btn" onclick={skip}>Skip Setup</button>
@@ -54,12 +155,22 @@
 
     {:else if step === 1}
       <div class="step">
-        <div class="step-icon"><Icon name="folder" size={28} /></div>
-        <h2>Choose Your Vault</h2>
-        <p class="step-desc">Your writing vault is where all your documents live. You can change this later in Settings.</p>
-        <div class="input-group">
-          <label for="onboard-vault-path">Vault Path</label>
-          <input id="onboard-vault-path" type="text" bind:value={vaultPath} placeholder="~/WritingVault" />
+        <div class="step-icon"><Icon name="pencil" size={28} /></div>
+        <h2>What do you mainly do?</h2>
+        <p class="step-desc">This presets your top bar. You can change every pin on the next step.</p>
+        <div class="pick-list" role="radiogroup" aria-label="Primary use">
+          {#each USE_CASES as u}
+            <button
+              class="pick-card"
+              class:selected={useCase === u.id}
+              role="radio"
+              aria-checked={useCase === u.id}
+              onclick={() => pickUseCase(u.id)}
+            >
+              <span class="pick-label">{u.label}</span>
+              <span class="pick-desc">{u.desc}</span>
+            </button>
+          {/each}
         </div>
         <div class="step-actions">
           <button class="secondary-btn" onclick={prev}>Back</button>
@@ -69,51 +180,130 @@
 
     {:else if step === 2}
       <div class="step">
-        <div class="step-icon"><Icon name="sparkle" size={28} /></div>
-        <h2>AI Provider (Optional)</h2>
-        <p class="step-desc">Connect a local or remote AI model. You can skip this and set it up later.</p>
-        <div class="input-group">
-          <label for="onboard-endpoint">Endpoint</label>
-          <input id="onboard-endpoint" type="text" bind:value={aiEndpoint} placeholder="http://localhost:11434/v1" />
+        <div class="step-icon"><Icon name="pin" size={28} /></div>
+        <h2>Pick your top bar</h2>
+        <p class="step-desc">Pin up to 4 workspaces ({topBarIds.length}/4). Everything else lives in the grouped sidebar; hidden ones stay one Ctrl+K away.</p>
+        <div class="check-grid">
+          {#each workspaces as w}
+            <label class="check-row">
+              <input type="checkbox" checked={topBarIds.includes(w.id)} onchange={() => toggleTop(w.id)} />
+              <span>{w.label}</span>
+              {#if topBarDirty && topBarIds.includes(w.id)}<span class="mini-tag">top</span>{/if}
+            </label>
+          {/each}
         </div>
-        <div class="input-group">
-          <label for="onboard-model">Model Name</label>
-          <input id="onboard-model" type="text" bind:value={aiModel} placeholder="llama3.2" />
-        </div>
-        <div class="input-group">
-          <label for="onboard-apikey">API Key (if needed)</label>
-          <input id="onboard-apikey" type="password" bind:value={aiApiKey} placeholder="sk-..." />
+        <h3 class="sub-head">Hidden from sidebar</h3>
+        <div class="check-grid">
+          {#each workspaces as w}
+            <label class="check-row">
+              <input type="checkbox" checked={hiddenIds.includes(w.id)} onchange={() => toggleHidden(w.id)} />
+              <span>{w.label}</span>
+            </label>
+          {/each}
         </div>
         <div class="step-actions">
           <button class="secondary-btn" onclick={prev}>Back</button>
           <button class="primary-btn" onclick={next}>Continue</button>
-          <button class="skip-btn" onclick={next}>Skip</button>
+        </div>
+      </div>
+
+    {:else if step === 3}
+      <div class="step">
+        <div class="step-icon"><Icon name="sparkle" size={28} /></div>
+        <h2>Make it yours</h2>
+        <p class="step-desc">Theme, landing tab, and voice. Local voice models run on-device (heavier RAM); browser voice is used on phones.</p>
+        <div class="input-group">
+          <span class="group-label" id="onboard-theme-label">Theme</span>
+          <div class="radio-row" role="radiogroup" aria-labelledby="onboard-theme-label">
+            {#each [["dark", "Dark"], ["light", "Light"], ["brutalist", "Brutalist"], ["glass", "Glass"]] as [v, label]}
+              <label class="radio-pill">
+                <input type="radio" name="onboard-theme" value={v} bind:group={theme} />
+                <span>{label}</span>
+              </label>
+            {/each}
+          </div>
+        </div>
+        <div class="input-group">
+          <label for="onboard-landing">Land on</label>
+          <select id="onboard-landing" bind:value={defaultWorkspace}>
+            <option value="home">Home</option>
+            <option value="write">Write</option>
+            <option value="logs">Logs</option>
+            <option value="novel">Novel</option>
+          </select>
+        </div>
+        <div class="check-grid">
+          <label class="check-row">
+            <input type="checkbox" bind:checked={sttOn} />
+            <span>Voice dictation (mic)</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" bind:checked={ttsOn} />
+            <span>Read aloud</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" bind:checked={llmOn} />
+            <span>Local ghost autocomplete</span>
+          </label>
+        </div>
+        <div class="step-actions">
+          <button class="secondary-btn" onclick={prev}>Back</button>
+          <button class="primary-btn" onclick={next}>Continue</button>
         </div>
       </div>
 
     {:else}
       <div class="step">
-        <div class="step-icon"><Icon name="check" size={28} /></div>
-        <h2>You're All Set</h2>
-        <p class="step-desc">Start writing. Use <kbd>Ctrl+K</kbd> to open the command palette anytime.</p>
+        <div class="step-icon"><Icon name="folder" size={28} /></div>
+        <h2>Vault & AI (optional)</h2>
+        <p class="step-desc">Where your writing lives, plus models. Small serves ghost + light tasks; main serves chat, Composer, Structurize. Skip freely — set up later in Settings.</p>
+        <div class="input-group">
+          <label for="onboard-vault-path">Vault Path</label>
+          <input id="onboard-vault-path" type="text" bind:value={vaultPath} placeholder="~/WritingVault" />
+        </div>
+        <label class="check-row seed-row">
+          <input type="checkbox" bind:checked={seedSample} />
+          <span>Seed a guided-tour doc + starter template</span>
+        </label>
+        <div class="input-group">
+          <label for="onboard-small-endpoint">Small model endpoint</label>
+          <input id="onboard-small-endpoint" type="text" bind:value={smallEndpoint} placeholder="http://127.0.0.1:8093/v1" />
+        </div>
+        <div class="input-group">
+          <label for="onboard-small-model">Small model name</label>
+          <input id="onboard-small-model" type="text" bind:value={smallModel} placeholder="lfm2.5-350m" />
+        </div>
+        <div class="input-group">
+          <label for="onboard-endpoint">Main model endpoint</label>
+          <input id="onboard-endpoint" type="text" bind:value={mainEndpoint} placeholder="http://localhost:11434/v1" />
+        </div>
+        <div class="input-group">
+          <label for="onboard-model">Main model name</label>
+          <input id="onboard-model" type="text" bind:value={mainModel} placeholder="llama3.2" />
+        </div>
+        <div class="input-group">
+          <label for="onboard-apikey">API Key (if needed)</label>
+          <input id="onboard-apikey" type="password" bind:value={aiApiKey} placeholder="sk-..." />
+        </div>
         <div class="tips">
           <div class="tip"><kbd>Ctrl+K</kbd> Command palette</div>
           <div class="tip"><kbd>Ctrl+J</kbd> AI panel</div>
           <div class="tip"><kbd>F11</kbd> Zen mode</div>
-          <div class="tip"><kbd>Ctrl+S</kbd> Save document</div>
-          <div class="tip"><kbd>Ctrl+T</kbd> Insert timestamp</div>
         </div>
         <div class="step-actions">
+          <button class="secondary-btn" onclick={prev}>Back</button>
           <button class="primary-btn" onclick={finish}>Start Writing</button>
+          <button class="skip-btn" onclick={skip}>Skip</button>
         </div>
       </div>
     {/if}
 
-    <div class="step-dots">
-      {#each [0, 1, 2, 3] as i}
+    <div class="step-dots" aria-label="Setup progress">
+      {#each [0, 1, 2, 3, 4] as i}
         <span class="dot" class:active={step === i}></span>
       {/each}
     </div>
+    <p class="step-count">Step {step + 1} of 5</p>
   </div>
 </div>
 
@@ -125,22 +315,30 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 500;
+    z-index: 600;
   }
 
   .onboarding-card {
     width: 480px;
     max-width: 90vw;
+    max-height: 90dvh;
+    overflow-y: auto;
     background: var(--surface-raised);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
-    overflow: hidden;
+    overflow-x: hidden;
   }
 
   .step {
     padding: 40px;
     text-align: center;
+  }
+
+  @media (max-width: 480px) {
+    .step {
+      padding: 24px;
+    }
   }
 
   .step-icon {
@@ -162,6 +360,14 @@
     color: var(--text-primary);
   }
 
+  .sub-head {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: left;
+    margin: 20px 0 8px;
+  }
+
   .step-desc {
     font-size: var(--font-size-sm);
     color: var(--text-muted);
@@ -174,7 +380,7 @@
     margin-bottom: 16px;
   }
 
-  .input-group label {
+  .input-group label, .group-label {
     display: block;
     font-size: 12px;
     font-weight: 500;
@@ -182,7 +388,7 @@
     margin-bottom: 4px;
   }
 
-  .input-group input {
+  .input-group input, .input-group select {
     width: 100%;
     height: 40px;
     padding: 0 12px;
@@ -194,13 +400,114 @@
     font-family: var(--font-mono);
   }
 
-  .input-group input:focus {
+  .input-group input:focus, .input-group select:focus {
     outline: none;
     border-color: var(--accent-primary);
   }
 
+  .pick-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .pick-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    text-align: left;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-base);
+    cursor: pointer;
+  }
+
+  .pick-card.selected {
+    border-color: var(--accent-primary);
+    background: var(--surface-overlay);
+  }
+
+  .pick-label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .pick-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .check-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+  }
+
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    min-height: 40px;
+  }
+
+  .check-row input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-primary);
+    flex-shrink: 0;
+  }
+
+  .seed-row {
+    margin-bottom: 16px;
+  }
+
+  .mini-tag {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent-primary);
+  }
+
+  .radio-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .radio-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    min-height: 44px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .radio-pill:has(input:checked) {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+  }
+
+  .radio-pill input {
+    accent-color: var(--accent-primary);
+  }
+
   .step-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
     margin-top: 24px;
@@ -208,6 +515,7 @@
 
   .primary-btn {
     padding: 10px 24px;
+    min-height: 44px;
     border: none;
     border-radius: var(--radius-md);
     background: var(--accent-primary);
@@ -223,6 +531,7 @@
 
   .secondary-btn {
     padding: 10px 24px;
+    min-height: 44px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     background: transparent;
@@ -237,6 +546,7 @@
 
   .skip-btn {
     padding: 10px 24px;
+    min-height: 44px;
     border: none;
     border-radius: var(--radius-md);
     background: transparent;
@@ -265,7 +575,7 @@
     gap: 8px;
   }
 
-  .tip kbd {
+  .tip kbd, .step-desc kbd {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -283,6 +593,14 @@
     display: flex;
     justify-content: center;
     gap: 8px;
+    padding: 0 0 8px;
+  }
+
+  .step-count {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 0;
     padding: 0 0 20px;
   }
 

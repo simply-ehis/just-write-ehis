@@ -9,7 +9,18 @@ import * as pdfjs from "pdfjs-dist";
 
 export interface ParsedBook {
   title: string;
+  author: string | null;
   text: string;
+  /** EPUB cover art (capped size), for project dressing. Absent when none. */
+  cover?: { b64: string; mime: string } | null;
+}
+
+/** Thrown when a PDF needs a password the caller didn't supply. */
+export class PasswordNeededError extends Error {
+  constructor(filename: string) {
+    super(`"${filename}" is password-locked — enter its password to import.`);
+    this.name = "PasswordNeededError";
+  }
 }
 
 function decodeEntities(s: string): string {
@@ -68,12 +79,21 @@ export async function parseEpub(data: Uint8Array): Promise<ParsedBook> {
 
   const title =
     opf.match(/<dc:title[^>]*>([^<]*)<\/dc:title>/i)?.[1]?.trim() || "Untitled";
+  const author =
+    opf.match(/<dc:creator[^>]*>([^<]*)<\/dc:creator>/i)?.[1]?.trim() || null;
 
   const idToHref = new Map<string, string>();
+  const idToMime = new Map<string, string>();
+  const idProps = new Map<string, string>();
   for (const m of opf.matchAll(/<item[\s/>][^>]*>/gi)) {
     const id = attr(m[0], "id");
     const href = attr(m[0], "href");
-    if (id && href) idToHref.set(id, resolveHref(base, href));
+    if (id && href) {
+      idToHref.set(id, resolveHref(base, href));
+      const mt = attr(m[0], "media-type") ?? "";
+      idToMime.set(id, mt);
+      idProps.set(id, attr(m[0], "properties") ?? "");
+    }
   }
   const spine: string[] = [];
   for (const m of opf.matchAll(/<itemref[\s/>][^>]*>/gi)) {
@@ -94,7 +114,30 @@ export async function parseEpub(data: Uint8Array): Promise<ParsedBook> {
   }
   const text = parts.join("\n\n").trim();
   if (!text) throw new Error("EPUB contains no readable text.");
-  return { title: decodeEntities(title), text };
+
+  // Cover art: declared cover-image first, else an image id with "cover"
+  // in the name. Capped — a 10MB plate must not ride into frontmatter.
+  let cover: ParsedBook["cover"] = null;
+  const coverId =
+    [...idToHref.keys()].find((id) => (idProps.get(id) ?? "").split(/\s+/).includes("cover-image")) ??
+    [...idToHref.keys()].find(
+      (id) => id.toLowerCase().includes("cover") && (idToMime.get(id) ?? "").startsWith("image/")
+    );
+  if (coverId) {
+    const href = idToHref.get(coverId);
+    const file = href ? zip.file(href) : null;
+    const mime = idToMime.get(coverId) ?? "image/jpeg";
+    if (file) {
+      try {
+        const b64 = await file.async("base64");
+        // ~1.5MB cap on the base64 payload.
+        if (b64.length <= 2_000_000) cover = { b64, mime };
+      } catch {
+        /* art is dressing — a bad image never fails the import */
+      }
+    }
+  }
+  return { title: decodeEntities(title), author: author ? decodeEntities(author) : null, text, cover };
 }
 
 /**
@@ -133,23 +176,34 @@ export async function parseDocx(data: Uint8Array): Promise<ParsedBook> {
   }
   const text = out.join("\n\n").trim();
   if (!text) throw new Error("DOCX contains no readable text.");
-  return { title: "Untitled", text };
+  return { title: "Untitled", author: null, text };
 }
 
 /**
  * PDF text layer via pdf.js (page order, blank line between pages).
  * `workerSrc` wires the bundled worker in the app; node runs workerless.
+ * `password` unlocks password-protected files — without it a locked file
+ * throws PasswordNeededError (not a generic toast) so the caller can ask.
  */
-export async function parsePdf(data: Uint8Array, workerSrc?: string): Promise<ParsedBook> {
+export async function parsePdf(data: Uint8Array, workerSrc?: string, password?: string): Promise<ParsedBook> {
   if (workerSrc) {
     pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
   }
   const copy = new Uint8Array(data);
-  const pdf = await pdfjs.getDocument({
-    data: copy,
-    useWorkerFetch: false,
-    verbosity: 0,
-  }).promise;
+  let pdf;
+  try {
+    pdf = await pdfjs.getDocument({
+      data: copy,
+      password: password ?? "",
+      useWorkerFetch: false,
+      verbosity: 0,
+    }).promise;
+  } catch (e) {
+    if ((e as { name?: string })?.name === "PasswordException") {
+      throw new PasswordNeededError("this PDF");
+    }
+    throw e;
+  }
   let title = "Untitled";
   try {
     const meta = await pdf.getMetadata();
@@ -178,14 +232,15 @@ export async function parsePdf(data: Uint8Array, workerSrc?: string): Promise<Pa
     await destroyable.destroy().catch(() => {});
   }
   if (pages.length === 0) throw new Error("PDF contains no extractable text (scanned images need OCR).");
-  return { title, text: pages.join("\n\n") };
+  return { title, author: null, text: pages.join("\n\n") };
 }
 
 /** Route a dropped file to the right parser by extension. */
 export async function parseBookFile(
   filename: string,
   data: Uint8Array,
-  workerSrc?: string
+  workerSrc?: string,
+  opts?: { password?: string }
 ): Promise<ParsedBook> {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   const fallbackTitle = filename.replace(/\.[^.]+$/, "") || "Untitled";
@@ -198,7 +253,7 @@ export async function parseBookFile(
     return { ...book, title: fallbackTitle };
   }
   if (ext === "pdf") {
-    const book = await parsePdf(data, workerSrc);
+    const book = await parsePdf(data, workerSrc, opts?.password);
     return { ...book, title: book.title === "Untitled" ? fallbackTitle : book.title };
   }
   throw new Error(`.${ext || "?"} isn't a book format — import .epub, .pdf, .docx, .md, .txt, or .fountain.`);

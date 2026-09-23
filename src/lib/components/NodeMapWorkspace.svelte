@@ -15,11 +15,27 @@
   let selectedNodeId = $state<string | null>(null);
   let hoveredNodeId = $state<string | null>(null);
   let showOrphans = $state(true);
-  let showHubs = $state(true);
+  // Hubs-only filter (was a dead toggle that only drew gold rings — the
+  // rings stay; this now actually filters to hubs + their neighbors).
+  let hubOnly = $state(false);
   let filterWorkspace = $state<string>("all");
   let filterTags = $state<string[]>([]);
   let tagSearch = $state("");
   let showTagSuggestions = $state(false);
+
+  // Large-vault guard: cap the initial render (highest degree first) with
+  // an explicit Show-all escape hatch — the force layout + per-frame draw
+  // both degrade past this size with no virtualization in place.
+  const NODE_CAP = 800;
+  let showAllNodes = $state(false);
+  let cappedCount = $state(0);
+
+  // Click-after-drag guard: mouseup clears isDragging/isPanning before
+  // click fires, so the click handler can't tell a drag from a tap.
+  // Distance-tracked suppressClick survives across the two events.
+  let downPos = $state<{ x: number; y: number } | null>(null);
+  let suppressClick = $state(false);
+  let tickCount = $state(0);
 
   let width = $state(800);
   let height = $state(600);
@@ -51,16 +67,26 @@
     contextSnippet: string | null;
   }
 
-  // Pine/paper node palette — muted earth tones that read on both themes.
-  const workspaceColors: Record<string, string> = {
-    logs: "#C99A3C",
-    write: "#9C9686",
-    map: "#7FBF9A",
-    novel: "#A79BC9",
-    script: "#D97B6C",
-    projects: "#8FA3B8",
-    reader: "#5B8C7A",
-    default: "#9C9686",
+  // Node fills mirror the --ws-* tokens per theme (canvas can't read
+  // var() at draw time, so the mapping is explicit). Hue semantics stay
+  // identical across themes; only luminance shifts for the surface.
+  const workspacePalettes: Record<string, Record<string, string>> = {
+    light: {
+      logs: "#C99A3C", write: "#9C9686", map: "#7FBF9A", novel: "#A79BC9",
+      script: "#D97B6C", projects: "#8FA3B8", reader: "#5B8C7A", default: "#9C9686",
+    },
+    dark: {
+      logs: "#D9A441", write: "#A39E93", map: "#8FC7A9", novel: "#A79BC9",
+      script: "#E08A7A", projects: "#9AA1AD", reader: "#7FBF9A", default: "#A39E93",
+    },
+    brutalist: {
+      logs: "#FFB000", write: "#A8A294", map: "#8FD694", novel: "#C4B5E3",
+      script: "#F0857A", projects: "#9AA1AD", reader: "#7FBF9A", default: "#A8A294",
+    },
+    glass: {
+      logs: "#D9A441", write: "#9C9686", map: "#A9E8C6", novel: "#B9A8DC",
+      script: "#E89A8B", projects: "#9AA1AD", reader: "#7FBF9A", default: "#9C9686",
+    },
   };
 
   // Canvas can't use var(); track the theme instead (cheap $derived, read per draw).
@@ -80,7 +106,8 @@
   );
 
   function getNodeColor(ws: string): string {
-    return workspaceColors[ws] || workspaceColors.default;
+    const palette = workspacePalettes[$settings.theme] ?? workspacePalettes.dark;
+    return palette[ws] || palette.default;
   }
 
   function screenToWorld(sx: number, sy: number): [number, number] {
@@ -113,14 +140,28 @@
       return true;
     });
 
-    const nodeIds = new Set(filteredNodes.map((n) => n.id));
+    // Hubs-only view: hub nodes plus their direct neighbors. Off = all.
+    let visibleNodes = filteredNodes;
+    if (hubOnly) {
+      const hubIds = new Set(gd.hubs.map(([id]) => id));
+      const neighborIds = new Set<string>();
+      for (const e of gd.edges) {
+        if (hubIds.has(e.source)) neighborIds.add(e.target);
+        if (hubIds.has(e.target)) neighborIds.add(e.source);
+      }
+      visibleNodes = filteredNodes.filter((n) => hubIds.has(n.id) || neighborIds.has(n.id));
+    }
+
+    const nodeIds = new Set(visibleNodes.map((n) => n.id));
     const filteredEdges = gd.edges.filter((e) =>
       nodeIds.has(e.source) && nodeIds.has(e.target)
     );
 
+    // O(1) endpoint lookup per edge (was O(N) find per edge per frame).
+    const nodeById = new Map(visibleNodes.map((n) => [n.id, n]));
     for (const edge of filteredEdges) {
-      const src = gd.nodes.find((n) => n.id === edge.source);
-      const tgt = gd.nodes.find((n) => n.id === edge.target);
+      const src = nodeById.get(edge.source);
+      const tgt = nodeById.get(edge.target);
       if (!src || !tgt || src.x == null || src.y == null || tgt.x == null || tgt.y == null) continue;
 
       const isHighlighted = selectedNodeId === edge.source || selectedNodeId === edge.target;
@@ -132,7 +173,7 @@
       ctx.stroke();
     }
 
-    for (const node of filteredNodes) {
+    for (const node of visibleNodes) {
       if (node.x == null || node.y == null) continue;
 
       const isSelected = selectedNodeId === node.id;
@@ -191,6 +232,8 @@
     const sy = e.clientY - rect.top;
     const [wx, wy] = screenToWorld(sx, sy);
 
+    downPos = { x: e.clientX, y: e.clientY };
+    suppressClick = false;
     const node = findNodeAt(wx, wy);
     if (node) {
       dragNode = node;
@@ -210,6 +253,11 @@
     const sy = e.clientY - rect.top;
     const [wx, wy] = screenToWorld(sx, sy);
 
+    if (downPos) {
+      const dx = e.clientX - downPos.x;
+      const dy = e.clientY - downPos.y;
+      if (dx * dx + dy * dy > 25) suppressClick = true;
+    }
     if (isDragging && dragNode) {
       dragNode.fx = wx;
       dragNode.fy = wy;
@@ -236,6 +284,9 @@
     isDragging = false;
     isPanning = false;
     dragNode = null;
+    downPos = null;
+    // NOTE: suppressClick survives here on purpose — click fires after
+    // mouseup and must still see it. handleClick consumes it.
   }
 
   function handleWheel(e: WheelEvent) {
@@ -255,6 +306,7 @@
   }
 
   function handleClick(e: MouseEvent) {
+    if (suppressClick) { suppressClick = false; return; }
     if (isDragging || isPanning) return;
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -314,7 +366,25 @@
   async function loadGraph() {
     loading = true;
     try {
-      graphData = await api.graphQuery({ workspace: filterWorkspace, tags: filterTags });
+      const full = await api.graphQuery({ workspace: filterWorkspace, tags: filterTags });
+      // Cap the force layout past NODE_CAP (highest degree first) — the
+      // sim + draw both degrade without virtualization. Explicit opt-in
+      // to see everything; filters still apply on top.
+      if (!showAllNodes && full.nodes.length > NODE_CAP) {
+        const keep = new Set(
+          [...full.nodes].sort((a, b) => b.degree - a.degree).slice(0, NODE_CAP).map((n) => n.id)
+        );
+        cappedCount = full.nodes.length - NODE_CAP;
+        graphData = {
+          ...full,
+          nodes: full.nodes.filter((n) => keep.has(n.id)),
+          edges: full.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
+          orphans: full.orphans.filter((id) => keep.has(id)),
+        };
+      } else {
+        cappedCount = 0;
+        graphData = full;
+      }
       initSimulation();
     } catch (e) {
       console.error("Failed to load graph:", e);
@@ -376,6 +446,11 @@
       .force("center", forceCenter<SimNode>(0, 0))
       .force("collide", forceCollide<SimNode>().radius((d) => 10 + d.degree * 2))
       .on("tick", () => {
+        // Sync positions at ~10fps, not every tick: each write retriggers
+        // Svelte reactivity (draw reads graphData), so per-tick sync is a
+        // storm for zero visual gain.
+        tickCount++;
+        if (tickCount % 6 !== 0) return;
         graphData = { ...graphData!, nodes: nodes.map((n) => ({
           id: n.id, title: n.title, workspace: n.workspace, kind: n.kind,
           word_count: n.wordCount, activity_score: n.activityScore, degree: n.degree,
@@ -496,11 +571,15 @@
         Orphans
       </label>
       <label class="toggle-label">
-        <input type="checkbox" bind:checked={showHubs} />
-        Hubs
+        <input type="checkbox" bind:checked={hubOnly} />
+        Hubs only
       </label>
       {#if graphData}
         <span class="stats">{graphData.nodes.length} nodes / {graphData.edges.length} edges</span>
+      {/if}
+      {#if cappedCount > 0}
+        <span class="stats capped" title="Large vault: showing top {NODE_CAP} connected docs">+{cappedCount} capped</span>
+        <button class="toolbar-btn" onclick={() => { showAllNodes = true; loadGraph(); }}>Show all</button>
       {/if}
     </div>
   </div>
@@ -529,6 +608,8 @@
 
   {#if selectedNodeId && graphData}
     {@const node = graphData.nodes.find((n) => n.id === selectedNodeId)}
+    {@const allNeighbors = node ? graphData.edges.filter((e) => e.source === node.id || e.target === node.id) : []}
+    {@const neighbors = allNeighbors.slice(0, 12)}
     {#if node}
       <div class="node-inspector">
         <div class="inspector-header">
@@ -546,6 +627,20 @@
         <div class="inspector-actions">
           <button class="btn-primary" onclick={() => openDoc(node.id)}>Open</button>
         </div>
+        {#if neighbors.length > 0}
+          <div class="neighbor-list">
+            <div class="neighbor-head">Linked ({allNeighbors.length})</div>
+            {#each neighbors as e}
+              {@const otherId = e.source === node.id ? e.target : e.source}
+              {@const other = graphData.nodes.find((n) => n.id === otherId)}
+              <button class="neighbor-item" onclick={() => { selectedNodeId = otherId; }}>
+                <span class="neighbor-kind">{e.kind}</span>
+                <span class="neighbor-title">{other?.title ?? otherId}</span>
+                {#if e.context_snippet}<span class="neighbor-snippet">{e.context_snippet}</span>{/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -719,5 +814,67 @@
 
   .btn-primary:hover {
     background: var(--accent-hover);
+  }
+
+  .neighbor-list {
+    margin-top: 12px;
+    max-height: 180px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .neighbor-head {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .neighbor-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .neighbor-item:hover {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+  }
+
+  .neighbor-kind {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+
+  .neighbor-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .neighbor-snippet {
+    color: var(--text-muted);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    overflow: hidden;
   }
 </style>
