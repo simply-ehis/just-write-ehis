@@ -445,7 +445,7 @@
 
   .close:hover {
     background: var(--accent-semantic-red);
-    color: white;
+    color: var(--text-on-accent);
   }
 
   .pin-indicator {

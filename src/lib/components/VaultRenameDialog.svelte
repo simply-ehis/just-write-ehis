@@ -254,7 +254,7 @@
     font-size: 13px;
     font-weight: 500;
     background: var(--accent-primary);
-    color: white;
+    color: var(--text-on-accent);
   }
 
   .btn-rename:disabled {

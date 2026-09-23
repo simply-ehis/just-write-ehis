@@ -1056,7 +1056,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   }
   .cancel-btn:hover {
     opacity: 1;
-    color: #ef4444;
+    color: var(--accent-semantic-red);
   }
 
   .retry-btn {

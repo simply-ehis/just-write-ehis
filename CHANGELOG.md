@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased (Area 4: brutalist + glass as real themes)
+
+### Changed
+- **Brutalist is its own palette now** (was byte-identical to dark): hazard theme — near-black concrete `#100F0D`, safety-amber `#FFB000` accent, 0 radius + hard ink shadows via tokens (not overrides), amber selection/focus, per-theme CodeMirror hazard editor
+- **Glass glows**: luminous mint accent `#A9E8C6`, `rgba(143,199,169,0.3)` selection, `--accent-glow` on active nav/tabs/primary buttons, frosted blur extended to palette/modals/dialogs, swollen radius scale via tokens, translucent mint CodeMirror editor
+- **Token gaps closed**: `--surface-elevated`, `--accent-on`, `--accent-semantic-yellow` defined in all 4 themes + system fallback; fallback gains `--ws-inbox/files/properties`; `--danger` aliased to `--error`; light `--ink-muted` darkened to `#5F5C50` for 4.5:1 small-text contrast
+- **Literal-color bypasses tokenized**: on-accent whites → `var(--text-on-accent)` (TabBar, Logs, NodeMap, Projects, VaultRename, VersionHistory, FileBrowser), AiPanel cancel → semantic-red, SettingsPane perf → semantic-green/`--warning`, charts/craft/skills/usage hues → semantic tokens (SVG-safe `var()`), NodeMap rings follow theme accent/warning, EditorPane snippet expansion deferred past the update cycle (same crash class as autocorrect — expansion was silently dead)
+- **Kept fixed deliberately** (verified, not overlooked): ConflictBanner amber (fixed bg carries contrast in every theme — tokenizing would break it), recording-red/TTS-blue whites (4.5+/5.2:1 on fixed brand bgs), PDF page white (document fidelity), canvas card hues + NodeMap dots (user/data identity colors), streak heat cells (GitHub-style convention)
+- Decision: keep all 4 themes (signed off); no in-repo "3 themes" text exists (external spec holds that)
+
+### Tests
+- `tests/theme-sweep.mjs` extended (50 checks): per-theme token contract, brutalist/glass distinctness, WCAG contrast text-on-bg + on-accent-on-accent ≥ 4.5:1 (all pass with margin), editor-palette parity with app.css, mounts under all 4 themes
+
 ## Unreleased (Area 3: app-shell navigation)
 
 ### Changed

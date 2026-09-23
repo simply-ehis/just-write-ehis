@@ -489,7 +489,7 @@
 
   .confirm-yes:hover {
     background: var(--accent-semantic-red);
-    color: white;
+    color: var(--text-on-accent);
   }
 
   .confirm-no {

@@ -1253,11 +1253,11 @@
   }
 
   .perf-value.pass {
-    color: #4ade80;
+    color: var(--accent-semantic-green);
   }
 
   .perf-value.warn {
-    color: #fbbf24;
+    color: var(--warning);
   }
 
   .perf-budget {

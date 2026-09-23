@@ -71,20 +71,26 @@
 
   // Summary colors computed in script: `<` comparisons are illegal
   // inside HTML attribute strings, so they live here instead.
+  // Traffic-light hues come from theme tokens so chart strokes read on
+  // paper and ink alike (SVG accepts var() in presentation attributes).
+  const CHART_GOOD = "var(--accent-semantic-green)";
+  const CHART_WARN = "var(--warning)";
+  const CHART_BAD = "var(--accent-semantic-red)";
+  const CHART_IDLE = "var(--text-muted)";
   let filterColor = $derived.by(() => {
     const v = lastValue(filterTrend);
-    if (v === null) return "#95a5a6";
-    return v < 0.02 ? "#27ae60" : v < 0.04 ? "#f39c12" : "#e74c3c";
+    if (v === null) return CHART_IDLE;
+    return v < 0.02 ? CHART_GOOD : v < 0.04 ? CHART_WARN : CHART_BAD;
   });
   let sentenceColor = $derived.by(() => {
     const v = lastValue(sentenceTrend);
-    if (v === null) return "#95a5a6";
-    return v < 15 ? "#27ae60" : v < 22 ? "#f39c12" : "#e74c3c";
+    if (v === null) return CHART_IDLE;
+    return v < 15 ? CHART_GOOD : v < 22 ? CHART_WARN : CHART_BAD;
   });
   let dialogueColor = $derived.by(() => {
     const v = lastValue(dialogueTrend);
-    if (v === null) return "#95a5a6";
-    return v > 0.3 ? "#27ae60" : v > 0.15 ? "#f39c12" : "#e74c3c";
+    if (v === null) return CHART_IDLE;
+    return v > 0.3 ? CHART_GOOD : v > 0.15 ? CHART_WARN : CHART_BAD;
   });
   let filterLabel = $derived.by(() => {
     const v = lastValue(filterTrend);
@@ -122,12 +128,12 @@
 
   let metricSections = $derived.by((): MetricSection[] => {
     const sections: MetricSection[] = [
-      { title: "Dialogue Ratio", data: dialogueTrend, label: "Dialogue %", color: "#e74c3c", note: "Percentage of text in dialogue. Higher = more scene-driven." },
-      { title: "Avg Sentence Length", data: sentenceTrend, label: "Words", color: "#3498db", note: "Average words per sentence. Lower = punchier prose." },
-      { title: "Filter Words", data: filterTrend, label: "Filter %", color: "#f39c12", note: "Frequency of weak words (very, really, just, etc.). Lower = tighter prose." },
+      { title: "Dialogue Ratio", data: dialogueTrend, label: "Dialogue %", color: "var(--accent-semantic-red)", note: "Percentage of text in dialogue. Higher = more scene-driven." },
+      { title: "Avg Sentence Length", data: sentenceTrend, label: "Words", color: "var(--accent-semantic-purple)", note: "Average words per sentence. Lower = punchier prose." },
+      { title: "Filter Words", data: filterTrend, label: "Filter %", color: "var(--warning)", note: "Frequency of weak words (very, really, just, etc.). Lower = tighter prose." },
     ];
     if (repetitionTrend.length > 0) {
-      sections.push({ title: "Repeated Constructions", data: repetitionTrend, label: "Count", color: "#9b59b6", note: "Repeated sentence starters and structural patterns. Lower = more varied syntax." });
+      sections.push({ title: "Repeated Constructions", data: repetitionTrend, label: "Count", color: "var(--accent-semantic-purple)", note: "Repeated sentence starters and structural patterns. Lower = more varied syntax." });
     }
     return sections;
   });
@@ -291,13 +297,13 @@
   }
 
   .trend-badge.up {
-    background: #e74c3c22;
-    color: #e74c3c;
+    background: color-mix(in srgb, var(--accent-semantic-red) 13%, transparent);
+    color: var(--accent-semantic-red);
   }
 
   .trend-badge.down {
-    background: #27ae6022;
-    color: #27ae60;
+    background: color-mix(in srgb, var(--accent-semantic-green) 13%, transparent);
+    color: var(--accent-semantic-green);
   }
 
   .trend-badge.flat {

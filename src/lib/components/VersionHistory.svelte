@@ -304,7 +304,7 @@
   .restore-btn {
     padding: 6px 12px;
     background: var(--accent-semantic-green);
-    color: white;
+    color: var(--text-on-accent);
     border: none;
     border-radius: var(--radius-md);
     font-size: 12px;

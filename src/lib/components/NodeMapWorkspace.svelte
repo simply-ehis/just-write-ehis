@@ -65,6 +65,19 @@
 
   // Canvas can't use var(); track the theme instead (cheap $derived, read per draw).
   let isDark = $derived($settings.theme !== "light");
+  // Selection/hub rings follow the theme accent + warning so they read
+  // on paper, ink, hazard-amber, and glow-mint alike.
+  let ringSelected = $derived(
+    $settings.theme === "light" ? "#3F6656"
+    : $settings.theme === "brutalist" ? "#FFB000"
+    : $settings.theme === "glass" ? "#A9E8C6"
+    : "#8FC7A9"
+  );
+  let ringHub = $derived(
+    $settings.theme === "light" ? "#9A6B1A"
+    : $settings.theme === "brutalist" ? "#FFB000"
+    : "#D9A441"
+  );
 
   function getNodeColor(ws: string): string {
     return workspaceColors[ws] || workspaceColors.default;
@@ -114,7 +127,7 @@
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       ctx.lineTo(tgt.x, tgt.y);
-      ctx.strokeStyle = isHighlighted ? "#8FC7A960" : "#9C968655";
+      ctx.strokeStyle = isHighlighted ? `${ringSelected}60` : "#9C968655";
       ctx.lineWidth = isHighlighted ? 2 : 1;
       ctx.stroke();
     }
@@ -138,7 +151,7 @@
       if (isSelected || isHub) {
         ctx.beginPath();
         ctx.arc(node.x, node.y, radius + 3, 0, Math.PI * 2);
-        ctx.strokeStyle = isSelected ? "#8FC7A9" : "#C99A3C";
+        ctx.strokeStyle = isSelected ? ringSelected : ringHub;
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -697,7 +710,7 @@
 
   .btn-primary {
     background: var(--accent);
-    color: white;
+    color: var(--text-on-accent);
     padding: 6px 14px;
     border-radius: var(--radius-md);
     font-size: 12px;

@@ -195,7 +195,9 @@ async function noNativeDialogs() {
   const ai = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
   check("no hardcoded dev paths", !ai.includes("C:\\\\Users") && !ai.includes("small-model-harness\""));
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("editor theme follows setting", editor.includes('theme !== "light"'));
+  check("editor theme follows setting", editor.includes("makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme"));
+  const palette = await readFile(join(root, "src/lib/editorTheme.ts"), "utf8");
+  check("editor palettes per theme", ["light", "dark", "brutalist", "glass"].every((t) => palette.includes(`${t}:`)));
 }
 
 async function integrityWiring() {

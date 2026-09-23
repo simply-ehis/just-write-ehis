@@ -15,6 +15,7 @@
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
+  import { AUTOCORRECT_WAVY, editorPalette } from "$lib/editorTheme";
   import VersionHistory from "./VersionHistory.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
   import RhythmPanel from "./RhythmPanel.svelte";
@@ -260,20 +261,17 @@
     await attachFiles(editorView, files);
   }
 
-  function makeDarkTheme(font: string, size: number, lh: number, dark = true) {
-    // Paper & pine: keep the CodeMirror surface in lockstep with app.css.
-    const bg = dark ? "#1B1A15" : "#F1EFE6";
-    const fg = dark ? "#ECE7D8" : "#2B2A25";
-    const muted = dark ? "#9C9686" : "#726F62";
-    const overlay = dark ? "#2A2721" : "#EBE7D9";
-    const accent = dark ? "#8FC7A9" : "#3F6656";
+  function makeDarkTheme(font: string, size: number, lh: number, theme = "dark") {
+    // Per-theme editor surface from the shared palette (never dark's
+    // editor by default for brutalist/glass). Mirrors app.css.
+    const p = editorPalette(theme);
     return EditorView.theme({
       "&": {
-        backgroundColor: bg,
-        color: fg,
+        backgroundColor: p.bg,
+        color: p.fg,
       },
       ".cm-content": {
-        caretColor: accent,
+        caretColor: p.accent,
         fontFamily: `'${font}', monospace`,
         fontSize: `${size}px`,
         lineHeight: `${lh}`,
@@ -282,27 +280,27 @@
         margin: "0 auto",
       },
     ".cm-gutters": {
-      backgroundColor: bg,
-      color: muted,
+      backgroundColor: p.bg,
+      color: p.muted,
       border: "none",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: overlay,
+      backgroundColor: p.overlay,
     },
     ".cm-activeLine": {
-      backgroundColor: dark ? "#2A272160" : "#EBE7D980",
+      backgroundColor: p.overlay,
     },
     ".cm-selectionBackground": {
-      backgroundColor: dark ? "#8FC7A930 !important" : "#3F665630 !important",
+      backgroundColor: `${p.sel} !important`,
     },
     ".cm-cursor": {
-      borderLeftColor: accent,
+      borderLeftColor: p.accent,
     },
     ".cm-focused .cm-selectionBackground": {
-      backgroundColor: dark ? "#8FC7A940 !important" : "#3F665640 !important",
+      backgroundColor: `${p.selFocus} !important`,
     },
     ".cm-autocorrect-suggest": {
-      textDecoration: "underline wavy #d9a521 1px",
+      textDecoration: AUTOCORRECT_WAVY,
       textUnderlineOffset: "3px",
     },
     ".cm-focus-dimmed": {
@@ -311,26 +309,29 @@
     },
     // Find/replace panel: solid theme surfaces, never the default white.
     ".cm-panel.cm-search": {
-      backgroundColor: overlay,
-      color: fg,
-      borderBottom: `1px solid ${muted}`,
+      backgroundColor: p.overlay,
+      color: p.fg,
+      borderBottom: `1px solid ${p.muted}`,
       padding: "6px 8px",
+      borderRadius: p.radius,
     },
     ".cm-panel.cm-search input": {
-      backgroundColor: bg,
-      color: fg,
-      border: `1px solid ${muted}`,
+      backgroundColor: p.bg,
+      color: p.fg,
+      border: `1px solid ${p.muted}`,
+      borderRadius: p.radius,
     },
     ".cm-panel.cm-search button": {
       backgroundColor: "transparent",
-      color: fg,
-      border: `1px solid ${muted}`,
+      color: p.fg,
+      border: `1px solid ${p.muted}`,
+      borderRadius: p.radius,
     },
     ".cm-searchMatch": {
-      backgroundColor: dark ? "#8FC7A940" : "#3F665640",
+      backgroundColor: p.match,
     },
     ".cm-searchMatch-selected": {
-      backgroundColor: dark ? "#8FC7A980" : "#3F665680",
+      backgroundColor: p.matchSel,
     },
   });
   }
@@ -341,14 +342,18 @@
     }
 
     const content = doc?.content ?? "";
-    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
+    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme);
 
-    // Snippet expansion plugin
+    // Snippet expansion plugin. The expansion dispatch is deferred past
+    // the update cycle (dispatch is illegal synchronously inside
+    // ViewPlugin.update) and revalidated, so a fast typist can never
+    // have the deferred fix clobber newer text.
     const snippetPlugin = ViewPlugin.fromClass(
       class {
         lastText = "";
+        pendingExpand = false;
         update(update: ViewUpdate) {
-          if (!update.docChanged) return;
+          if (!update.docChanged || this.pendingExpand) return;
           const state = update.state;
           const selection = state.selection.main;
           if (!selection.empty) return;
@@ -361,8 +366,21 @@
               const expanded = expandSnippet(snippet.trigger, $currentWorkspace ?? "write");
               if (expanded) {
                 const from = pos - snippet.trigger.length;
-                update.view.dispatch({
-                  changes: { from, to: pos, insert: expanded },
+                const view = update.view;
+                this.pendingExpand = true;
+                queueMicrotask(() => {
+                  this.pendingExpand = false;
+                  try {
+                    if (
+                      view.state.selection.main.empty &&
+                      view.state.selection.main.head === pos &&
+                      view.state.sliceDoc(from, pos) === snippet.trigger
+                    ) {
+                      view.dispatch({ changes: { from, to: pos, insert: expanded } });
+                    }
+                  } catch {
+                    /* view destroyed or doc reshaped mid-flight: drop */
+                  }
                 });
                 break;
               }
@@ -382,7 +400,7 @@
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
-          // Paid for in package.json but never wired: find/replace (Ctrl+F).
+          // Find/replace (Ctrl+F) via @codemirror/search; panel themed above.
           ...searchKeymap,
           {
             key: "Tab",
@@ -850,7 +868,7 @@
     <div class="craft-panel">
       <div class="craft-charts">
         <TrendlineChart data={dialogueTrend} label="Dialogue Ratio" />
-        <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="#6e8efb" />
+        <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="var(--accent-semantic-purple)" />
       </div>
     </div>
   {/if}

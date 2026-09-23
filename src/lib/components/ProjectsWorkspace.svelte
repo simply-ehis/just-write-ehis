@@ -565,7 +565,7 @@
 
   .ai-btn {
     background: var(--accent-semantic-purple) !important;
-    color: white !important;
+    color: var(--text-on-accent) !important;
     border-color: var(--accent-semantic-purple) !important;
   }
 

@@ -370,7 +370,7 @@
   }
 
   .footer-stats.stale {
-    color: var(--accent-semantic-yellow, #d9a521);
+    color: var(--accent-semantic-yellow);
   }
 
   .backup-dot {
@@ -382,6 +382,6 @@
   }
 
   .backup-dot.stale {
-    background: var(--accent-semantic-yellow, #d9a521);
+    background: var(--accent-semantic-yellow);
   }
 </style>

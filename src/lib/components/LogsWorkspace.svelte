@@ -390,7 +390,7 @@
 
   .day-cell.selected {
     background: var(--accent);
-    color: white;
+    color: var(--text-on-accent);
   }
 
   .day-cell.has-entry::after {
@@ -475,7 +475,7 @@
     justify-content: center;
     border-radius: var(--radius-md);
     background: var(--accent);
-    color: white;
+    color: var(--text-on-accent);
     font-size: 18px;
   }
 

@@ -136,8 +136,8 @@
     {:else}
       <div class="trend-row">
         <TrendlineChart data={dialogueTrend} label="Dialogue Ratio" />
-        <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="#6e8efb" />
-        <TrendlineChart data={filterTrend} label="Filter Words" color="#f39c12" />
+        <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="var(--accent-semantic-purple)" />
+        <TrendlineChart data={filterTrend} label="Filter Words" color="var(--warning)" />
       </div>
       <button class="link-btn" onclick={() => ($currentWorkspace = "craft")}>
         Open full Craft analytics <Icon name="arrow-right" size={13} />

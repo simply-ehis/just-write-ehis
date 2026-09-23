@@ -64,7 +64,7 @@
   </div>
   <div class="rhythm-charts">
     <TrendlineChart data={dialogueTrend} label="Dialogue Ratio" />
-    <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="#6e8efb" />
+    <TrendlineChart data={sentenceTrend} label="Avg Sentence Length" color="var(--accent-semantic-purple)" />
   </div>
 </div>
 

@@ -415,7 +415,7 @@
   .legend-gradient {
     flex: 1;
     height: 8px;
-    background: linear-gradient(90deg, var(--surface-overlay), #e74c3c);
+    background: linear-gradient(90deg, var(--surface-overlay), var(--accent-semantic-red));
     border-radius: 4px;
   }
 

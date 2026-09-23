@@ -3,12 +3,14 @@
   --bg: #F1EFE6;
   --surface: #FAF9F3;
   --surface-2: #EBE7D9;
+  --surface-elevated: #FFFFFF;
   --ink: #2B2A25;
-  --ink-muted: #726F62;
+  --ink-muted: #5F5C50;
   --border: #E1DCC9;
   --accent: #3F6656;
   --accent-soft: #DCE7DE;
   --accent-ink: #FFFFFF;
+  --accent-on: var(--text-on-accent);
 
   color-scheme: light;
 
@@ -43,6 +45,7 @@
   --accent-semantic-green: var(--accent);
   --accent-semantic-purple: #7A6F9B;
   --accent-semantic-red: #B54434;
+  --accent-semantic-yellow: #9A6B1A;
   --success: var(--accent);
   --warning: #9A6B1A;
   --error: #B54434;
@@ -70,12 +73,14 @@
   --bg: #1B1A15;
   --surface: #221F19;
   --surface-2: #2A2721;
+  --surface-elevated: #2E2A22;
   --ink: #ECE7D8;
   --ink-muted: #9C9686;
   --border: #332F26;
   --accent: #8FC7A9;
   --accent-soft: #263229;
   --accent-ink: #16211B;
+  --accent-on: var(--text-on-accent);
 
   color-scheme: dark;
 
@@ -108,6 +113,7 @@
   --accent-semantic-green: var(--accent);
   --accent-semantic-purple: #A79BC9;
   --accent-semantic-red: #E08A7A;
+  --accent-semantic-yellow: #D9A441;
   --success: var(--accent);
   --warning: #D9A441;
   --error: #E08A7A;
@@ -130,16 +136,20 @@
 }
 
 :root[data-theme="brutalist"] {
-  /* brutalist — same palette as dark, structural overhaul */
-  --bg: #1B1A15;
-  --surface: #221F19;
-  --surface-2: #2A2721;
-  --ink: #ECE7D8;
-  --ink-muted: #9C9686;
-  --border: #332F26;
-  --accent: #8FC7A9;
-  --accent-soft: #263229;
-  --accent-ink: #16211B;
+  /* brutalist — hazard: near-black concrete, safety-amber accent.
+     Deliberately NOT dark's palette: flat fills, 0 radius, 2-3px hard
+     ink borders, offset ink shadows, amber focus/selection. */
+  --bg: #100F0D;
+  --surface: #171614;
+  --surface-2: #1E1C19;
+  --surface-elevated: #242220;
+  --ink: #F4F1E6;
+  --ink-muted: #A8A294;
+  --border: #2A2824;
+  --accent: #FFB000;
+  --accent-soft: #3A2C10;
+  --accent-ink: #191100;
+  --accent-on: var(--text-on-accent);
 
   color-scheme: dark;
 
@@ -163,31 +173,42 @@
   --text-on-accent: var(--accent-ink);
 
   --border-strong: #4A4436;
-  --border-subtle: #29251E;
+  --border-subtle: #242220;
 
-  --accent-hover: #A5D6BC;
+  --accent-hover: #FFC133;
   --accent-primary: var(--accent);
   --accent-write: var(--accent);
-  --accent-green: var(--accent);
-  --accent-semantic-green: var(--accent);
-  --accent-semantic-purple: #A79BC9;
-  --accent-semantic-red: #E08A7A;
+  --accent-green: #8FD694;
+  --accent-semantic-green: #8FD694;
+  --accent-semantic-purple: #C4B5E3;
+  --accent-semantic-red: #F0857A;
+  --accent-semantic-yellow: #FFB000;
   --success: var(--accent);
-  --warning: #D9A441;
-  --error: #E08A7A;
+  --warning: #FFB000;
+  --error: #F0857A;
 
-  --ws-logs: #D9A441;
-  --ws-write: #9C9686;
-  --ws-map: #8FC7A9;
-  --ws-canvas: #E09A5A;
-  --ws-novel: #A79BC9;
-  --ws-script: #E08A7A;
+  --ws-logs: #FFB000;
+  --ws-write: #A8A294;
+  --ws-map: #8FD694;
+  --ws-canvas: #F08C4B;
+  --ws-novel: #C4B5E3;
+  --ws-script: #F0857A;
   --ws-projects: #9AA1AD;
   --ws-reader: #7FBF9A;
-  --ws-home: #8FC7A9;
-  --ws-inbox: #D9A35A;
+  --ws-home: #FFB000;
+  --ws-inbox: #F5A524;
   --ws-files: #A39E93;
   --ws-properties: #93A985;
+
+  /* Radius scale collapses to 0: brutalism differs by tokens, not overrides. */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-full: 0;
+
+  /* Soft shadows become hard ink offsets. */
+  --shadow-sm: 2px 2px 0 var(--ink);
+  --shadow-md: 4px 4px 0 var(--ink);
 
   /* Brutalist structural tokens */
   --brutalist-shadow: 4px 4px 0 var(--ink);
@@ -240,9 +261,13 @@
     --accent-semantic-green: var(--accent);
     --accent-semantic-purple: #A79BC9;
     --accent-semantic-red: #E08A7A;
+    --accent-semantic-yellow: #D9A441;
+    --accent-on: var(--text-on-accent);
     --success: var(--accent);
     --warning: #D9A441;
     --error: #E08A7A;
+
+    --surface-elevated: #2E2A22;
 
     --ws-logs: #D9A441;
     --ws-write: #9C9686;
@@ -253,6 +278,9 @@
     --ws-projects: #9AA1AD;
     --ws-reader: #7FBF9A;
     --ws-home: #8FC7A9;
+    --ws-inbox: #D9A35A;
+    --ws-files: #A39E93;
+    --ws-properties: #93A985;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -295,6 +323,9 @@
   --space-4: 16px;
   --space-6: 24px;
   --space-8: 32px;
+
+  /* Semantic alias so var(--danger, …) fallbacks resolve to the theme error. */
+  --danger: var(--error);
 }
 
 * {
@@ -745,6 +776,10 @@ input:focus, textarea:focus, select:focus {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* The entry list outgrows short windows: scroll it, keep header+footer pinned. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .workspace-nav .nav-item {
@@ -1249,16 +1284,20 @@ input:focus, textarea:focus, select:focus {
    ============================================ */
 
 :root[data-theme="glass"] {
-  /* Glass — same palette as dark, frosted glass structural overhaul */
+  /* Glass — abyssal glow: near-black base, real translucency, a
+     luminous mint accent. Distinct from dark's flat ink-well fills. */
   --bg: #0a0a0a;
   --surface: rgba(255, 255, 255, 0.04);
   --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-elevated: rgba(255, 255, 255, 0.09);
   --ink: #ECE7D8;
   --ink-muted: #9C9686;
   --border: rgba(255, 255, 255, 0.08);
-  --accent: #8FC7A9;
-  --accent-soft: rgba(143, 199, 169, 0.12);
+  --accent: #A9E8C6;
+  --accent-soft: rgba(143, 199, 169, 0.14);
   --accent-ink: #16211B;
+  --accent-on: var(--text-on-accent);
+  --accent-glow: 0 0 14px rgba(143, 199, 169, 0.35);
 
   color-scheme: dark;
 
@@ -1284,29 +1323,35 @@ input:focus, textarea:focus, select:focus {
   --border-strong: rgba(255, 255, 255, 0.14);
   --border-subtle: rgba(255, 255, 255, 0.06);
 
-  --accent-hover: #A5D6BC;
+  --accent-hover: #C2F2DA;
   --accent-primary: var(--accent);
   --accent-write: var(--accent);
   --accent-green: var(--accent);
   --accent-semantic-green: var(--accent);
-  --accent-semantic-purple: #A79BC9;
-  --accent-semantic-red: #E08A7A;
+  --accent-semantic-purple: #B9A8DC;
+  --accent-semantic-red: #E89A8B;
+  --accent-semantic-yellow: #D9A441;
   --success: var(--accent);
   --warning: #D9A441;
-  --error: #E08A7A;
+  --error: #E89A8B;
 
   --ws-logs: #D9A441;
   --ws-write: #9C9686;
-  --ws-map: #8FC7A9;
+  --ws-map: #A9E8C6;
   --ws-canvas: #E09A5A;
-  --ws-novel: #A79BC9;
-  --ws-script: #E08A7A;
+  --ws-novel: #B9A8DC;
+  --ws-script: #E89A8B;
   --ws-projects: #9AA1AD;
   --ws-reader: #7FBF9A;
-  --ws-home: #8FC7A9;
+  --ws-home: #A9E8C6;
   --ws-inbox: #D9A35A;
   --ws-files: #A39E93;
   --ws-properties: #93A985;
+
+  /* Radius scale swells: glass differs by tokens, not overrides. */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
 
   /* Glass structural tokens */
   --glass-bg: rgba(255, 255, 255, 0.03);
@@ -1566,6 +1611,26 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius) !important;
   box-shadow: var(--glass-shadow), var(--glass-inset);
+}
+
+/* Glass — luminous accent: active destinations and primary actions glow. */
+[data-theme="glass"] .workspace-nav .nav-item.active,
+[data-theme="glass"] .tab-bar .tab.active {
+  box-shadow: var(--accent-glow);
+}
+
+[data-theme="glass"] .btn-primary {
+  box-shadow: var(--accent-glow);
+}
+
+/* Glass — floating dialogs frost over the workspace beneath. */
+[data-theme="glass"] .palette,
+[data-theme="glass"] .modal,
+[data-theme="glass"] .qc-panel,
+[data-theme="glass"] .version-panel {
+  background: rgba(18, 20, 18, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 /* Glass — workspace top bar */

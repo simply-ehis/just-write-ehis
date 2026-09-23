@@ -3,6 +3,7 @@
   import { EditorView, keymap } from "@codemirror/view";
   import { Compartment, EditorState } from "@codemirror/state";
   import { ghostField, ghostInlinePlugin, setGhostEffect } from "$lib/ghostWidget";
+  import { AUTOCORRECT_WAVY, editorPalette } from "$lib/editorTheme";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
@@ -187,20 +188,18 @@ import VersionHistory from "./VersionHistory.svelte";
     return false;
   }
 
-  function makeDarkTheme(font: string, size: number, lh: number, dark = true) {
-    // Paper & pine: keep the CodeMirror surface in lockstep with app.css.
-    const bg = dark ? "#1B1A15" : "#F1EFE6";
-    const fg = dark ? "#ECE7D8" : "#2B2A25";
-    const muted = dark ? "#9C9686" : "#726F62";
-    const overlay = dark ? "#2A2721" : "#EBE7D9";
-    const accent = dark ? "#8FC7A9" : "#3F6656";
+  function makeDarkTheme(font: string, size: number, lh: number, theme = "dark") {
+    // Per-theme editor surface, in lockstep with app.css via the shared
+    // palette (brutalist gets flat amber, glass translucent mint — never
+    // dark's editor by default).
+    const p = editorPalette(theme);
     return EditorView.theme({
       "&": {
-        backgroundColor: bg,
-        color: fg,
+        backgroundColor: p.bg,
+        color: p.fg,
       },
       ".cm-content": {
-        caretColor: accent,
+        caretColor: p.accent,
         fontFamily: `'${font}', monospace`,
         fontSize: `${size}px`,
         lineHeight: `${lh}`,
@@ -209,61 +208,64 @@ import VersionHistory from "./VersionHistory.svelte";
         margin: "0 auto",
       },
     ".cm-gutters": {
-      backgroundColor: bg,
-      color: muted,
+      backgroundColor: p.bg,
+      color: p.muted,
       border: "none",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: overlay,
+      backgroundColor: p.overlay,
     },
     ".cm-activeLine": {
-      backgroundColor: dark ? "#2A272160" : "#EBE7D980",
+      backgroundColor: p.overlay,
     },
     ".cm-selectionBackground": {
-      backgroundColor: dark ? "#8FC7A930 !important" : "#3F665630 !important",
+      backgroundColor: `${p.sel} !important`,
     },
     ".cm-cursor": {
-      borderLeftColor: accent,
+      borderLeftColor: p.accent,
     },
     ".cm-focused .cm-selectionBackground": {
-      backgroundColor: dark ? "#8FC7A940 !important" : "#3F665640 !important",
+      backgroundColor: `${p.selFocus} !important`,
     },
     ".cm-focus-dimmed": {
       opacity: "0.35",
       transition: "opacity 0.3s ease",
     },
     ".cm-autocorrect-suggest": {
-      textDecoration: "underline wavy #d9a521 1px",
+      textDecoration: AUTOCORRECT_WAVY,
       textUnderlineOffset: "3px",
     },
     // Find/replace panel: solid theme surfaces, never the default white.
     ".cm-panel.cm-search": {
-      backgroundColor: overlay,
-      color: fg,
-      borderBottom: `1px solid ${muted}`,
+      backgroundColor: p.overlay,
+      color: p.fg,
+      borderBottom: `1px solid ${p.muted}`,
       padding: "6px 8px",
+      borderRadius: p.radius,
     },
     ".cm-panel.cm-search input": {
-      backgroundColor: bg,
-      color: fg,
-      border: `1px solid ${muted}`,
+      backgroundColor: p.bg,
+      color: p.fg,
+      border: `1px solid ${p.muted}`,
+      borderRadius: p.radius,
     },
     ".cm-panel.cm-search button": {
       backgroundColor: "transparent",
-      color: fg,
-      border: `1px solid ${muted}`,
+      color: p.fg,
+      border: `1px solid ${p.muted}`,
+      borderRadius: p.radius,
     },
     ".cm-searchMatch": {
-      backgroundColor: dark ? "#8FC7A940" : "#3F665640",
+      backgroundColor: p.match,
     },
     ".cm-searchMatch-selected": {
-      backgroundColor: dark ? "#8FC7A980" : "#3F665680",
+      backgroundColor: p.matchSel,
     },
   });
   }
 
   function currentThemeExt() {
-    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
+    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme);
   }
 
   function currentAutocorrectExt() {
