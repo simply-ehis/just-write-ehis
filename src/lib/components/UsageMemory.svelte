@@ -1,50 +1,30 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
+  import { dashboardStats, refreshDashboardStats } from "$lib/stores/dashboard";
   import Icon from "./Icon.svelte";
 
-  // Data state
-  let reopenNeverFinish = $state<Array<{ doc: any; openCount: number; lastOpened: string }>>([]);
-  let streakHeatmap = $state<{ date: string; words: number }[]>([]);
-  let writingTimePatterns = $state<{ hour: number; count: number }[]>([]);
-  let writingVelocity = $state<{ date: string; words: number }[]>([]);
-  let productivityScore = $state<{ score: number; totalWords: number; totalDocs: number; activeDays: number; avgWords: number } | null>(null);
+  // Data state — derived from the shared dashboard store (single truth:
+  // Home cards read the same cache, commands underneath unchanged).
+  let reopenNeverFinish = $derived($dashboardStats.reopenNeverFinish);
+  let streakHeatmap = $derived($dashboardStats.streakHeatmap);
+  let writingTimePatterns = $derived($dashboardStats.writingTimePatterns);
+  let writingVelocity = $derived($dashboardStats.writingVelocity);
+  let productivityScore = $derived($dashboardStats.productivityScore);
   let loading = $state(true);
   let activeTab = $state<'reopen' | 'streak' | 'patterns' | 'velocity'>('reopen');
-
-  async function loadData() {
-    loading = true;
-    try {
-      const [
-        reopenData,
-        streakData,
-        patternsData,
-        velocityData,
-        productivityData
-      ] = await Promise.all([
-        api.getReopenNeverFinish?.() ?? Promise.resolve([]),
-        api.dashboardStreakHeatmap?.() ?? Promise.resolve([]),
-        api.dashboardWritingTimePatterns?.() ?? Promise.resolve([]),
-        api.dashboardWritingVelocity?.() ?? Promise.resolve([]),
-        api.dashboardProductivityScore?.() ?? Promise.resolve(null)
-      ]);
-
-      reopenNeverFinish = reopenData || [];
-      streakHeatmap = streakData || [];
-      writingTimePatterns = patternsData || [];
-      writingVelocity = velocityData || [];
-      productivityScore = productivityData;
-    } catch (e) {
-      console.error("Failed to load usage memory data:", e);
-    } finally {
-      loading = false;
-    }
-  }
 
   // $effect runs on mount and whenever the open doc/workspace changes.
   $effect(() => {
     if ($currentDoc || $currentWorkspace) {
-      loadData();
+      loading = true;
+      refreshDashboardStats()
+        .catch((e) => {
+          console.error("Failed to load usage memory data:", e);
+        })
+        .finally(() => {
+          loading = false;
+        });
     }
   });
 

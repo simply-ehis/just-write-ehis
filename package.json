@@ -32,7 +32,8 @@
     "test:export": "node tests/export-batch.mjs",
     "test:onboard": "node tests/onboard-flow.mjs",
     "test:entities": "node tests/entities-unit.mjs",
-    "test:wstoggles": "node tests/ws-toggles.mjs"
+    "test:wstoggles": "node tests/ws-toggles.mjs",
+    "test:settings": "node tests/settings-validate.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

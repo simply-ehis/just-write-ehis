@@ -222,7 +222,7 @@
       properties: "Library",
       craft: "Craft",
       stats: "Stats",
-      skills: "Skills",
+      skills: "Tips",
     };
     return labels[ws] ?? ws;
   }

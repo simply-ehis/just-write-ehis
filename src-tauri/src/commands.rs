@@ -656,52 +656,6 @@ pub fn dashboard_productivity_score(db: State<'_, Database>) -> Result<serde_jso
     db.dashboard_productivity_score()
 }
 
-#[tauri::command]
-pub fn dashboard_heatmap_data(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let rows = db.dashboard_streak_heatmap()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(date, words)| {
-        serde_json::json!({"date": date, "count": words})
-    }).collect()))
-}
-
-#[tauri::command]
-pub fn dashboard_activity_heatmap(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let hours = db.analytics_heatmap_hourly()?;
-    let days = db.analytics_heatmap_daily()?;
-    Ok(serde_json::json!({"hours": hours, "daysOfWeek": days}))
-}
-
-#[tauri::command]
-pub fn dashboard_word_count_timeline(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let rows = db.dashboard_streak_heatmap()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(date, words)| {
-        serde_json::json!({"date": date, "words": words})
-    }).collect()))
-}
-
-#[tauri::command]
-pub fn analytics_heatmap_hourly(db: State<'_, Database>) -> Result<Vec<i64>, String> {
-    db.analytics_heatmap_hourly()
-}
-
-#[tauri::command]
-pub fn analytics_heatmap_daily(db: State<'_, Database>) -> Result<Vec<i64>, String> {
-    db.analytics_heatmap_daily()
-}
-
-#[tauri::command]
-pub fn analytics_word_count_by_workspace(db: State<'_, Database>) -> Result<Vec<(String, i64)>, String> {
-    db.analytics_word_count_by_workspace()
-}
-
-#[tauri::command]
-pub fn analytics_activity_timeline(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let rows = db.analytics_activity_timeline()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(date, words, docs)| {
-        serde_json::json!({"date": date, "words": words, "docs": docs})
-    }).collect()))
-}
-
 fn script_frontmatter_array(doc_id: &str, db: &State<'_, Database>, key: &str) -> Result<serde_json::Value, String> {
     let fm = db.get_doc_frontmatter(doc_id)?;
     Ok(fm.get(key).cloned().unwrap_or(serde_json::Value::Array(vec![])))

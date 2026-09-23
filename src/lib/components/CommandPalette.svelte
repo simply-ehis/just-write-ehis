@@ -34,7 +34,7 @@
     { id: 'inbox', label: 'Open Inbox', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
     { id: 'craft', label: 'Open Craft Analytics (Settings)', icon: 'chart', action: () => { openSettingsAt('craft'); $showSettings = true; close(); } },
     { id: 'stats', label: 'Open Usage Stats (Settings)', icon: 'calendar', action: () => { openSettingsAt('stats'); $showSettings = true; close(); } },
-    { id: 'skills', label: 'Open Skills (Settings)', icon: 'sparkle', action: () => { openSettingsAt('skills'); $showSettings = true; close(); } },
+    { id: 'skills', label: 'Open Tips (Settings)', icon: 'sparkle', action: () => { openSettingsAt('skills'); $showSettings = true; close(); } },
     { id: 'properties', label: 'All Documents (Table/Board)', icon: 'table', action: () => { $currentWorkspace = 'properties'; close(); } },
     { id: 'daily-note', label: 'Open Today\'s Daily Note', icon: 'calendar', action: () => { void openDailyNotePalette(); } },
     { id: 'quick-capture', label: 'Quick Capture (Inbox)', icon: 'inbox', action: () => { quickCapture(); close(); } },

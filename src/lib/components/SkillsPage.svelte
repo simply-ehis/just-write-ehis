@@ -54,7 +54,7 @@
         filterTrend = f;
       })
       .catch((e) => {
-        console.warn("Skills power features load failed:", e);
+        console.warn("Tips power features load failed:", e);
       })
       .finally(() => {
         if ($currentDoc?.id === docId) loading = false;
@@ -86,13 +86,13 @@
 
 <div class="skills-page">
   <div class="skills-header">
-    <h1>Skills</h1>
+    <h1>Tips</h1>
     <span class="doc-title">{$currentDoc?.title || "No document selected"}</span>
   </div>
 
   <section class="skills-section">
     <h2>Power features</h2>
-    <p class="section-hint">Unused features surface as gentle nudges. Try one to retire its hint forever.</p>
+    <p class="section-hint">Unused features surface as gentle tips. Try one to retire its hint forever.</p>
     <div class="feature-list">
       {#each catalog as pf}
         {@const used = $settings.featuresUsed.includes(pf.feature)}

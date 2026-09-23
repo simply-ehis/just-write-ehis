@@ -1,5 +1,5 @@
 /**
- * features — feature-usage tracking for skill nudges.
+ * features — feature-usage tracking for Tips hints (the Settings → Tips page).
  *
  * SkillNudges.svelte shows unused-power-feature hints sparingly; every
  * hint retires forever once its feature is actually used (or dismissed).

@@ -231,8 +231,8 @@ async function modelWiring() {
 async function modelsDocWiring() {
   const models = await readFile(join(root, "docs/MODELS.md"), "utf8");
   check("models doc locks voice picks", models.includes("Moonshine streaming only") && models.includes("Kokoro-82M only"));
-  check("models doc records finetune verdict", models.includes("Finetune verdict"));
-  check("models doc records constraint audit", models.includes("Constraint audit"));
+  check("models doc lists cloud providers only", models.includes("OpenAI") && models.includes("Anthropic") && models.includes("Custom") && !models.includes("ollama pull") && !models.includes("llama3.2"));
+  check("models doc states chat-completions contract", models.includes("Provider notes") && models.includes("/chat/completions"));
 }
 
 async function memorySidecarLive() {
@@ -401,12 +401,31 @@ async function auditBatchWiring() {
   check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("harness_dir is empty") && commands.includes("ctx_size"));
 }
 
+async function settingsAreaWiring() {
+  const api = await readFile(join(root, "src/lib/api.ts"), "utf8");
+  check("orphaned dashboard commands deleted", !api.includes("dashboardHeatmapData") && !api.includes("dashboardActivityHeatmap") && !api.includes("dashboardWordCountTimeline") && !api.includes("analyticsHeatmapHourly") && !api.includes("analyticsActivityTimeline") && api.includes("dashboardWritingVelocity") && api.includes("dashboardProductivityScore"));
+  const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
+  check("dead sync keys deleted", !stores.includes("fileWatcherEnabled") && !stores.includes("conflictBehavior") && stores.includes("validateSettings") && stores.includes("resetSettings"));
+  check("retired ollama defaults migrate", stores.includes("migrateRetiredProviders") && (await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8")).includes("RETIRED_MAIN_MODELS"));
+  const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
+  check("settings import validates loudly + resets", pane.includes("validateSettings(imported") && pane.includes("Import blocked secrets") && pane.includes("resetAllSettings") && pane.includes("setupFileWatcher") && !pane.includes("setting-conflict-behavior"));
+  check("rhythm heatmap wired to checkbox", pane.includes("setting-rhythm-heatmap") && pane.includes("rhythmHeatmapInStatusBar"));
+  for (const f of ["EditorPane.svelte", "JustWriteWorkspace.svelte"]) {
+    const src = await readFile(join(root, "src/lib/components", f), "utf8");
+    check(`${f} records 3 craft metrics gated`, src.includes("craftProfilingEnabled") && src.includes('"dialogue_ratio"') && src.includes('"avg_sentence_length"') && src.includes('"filter_words"'));
+  }
+  const dash = await readFile(join(root, "src/lib/stores/dashboard.ts"), "utf8");
+  const usage = await readFile(join(root, "src/lib/components/UsageMemory.svelte"), "utf8");
+  check("dashboard single-truth store", dash.includes("refreshDashboardStats") && dash.includes("dashboardStreakHeatmap") && usage.includes("stores/dashboard") && !usage.includes("api.getReopenNeverFinish?.()"));
+}
+
 async function secretsWiring() {
   const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
-  check("settings export strips secrets", pane.includes("apiKey, appLockPin, ...exportable"));
-  check("settings import uses allowlist", pane.includes("IMPORTABLE_SETTINGS_KEYS"));
+  check("settings export strips secrets", pane.includes("for (const k of SECRET_KEYS) delete exportable[k]"));
+  check("settings import uses allowlist", pane.includes("validateSettings(imported"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
-  check("import allowlist excludes secrets", stores.includes("IMPORTABLE_SETTINGS_KEYS") && stores.includes('"apiKey", "appLockPin"'));
+  const schema = await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8");
+  check("import allowlist excludes secrets", schema.includes("SECRET_KEYS") && schema.includes('"apiKey", "appLockPin"'));
   check("lock can be disabled in settings", stores.includes("lockEnabled") && pane.includes("setting-lock-enabled"));
   const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
   check("preview secret bucket has allowlist", backend.includes('payload.key !== "apiKey"'));
@@ -553,6 +572,7 @@ await integrityWiring();
 await noNativeDialogs();
 await auditBatchWiring();
 await secretsWiring();
+await settingsAreaWiring();
 await recentWiring();
 await splitHardeningWiring();
 await themeAndReaderWiring();

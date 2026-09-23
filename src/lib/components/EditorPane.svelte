@@ -25,7 +25,7 @@
   import Icon from "./Icon.svelte";
   import { downloadConvertOutput, downloadFountain } from "$lib/download";
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
-  import { filterWordRatio } from "$lib/browserBackend";
+  import { craftStats } from "$lib/browserBackend";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
   import { markUsed } from "$lib/features";
   import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
@@ -522,12 +522,19 @@
         $currentDoc = { ...$currentDoc!, word_count: wordCount };
         // Craft profiling + write heartbeat, at most once a minute per doc.
         // (Drives streaks, heatmaps, patterns, and the craft skill nudge.)
+        // The write heartbeat is always recorded; craft metric snapshots are
+        // opt-in via Settings → Craft analytics recording (default off).
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
           const docId = $currentDoc!.id;
           api.usageRecord(docId, "write").catch(() => {});
-          api.memoryRecordMetric(docId, "filter_words", filterWordRatio(content)).catch(() => {});
+          if ($settings.craftProfilingEnabled) {
+            const stats = craftStats(content);
+            api.memoryRecordMetric(docId, "filter_words", stats.filterWords).catch(() => {});
+            api.memoryRecordMetric(docId, "dialogue_ratio", stats.dialogue).catch(() => {});
+            api.memoryRecordMetric(docId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+          }
         }
       } catch (e) {
         console.error("Failed to save:", e);

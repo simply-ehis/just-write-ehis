@@ -2479,66 +2479,6 @@ impl Database {
         }))
     }
 
-    /// Usage-event counts per hour (0-23), zero-filled.
-    pub fn analytics_heatmap_hourly(&self) -> Result<Vec<i64>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT CAST(strftime('%H', ts) AS INTEGER) AS hour, COUNT(*) FROM usage_events GROUP BY hour"
-        ).map_err(|e| e.to_string())?;
-        let mut buckets = vec![0i64; 24];
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
-        for r in rows.filter_map(|r| r.ok()) {
-            if (0..24).contains(&r.0) {
-                buckets[r.0 as usize] = r.1;
-            }
-        }
-        Ok(buckets)
-    }
-
-    /// Usage-event counts per weekday (0=Sunday..6=Saturday).
-    pub fn analytics_heatmap_daily(&self) -> Result<Vec<i64>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT CAST(strftime('%w', ts) AS INTEGER) AS day, COUNT(*) FROM usage_events GROUP BY day"
-        ).map_err(|e| e.to_string())?;
-        let mut buckets = vec![0i64; 7];
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
-        for r in rows.filter_map(|r| r.ok()) {
-            if (0..7).contains(&r.0) {
-                buckets[r.0 as usize] = r.1;
-            }
-        }
-        Ok(buckets)
-    }
-
-    /// Word totals per workspace (unlocked docs).
-    pub fn analytics_word_count_by_workspace(&self) -> Result<Vec<(String, i64)>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT workspace, COALESCE(SUM(word_count), 0) FROM docs WHERE locked = 0 GROUP BY workspace ORDER BY 2 DESC"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
-    }
-
-    /// Per-day words + touched-doc counts (unlocked docs).
-    pub fn analytics_activity_timeline(&self) -> Result<Vec<(String, i64, i64)>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT date(updated_at) as day, COALESCE(SUM(word_count), 0), COUNT(*) FROM docs WHERE locked = 0 GROUP BY day ORDER BY day"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
-        }).map_err(|e| e.to_string())?;
-        rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
-    }
-
     /// Raw frontmatter JSON for script metadata editing (roles, cast, timeline).
     pub fn get_doc_frontmatter(&self, doc_id: &str) -> Result<serde_json::Value, String> {
         let doc = self.get_doc(doc_id)?;

@@ -1,4 +1,8 @@
 import { writable, get } from "svelte/store";
+import { SECRET_KEYS, validateSettings, migrateRetiredProviders } from "$lib/settingsValidate";
+
+/** Re-exported so panes strip secrets with the same single list. */
+export { SECRET_KEYS };
 
 export type SettingsCategory =
   | "general"
@@ -6,7 +10,6 @@ export type SettingsCategory =
   | "ai"
   | "privacy"
   | "vaults"
-  | "sync"
   | "capture"
   | "keybindings"
   | "skills"
@@ -79,9 +82,6 @@ export interface AppSettings {
   vaultPath: string;
   backupFrequency: "daily" | "weekly" | "monthly" | "never";
   snapshotRetentionDays: number;
-
-  fileWatcherEnabled: boolean;
-  conflictBehavior: "keep-remote" | "keep-local" | "ask";
 
   androidCaptureMethod: "notification" | "widget" | "share-target";
   weeklyTriageReminder: boolean;
@@ -169,8 +169,8 @@ const defaultSettings: AppSettings = {
   smallModelName: "lfm2.5-350m",
   smallModelContextLength: 8192,
   useSmallAsMain: false,
-  mainModelEndpoint: "http://localhost:11434/v1",
-  mainModelName: "llama3.2",
+  mainModelEndpoint: "https://api.openai.com/v1",
+  mainModelName: "gpt-4o-mini",
   aiRateLimitCooldown: 3000,
   apiKey: "",
   sidecarHarnessDir: "",
@@ -181,14 +181,13 @@ const defaultSettings: AppSettings = {
 
   appLockPin: "",
   lockEnabled: true,
-  craftProfilingEnabled: true,
+  // Off until the user opts in: no craft metrics are recorded, so Craft
+  // charts and the filter-word nudge stay empty rather than half-fed.
+  craftProfilingEnabled: false,
 
   vaultPath: "~/WritingVault",
   backupFrequency: "daily",
   snapshotRetentionDays: 30,
-
-  fileWatcherEnabled: true,
-  conflictBehavior: "ask",
 
   androidCaptureMethod: "notification",
   weeklyTriageReminder: true,
@@ -245,7 +244,9 @@ const defaultSettings: AppSettings = {
   rhythmHeatmapInStatusBar: false,
 };
 
-const SECRET_KEYS = ["apiKey", "appLockPin"] as const;
+/** Defaults (exported for Reset-to-defaults; resetSettings deep-copies). */
+export const DEFAULT_SETTINGS: AppSettings = defaultSettings;
+
 type SecretKey = (typeof SECRET_KEYS)[number];
 
 /**
@@ -282,7 +283,19 @@ function loadSettings(): AppSettings {
   try {
     const stored = localStorage.getItem("writing-app-settings");
     if (stored) {
-      return { ...defaultSettings, ...JSON.parse(stored) };
+      const parsed: unknown = JSON.parse(stored);
+      // Sanitize: unknown/retired keys, wrong types, and smuggled secrets
+      // are dropped; out-of-range numbers are clamped. A corrupt store
+      // can never poison boot. Retired Ollama-era main-slot defaults
+      // migrate forward (exact matches only); deliberate custom values stay.
+      if (parsed && typeof parsed === "object") {
+        const { valid } = validateSettings(parsed as Record<string, unknown>);
+        const { patch, migrated } = migrateRetiredProviders(valid, defaultSettings);
+        if (migrated.length > 0) {
+          console.warn(`Settings migrated off retired providers: ${migrated.join(", ")}`);
+        }
+        return { ...defaultSettings, ...patch };
+      }
     }
   } catch (e) {
     console.warn("Failed to load settings from localStorage:", e);
@@ -406,4 +419,14 @@ export function toggleWorkspacePrivacy(workspaceId: string) {
     s.workspacePrivacy = { ...s.workspacePrivacy, [workspaceId]: !s.workspacePrivacy[workspaceId] };
     return s;
   });
+}
+
+/**
+ * Reset every setting to defaults (deep copy — nested keybindings/
+ * templates must not alias DEFAULT_SETTINGS). Secrets stay in the OS
+ * keychain; file-watcher/conflict/blankMode are reactive reads, so no
+ * resubscribe is needed — the file watcher is (re)started by the caller.
+ */
+export function resetSettings(): void {
+  settings.set(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings);
 }

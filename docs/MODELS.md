@@ -3,8 +3,8 @@ OWNERS: model picks, slot routing, sidecar model plumbing
 READ-WHEN: AI answers badly, swapping STT/TTS/LLM models, adding a new slot
 KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/fetch_sidecars.py
 INVARIANTS: small slot = ghost/light tasks; main slot = chat/composer/structurize; voice swaps apply on next sidecar start
-GOTCHAS: sidecars download weights on first run (network needed once); voice swaps need a sidecar restart, LLM swaps take effect immediately; fetch script downloads binaries + weights to models/; verify ollama tags with `ollama pull` before trusting names here
-UPDATED: 2026-09-17
+GOTCHAS: sidecars download weights on first run (network needed once); voice swaps need a sidecar restart; main slot needs a provider key — Test it before trusting it mid-sentence
+UPDATED: 2026-09-23
 
 # MODELS.md — picks per job (researched Sept 2026)
 
@@ -25,78 +25,46 @@ Changeability contract (every pick below must satisfy all three, verified):
 2. Settings → AI → **Test** confirms the endpoint serves it;
 3. no weights are bundled — `fetch_sidecars.py` downloads once, swapping never bloats the repo.
 
-## Light LLM (small slot, cap 0.5B — deep-researched Sept 2026)
+## Light LLM (small slot)
 
 The slot's jobs: inline continuation (Ghost), brace-directive extraction,
 title/tag suggestions, craft-metric notes. All want instruction-following
 + structured output at minimum latency, not reasoning.
 
-Ranked:
+Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
-1. **LFM2.5-350M** (Liquid AI) — **default, keep.** Native function
-   calling, 32K context, marketed verbatim as "data extraction and tool
-   use". Three confirmed routes: Ollama `LiquidAI/lfm2.5-350m` (`:q4_0`,
-   `:q8_0`), GGUF `LiquidAI/LFM2.5-350M-GGUF:Q4_K_M`
-   (`ollama run hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` or
-   `llama serve -hf …`), llama.cpp/LM Studio/vLLM. Best fit per job.
-2. **`qwen3:0.6b`** (Ollama) — biggest instruct jump in the survey data
-   (BBH ~41 vs ~16 for Qwen2.5-0.5B), native tool calling, safest
-   one-command install: `ollama pull qwen3:0.6b`. First fallback.
-3. **Falcon-H1-0.5B** (TII) — exactly at cap; hybrid Transformer+Mamba,
-   claims ~2024-7B-class performance, instruct + tool-calling variants,
-   GGUF in `tiiuae`'s collection, Ollama-able. Caveats: hybrid arch wants
-   a recent llama.cpp, and the Falcon-LLM license needs a read before
-   commercial use. Bench it, don't default it.
-4. **SmolLM2-360M-Instruct** (HuggingFace, Apache 2.0) — the license-safe
-   pick (`ollama run smollm2:360m`); solid, unexciting, honest.
-5. **`granite4:350m`** (Ollama, tools-tagged) — IBM entry with explicit
-   tool-calling; bench option if extraction fidelity disappoints.
+1. **Bundled local endpoint** — default, keep. The small-model sidecar
+   serves it at `http://127.0.0.1:8093/v1` with zero config and no key.
+2. **OpenAI** — same account/key as the main slot, smaller model id.
+3. **Google (Gemini)** — via Google's OpenAI-compatibility base URL.
+4. **Anthropic** — via an OpenAI-compatible gateway (the slot only speaks
+   `/chat/completions` + Bearer, so the native Anthropic API won't plug
+   in directly).
+5. **Custom** — any endpoint serving OpenAI-compatible `/chat/completions`
+   + `/models` (the Test button verifies both).
 
-Also-rans: `gemma3:270m` (fine generalist, weaker instruction-following),
-Falcon-H1-Tiny-90M (fascinating for classification-only micro-tasks, too
-small for continuation — not a slot replacement), MobileLLM-Flash-350M /
-Apertus-Mini-0.5B / MobileMoE-0.3B (paper-strong, weak GGUF/Ollama
-availability — revisit when packaged).
+### Provider notes
 
-No "Baron" tiny model exists: the name matches either an 8B uncensored
-Ollama fine-tune (4.9GB, 10× over cap, wrong job) or PyCQA/baron, a Python
-parser, not a model. Not pursued.
-
-### Finetune verdict: base wins
-
-The LFM2.5-350M finetune landscape is encoders, embeddings, language
-variants, MLX/ONNX ports, and near-zero-traction experiments
-(home-assistant SFT, uncensored/heretic forks). Nothing beats base for
-extraction or continuation — **run base**. Revisit only if a finetune
-ships with evals.
-
-### Constraint audit (Sept 2026 Hub sweep — why the shortlist is short)
-
-Under 2026 + non-giant + ≤0.5B + packaged generalist, the Hub set is
-empty; each name below costs one constraint:
-
-| Candidate | Disqualifier |
-|---|---|
-| Falcon-H1-0.5B (+ Tiny-Tool-Calling-90M) | excluded by instruction |
-| SmolLM2-360M (+ finetunes) | 2024; finetunes ~0 signal |
-| Gemma-270M (+ finetunes) | 2025; finetunes zero signal |
-| Qwen3-0.6B | excluded family; 600M over cap |
-| Apertus Mini, MobileLLM-Flash, EuroLLM/Sailor 0.5B | not packaged / don't exist |
-| Granite 350M | no GGUF (Ollama-only) |
-| Danube3-500M, PleIAs-Nano | 2024 (+over-cap/llama-arch for Nano) |
-| xLAM, Hammer | nothing ≤0.5B |
-| MobileMoE | MoE arch risk + unpackaged |
-| Mistral 0.4B drafts | speculative-decode dummies, wrong job |
-| SmolVLM, Minueza-3-95M | vision / roleplay — wrong job |
-| BitCPM4-0.5B | 2025 only — closest alternate (434M, Apache 2.0, official GGUF) |
+Both slots speak the same contract: `{base}/chat/completions` with a
+Bearer key, verified up front by `{base}/models`. If Test lists your model
+id, the slot works — provider-agnostic. No local-model tags, Ollama
+commands, or GGUF paths are listed here on purpose; the bundled sidecar
+is the only local exception and it needs no model pick.
 
 ## Main LLM (main slot)
 
-- `qwen3:8b` (Ollama) — capable local chat/prose work on modest hardware.
-- `qwen3:0.6b` — when the main box is weak; still coherent for short turns.
-- `llama3.2` — the safe default everything was built against.
-- Any OpenAI-compatible API also works (keys in Settings); per-workspace
-  local-only toggles still apply.
+Chat, Composer, Structurize. Paste the endpoint + model, add the key in
+Settings → AI, then Test — the slot never assumes a provider.
+
+- **OpenAI** — `https://api.openai.com/v1` + model id (default). Key required.
+- **Google (Gemini)** — Google's OpenAI-compatibility base URL + Gemini
+  model id (see Gemini docs for the current base URL). Key required.
+- **Anthropic** — through an OpenAI-compatible gateway/proxy; the native
+  Anthropic API won't plug in directly. Key lives in the gateway.
+- **Custom** — any OpenAI-compatible endpoint (self-hosted gateway,
+  compatible proxy). Paste base URL + model id, add a key if it needs one.
+- Per-workspace local-only toggles still apply: a private workspace never
+  calls the main slot.
 
 ## STT — Moonshine streaming only (locked, torch-free)
 

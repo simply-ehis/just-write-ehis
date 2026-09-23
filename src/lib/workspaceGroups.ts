@@ -3,7 +3,7 @@
  *
  * Sidebar.svelte's section headers and BottomBar.svelte's mobile More menu
  * used to be two independently hand-maintained lists that drifted apart
- * (BottomBar even kept Craft/Stats/Skills entries long after they became
+ * (BottomBar even kept Craft/Stats/Tips entries long after they became
  * Settings tabs). Both now read this module, so desktop and mobile always
  * present the same categories.
  *

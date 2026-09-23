@@ -39,7 +39,7 @@
     { name: "Canvas", desc: "Freeform board: cards, links, and doc-links, pan and zoom." },
     { name: "Library", desc: "Every document as table, board, or calendar, with saved views." },
     { name: "Files", desc: "Browse vault folder structure, open any file." },
-    { name: "Settings → Skills", desc: "Power features, hints, and try-one-click list." },
+    { name: "Settings → Tips", desc: "Power features, hints, and try-one-click list." },
     { name: "Settings → Craft", desc: "Dialogue, sentence, and filter-word trends for the open doc." },
     { name: "Settings → Stats", desc: "Streaks, patterns, velocity, and reopen lists." },
     { name: "AI Panel", desc: "Chat, Composer, Ghost, Structurize — right docked panel." },

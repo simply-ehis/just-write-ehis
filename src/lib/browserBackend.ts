@@ -43,7 +43,7 @@ async function aiChatCompletions(
       method: "POST",
       headers,
       body: JSON.stringify({
-        model: model || "llama3.2",
+        model: model || "gpt-4o-mini",
         messages: [
           ...(system ? [{ role: "system", content: system }] : []),
           { role: "user", content: prompt },
@@ -246,7 +246,8 @@ export function filterWordRatio(content: string): number {
   return Math.round((hits / words.length) * 1000) / 1000;
 }
 
-function craftStats(content: string): { dialogue: number; avgSentence: number; filterWords: number } {
+/** Prose metrics for one content snapshot (shared by live preview + record sites). */
+export function craftStats(content: string): { dialogue: number; avgSentence: number; filterWords: number } {
   const dialogueLines = content.split("\n").filter((l) => /^\s*["“—-]/.test(l)).length;
   const totalLines = Math.max(1, content.split("\n").filter((l) => l.trim()).length);
   const sentences = content.split(/[.!?]+/).filter((s) => s.trim().length > 0);
@@ -710,38 +711,6 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return { indexHtml: "<html><body>Static site published (desktop app required for full generation)</body></html>", files: ["index.html"] } as T;
     }
 
-    case "dashboard_heatmap_data": {
-      const days = store.days || [];
-      const heatmap = new Map<string, number>();
-      for (const day of days) {
-        const key = day.slice(0, 10);
-        heatmap.set(key, (heatmap.get(key) || 0) + 1);
-      }
-      return Array.from(heatmap.entries()).map(([date, count]) => ({ date, count })) as T;
-    }
-
-    case "dashboard_activity_heatmap": {
-      const hours = new Array(24).fill(0);
-      const daysOfWeek = new Array(7).fill(0);
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        const date = new Date(d.updated_at);
-        hours[date.getHours()]++;
-        daysOfWeek[date.getDay()]++;
-      }
-      return { hours, daysOfWeek } as T;
-    }
-
-    case "dashboard_word_count_timeline": {
-      const timeline = new Map<string, number>();
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        const key = d.updated_at.slice(0, 10);
-        timeline.set(key, (timeline.get(key) || 0) + d.word_count);
-      }
-      return Array.from(timeline.entries()).map(([date, words]) => ({ date, words })) as T;
-    }
-
     case "dashboard_productivity_score": {
       const docs = store.docs.filter(d => !d.locked);
       const totalWords = docs.reduce((sum, d) => sum + d.word_count, 0);
@@ -808,47 +777,6 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       const newFm = { ...fm, roles: filtered };
       store.saveDoc(String(payload.docId), { frontmatter_json: JSON.stringify(newFm) });
       return { success: true } as T;
-    }
-
-    // Cross-tab Connection Logic
-    case "analytics_heatmap_hourly": {
-      const hours = new Array(24).fill(0);
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        const hour = new Date(d.updated_at).getHours();
-        hours[hour]++;
-      }
-      return hours as T;
-    }
-
-    case "analytics_heatmap_daily": {
-      const days = new Array(7).fill(0);
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        const day = new Date(d.updated_at).getDay();
-        days[day]++;
-      }
-      return days as T;
-    }
-
-    case "analytics_word_count_by_workspace": {
-      const counts = new Map<string, number>();
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        counts.set(d.workspace, (counts.get(d.workspace) || 0) + d.word_count);
-      }
-      return Array.from(counts.entries()) as T;
-    }
-
-    case "analytics_activity_timeline": {
-      const timeline = new Map<string, { words: number; docs: number }>();
-      for (const d of store.docs) {
-        if (d.locked) continue;
-        const day = d.updated_at.slice(0, 10);
-        const existing = timeline.get(day) || { words: 0, docs: 0 };
-        timeline.set(day, { words: existing.words + d.word_count, docs: existing.docs + 1 });
-      }
-      return Array.from(timeline.entries()).map(([date, data]) => ({ date, ...data })) as T;
     }
 
     // Cross-tab features

@@ -275,11 +275,11 @@ Delete this doc whenever you're ready. Happy writing.
         </div>
         <div class="input-group">
           <label for="onboard-endpoint">Main model endpoint</label>
-          <input id="onboard-endpoint" type="text" bind:value={mainEndpoint} placeholder="http://localhost:11434/v1" />
+          <input id="onboard-endpoint" type="text" bind:value={mainEndpoint} placeholder="https://api.openai.com/v1" />
         </div>
         <div class="input-group">
           <label for="onboard-model">Main model name</label>
-          <input id="onboard-model" type="text" bind:value={mainModel} placeholder="llama3.2" />
+          <input id="onboard-model" type="text" bind:value={mainModel} placeholder="gpt-4o-mini" />
         </div>
         <div class="input-group">
           <label for="onboard-apikey">API Key (if needed)</label>

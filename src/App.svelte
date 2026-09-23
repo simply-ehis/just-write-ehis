@@ -45,7 +45,7 @@
   // below runs, so the check must use this, not the live store.
   const freshInstallAtBoot = $settings.featuresUsed.length === 0;
 
-  // Skills/Craft/Stats now live in Settings: old workspace ids redirect.
+  // Tips/Craft/Stats now live in Settings: old workspace ids redirect.
   $effect(() => {
     const ws = $currentWorkspace;
     if (ws === "craft" || ws === "stats" || ws === "skills") {

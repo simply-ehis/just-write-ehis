@@ -45,7 +45,7 @@
 
   // The More menu reads the SAME grouping as the desktop sidebar, so the
   // two can never drift apart again. Write lives in the main row (not
-  // repeated here); Craft/Stats/Skills are Settings tabs, not
+  // repeated here); Craft/Stats/Tips are Settings tabs, not
   // destinations, so they get no entries (single Settings entry below).
   interface MoreSection {
     label: string;

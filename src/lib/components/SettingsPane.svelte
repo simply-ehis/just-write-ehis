@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings, settingsCategory, IMPORTABLE_SETTINGS_KEYS, DEFAULT_HIDDEN_WORKSPACES, type SettingsCategory } from "$lib/stores/settings";
+  import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
+  import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
   import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
@@ -157,16 +158,92 @@
     return `${slot} slot OK — ${r.latencyMs}ms, ${model}.`;
   }
 
+  /**
+   * Clamp a numeric setting on blur through the shared schema (same rules
+   * as import/load). Non-numeric or in-range values pass through untouched.
+   */
+  function clampSettingKey(key: string) {
+    const v = ($settings as unknown as Record<string, unknown>)[key];
+    const fixed = clampNumber(key, v);
+    if (fixed !== null && fixed !== v) {
+      settings.set({ ...$settings, [key]: fixed });
+      showToast(`${key} clamped to ${fixed}`, "info");
+    }
+  }
+
+  function exportSettingsFile() {
+    const exportable: Record<string, unknown> = { ...$settings };
+    for (const k of SECRET_KEYS) delete exportable[k];
+    const data = JSON.stringify(exportable, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "just-write-ehis-settings.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Settings exported (secrets never included)", "success");
+  }
+
+  /** Import a settings file through validateSettings — loud about rejects. */
+  function importSettingsFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const imported: unknown = JSON.parse(text);
+        if (typeof imported !== "object" || imported === null || Array.isArray(imported)) {
+          throw new Error("not a settings object");
+        }
+        const report = validateSettings(imported as Record<string, unknown>);
+        if (Object.keys(report.valid).length > 0) {
+          settings.set({ ...$settings, ...report.valid });
+        }
+        // Loud report: secrets rejected, unknown/bad keys dropped, clamps.
+        if (report.secrets.length > 0) {
+          showToast(`Import blocked secrets: ${report.secrets.join(", ")} — kept current values`, "error");
+        }
+        if (report.rejected.length > 0) {
+          showToast(`Import dropped ${report.rejected.length} unknown/invalid keys: ${report.rejected.slice(0, 5).join(", ")}${report.rejected.length > 5 ? "…" : ""}`, "warning");
+        }
+        if (report.clamped.length > 0) {
+          showToast(`Import clamped out-of-range: ${report.clamped.join(", ")}`, "info");
+        }
+        const applied = Object.keys(report.valid).length;
+        showToast(applied > 0 ? `Settings imported (${applied} applied)` : "Settings import: nothing valid to apply", applied > 0 ? "success" : "warning");
+      } catch (err) {
+        showToast("Failed to import settings", "error");
+      }
+    };
+    input.click();
+  }
+
+  /** Reset to defaults, then (re)start the file watcher to match. */
+  async function resetAllSettings() {
+    resetSettings();
+    if (!isBrowserPreview()) {
+      try {
+        await api.setupFileWatcher();
+      } catch (e) {
+        console.warn("File watcher restart after reset failed:", e);
+      }
+    }
+    showToast("Settings reset to defaults", "success");
+  }
+
   const categories: { id: SettingsCategory; label: string; icon: string }[] = [
     { id: "general", label: "General", icon: "settings" },
     { id: "editor", label: "Editor & Writing", icon: "pencil" },
     { id: "ai", label: "AI & Providers", icon: "sparkle" },
-    { id: "skills", label: "Skills", icon: "sparkle" },
+    { id: "skills", label: "Tips", icon: "sparkle" },
     { id: "craft", label: "Craft", icon: "chart" },
     { id: "stats", label: "Stats", icon: "calendar" },
     { id: "privacy", label: "Privacy & Security", icon: "lock" },
     { id: "vaults", label: "Vaults & Backup", icon: "download" },
-    { id: "sync", label: "Sync & Files", icon: "refresh" },
     { id: "capture", label: "Capture & Notifications", icon: "bell" },
     { id: "keybindings", label: "Keybindings", icon: "keyboard" },
     { id: "about", label: "About & Diagnostics", icon: "info" },
@@ -441,7 +518,7 @@
         </div>
         <div class="setting-row">
           <label for="setting-streak-goal">Daily Streak Goal (words)</label>
-          <input id="setting-streak-goal" type="number" bind:value={$settings.streakGoal} min="0" max="10000" />
+          <input id="setting-streak-goal" type="number" bind:value={$settings.streakGoal} min="0" max="10000" onblur={() => clampSettingKey("streakGoal")} />
         </div>
         <div class="setting-row">
           <label for="setting-compact-mode">Compact mode (tighter chrome)</label>
@@ -450,6 +527,10 @@
         <div class="setting-row">
           <label for="setting-autohide-chrome">Auto-hide tabs while typing</label>
           <input id="setting-autohide-chrome" type="checkbox" bind:checked={$settings.autoHideChrome} />
+        </div>
+        <div class="setting-row">
+          <label for="setting-rhythm-heatmap">Paragraph density in status bar</label>
+          <input id="setting-rhythm-heatmap" type="checkbox" bind:checked={$settings.rhythmHeatmapInStatusBar} />
         </div>
         <div class="setting-row">
           <span class="setting-label">Setup flow</span>
@@ -474,11 +555,11 @@
         <h3>Editor & Writing</h3>
         <div class="setting-row">
           <label for="setting-font-size">Font Size</label>
-          <input id="setting-font-size" type="number" bind:value={$settings.fontSize} min="10" max="32" />
+          <input id="setting-font-size" type="number" bind:value={$settings.fontSize} min="10" max="32" onblur={() => clampSettingKey("fontSize")} />
         </div>
         <div class="setting-row">
           <label for="setting-line-height">Line Height</label>
-          <input id="setting-line-height" type="number" bind:value={$settings.lineHeight} min="1.0" max="3.0" step="0.1" />
+          <input id="setting-line-height" type="number" bind:value={$settings.lineHeight} min="1.0" max="3.0" step="0.1" onblur={() => clampSettingKey("lineHeight")} />
         </div>
         <div class="setting-row">
           <label for="setting-font-family">Editor Font</label>
@@ -523,16 +604,16 @@
         <p class="setting-desc">Small slot: Ghost autocomplete and light tasks. Main slot: chat, Composer, Structurize.</p>
         <div class="setting-row">
           <label for="setting-small-model-endpoint">Small Model Endpoint</label>
-          <input id="setting-small-model-endpoint" type="text" bind:value={$settings.smallModelEndpoint} placeholder="http://localhost:11434/v1" />
+          <input id="setting-small-model-endpoint" type="text" bind:value={$settings.smallModelEndpoint} placeholder="http://127.0.0.1:8093/v1" />
         </div>
         <div class="setting-row">
           <label for="setting-small-model-name">Small Model Name</label>
-          <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="llama3.2" />
+          <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="lfm2.5-350m" />
         </div>
-        <p class="setting-desc">Light-task picks: <code>LFM2.5-350M</code> (GGUF, tool-use specialist) · <code>qwen3:0.6b</code> · <code>gemma3:270m</code>. See docs/MODELS.md.</p>
+        <p class="setting-desc">Light-task picks: the bundled local endpoint by default — or any OpenAI-compatible endpoint (OpenAI, Google, Anthropic via gateway, Custom). See docs/MODELS.md.</p>
         <div class="setting-row">
           <label for="setting-small-model-ctx">Small Model Context Length</label>
-          <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} />
+          <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} onblur={() => clampSettingKey("smallModelContextLength")} />
         </div>
         <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Takes effect on the next sidecar start — restart the small model to apply.</p>
         <div class="setting-row">
@@ -542,13 +623,13 @@
         <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small model instead of the main slot. Ghost routing is unchanged (local :8093 if enabled, else small slot).</p>
         <div class="setting-row">
           <label for="setting-main-model-endpoint">Main Model Endpoint</label>
-          <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="http://localhost:11434/v1" />
+          <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="https://api.openai.com/v1" />
         </div>
         <div class="setting-row">
           <label for="setting-main-model-name">Main Model Name</label>
-          <input id="setting-main-model-name" type="text" bind:value={$settings.mainModelName} placeholder="llama3.2" />
+          <input id="setting-main-model-name" type="text" bind:value={$settings.mainModelName} placeholder="gpt-4o-mini" />
         </div>
-        <p class="setting-desc">Main-slot picks: <code>qwen3:8b</code> (capable local) · <code>qwen3:0.6b</code> (light, strong tool-use) · <code>llama3.2</code> (safe default). See docs/MODELS.md.</p>
+        <p class="setting-desc">Main-slot picks: <code>OpenAI</code> · <code>Google (Gemini)</code> · <code>Anthropic (via gateway)</code> · <code>Custom</code> OpenAI-compatible endpoint. Paste endpoint + model, add the key below, then Test. See docs/MODELS.md.</p>
         <div class="setting-row">
           <span class="setting-label">Test Small Slot</span>
           <button class="clear-btn" onclick={() => testSlot("small")} disabled={testingSlot !== null}>
@@ -795,9 +876,10 @@
           <p class="setting-desc">Type a new PIN to change it — it saves automatically and syncs to the OS keychain. Removing the PIN unlocks nothing by itself; clear per-doc locks from each doc.</p>
         {/if}
         <div class="setting-row">
-          <label for="setting-craft-profiling-enabled">Craft/Skills Profiling</label>
+          <label for="setting-craft-profiling-enabled">Craft analytics recording</label>
           <input id="setting-craft-profiling-enabled" type="checkbox" bind:checked={$settings.craftProfilingEnabled} />
         </div>
+        <p class="setting-desc">Off by default. When on, saves record dialogue/sentence/filter-word snapshots (max once a minute per doc) that power Craft charts and the filter-word tip.</p>
       </div>
       <div class="settings-section">
         <h3>AI Memory (vendored harness)</h3>
@@ -881,26 +963,9 @@
         </div>
         <div class="setting-row">
           <label for="setting-snapshot-retention-days">Snapshot Retention (days)</label>
-          <input id="setting-snapshot-retention-days" type="number" bind:value={$settings.snapshotRetentionDays} min="7" max="365" />
+          <input id="setting-snapshot-retention-days" type="number" bind:value={$settings.snapshotRetentionDays} min="7" max="365" onblur={() => clampSettingKey("snapshotRetentionDays")} />
         </div>
         <BackupManager />
-      </div>
-
-    {:else if activeCategory === "sync"}
-      <div class="settings-section">
-        <h3>Sync & Files</h3>
-        <div class="setting-row">
-          <label for="setting-file-watcher-enabled">File Watcher</label>
-          <input id="setting-file-watcher-enabled" type="checkbox" bind:checked={$settings.fileWatcherEnabled} />
-        </div>
-        <div class="setting-row">
-          <label for="setting-conflict-behavior">Conflict Behavior</label>
-          <select id="setting-conflict-behavior" bind:value={$settings.conflictBehavior}>
-            <option value="keep-remote">Keep remote</option>
-            <option value="keep-local">Keep local</option>
-            <option value="ask">Ask each time</option>
-          </select>
-        </div>
       </div>
 
     {:else if activeCategory === "capture"}
@@ -946,7 +1011,7 @@
 
     {:else if activeCategory === "skills"}
       <div class="settings-embed">
-        <LazyWorkspace loader={() => import("./SkillsPage.svelte")} label="Skills" />
+        <LazyWorkspace loader={() => import("./SkillsPage.svelte")} label="Tips" />
       </div>
 
     {:else if activeCategory === "craft"}
@@ -1135,47 +1200,11 @@
 
       <div class="settings-section">
         <h3>Export / Import Settings</h3>
-        <p class="setting-desc">Export your settings bundle (theme, keybindings, AI persona, templates) or import from a file.</p>
+        <p class="setting-desc">Export your settings bundle (theme, keybindings, AI persona, templates) or import from a file. Secrets live in the OS keychain and are never exported; imports that smuggle them are rejected loudly.</p>
         <div class="export-import-row">
-          <button class="primary-btn" onclick={() => {
-            const { apiKey, appLockPin, ...exportable } = $settings;
-            const data = JSON.stringify(exportable, null, 2);
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'just-write-ehis-settings.json';
-            a.click();
-            URL.revokeObjectURL(url);
-            showToast('Settings exported', 'success');
-          }}>Export Settings</button>
-          <button class="secondary-btn" onclick={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = async (e) => {
-              const file = (e.target as HTMLInputElement).files?.[0];
-              if (!file) return;
-              try {
-                const text = await file.text();
-                const imported = JSON.parse(text);
-                if (typeof imported !== "object" || imported === null) {
-                  throw new Error("not a settings object");
-                }
-                // Allowlist: known keys only, never secrets. A settings
-                // file must not smuggle credentials or unknown keys.
-                const safe: Record<string, unknown> = {};
-                for (const [k, v] of Object.entries(imported)) {
-                  if (IMPORTABLE_SETTINGS_KEYS.has(k)) safe[k] = v;
-                }
-                $settings = { ...$settings, ...safe };
-                showToast('Settings imported', 'success');
-              } catch (err) {
-                showToast('Failed to import settings', 'error');
-              }
-            };
-            input.click();
-          }}>Import Settings</button>
+          <button class="primary-btn" onclick={exportSettingsFile}>Export Settings</button>
+          <button class="secondary-btn" onclick={importSettingsFile}>Import Settings</button>
+          <button class="secondary-btn" onclick={resetAllSettings}>Reset to defaults</button>
         </div>
       </div>
     {/if}

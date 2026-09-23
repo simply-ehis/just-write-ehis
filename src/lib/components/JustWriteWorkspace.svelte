@@ -20,7 +20,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
 import VersionHistory from "./VersionHistory.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
   import Icon from "./Icon.svelte";
-  import { filterWordRatio } from "$lib/browserBackend";
+  import { craftStats } from "$lib/browserBackend";
   import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { splitTarget } from "$lib/stores/split";
@@ -425,12 +425,18 @@ import VersionHistory from "./VersionHistory.svelte";
         await api.docSave($currentDoc!.id, undefined, content);
         $currentDoc = { ...$currentDoc!, word_count: words };
         // Same craft/write heartbeat as the main editor (at most 1/min).
+        // Write heartbeat always; craft snapshots only when opted in.
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
           const docId = $currentDoc!.id;
           api.usageRecord(docId, "write").catch(() => {});
-          api.memoryRecordMetric(docId, "filter_words", filterWordRatio(content)).catch(() => {});
+          if ($settings.craftProfilingEnabled) {
+            const stats = craftStats(content);
+            api.memoryRecordMetric(docId, "filter_words", stats.filterWords).catch(() => {});
+            api.memoryRecordMetric(docId, "dialogue_ratio", stats.dialogue).catch(() => {});
+            api.memoryRecordMetric(docId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+          }
         }
       } catch (e) {
         console.error("Failed to save:", e);

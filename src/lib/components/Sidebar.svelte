@@ -51,7 +51,7 @@
     properties: "library views & files",
     craft: "writing craft",
     stats: "writing stats",
-    skills: "AI skills",
+    skills: "tips & power features",
   };
 
   let { class: className = '' } = $props();

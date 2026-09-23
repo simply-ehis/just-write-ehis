@@ -723,25 +723,11 @@ export const api = {
     safeInvoke<{ indexHtml: string; files: string[]; imagesInlined?: number; imagesSkipped?: number }>("publish_static_site", { config }),
 
   // ── Import/Export ────────────────────────────────────────────────
-// Telemetry/Analytics
-  dashboardHeatmapData: () =>
-    safeInvoke<{ date: string; count: number }[]>("dashboard_heatmap_data"),
-  dashboardActivityHeatmap: () =>
-    safeInvoke<{ hours: number[]; daysOfWeek: number[] }>("dashboard_activity_heatmap"),
-  dashboardWordCountTimeline: () =>
-    safeInvoke<{ date: string; words: number }[]>("dashboard_word_count_timeline"),
+// Telemetry/Analytics (only commands with live callers stay surfaced)
   dashboardProductivityScore: () =>
     safeInvoke<{ score: number; totalWords: number; totalDocs: number; activeDays: number; avgWords: number }>("dashboard_productivity_score"),
   dashboardWritingVelocity: () =>
     safeInvoke<{ date: string; words: number }[]>("dashboard_writing_velocity"),
-  dashboardHeatmapHourly: () =>
-    safeInvoke<number[]>("analytics_heatmap_hourly"),
-  dashboardHeatmapDaily: () =>
-    safeInvoke<number[]>("analytics_heatmap_daily"),
-  dashboardWordCountByWorkspace: () =>
-    safeInvoke<[string, number][]>("analytics_word_count_by_workspace"),
-  dashboardActivityTimeline: () =>
-    safeInvoke<{ date: string; words: number; docs: number }[]>("analytics_activity_timeline"),
 
   // Role Assignment for Scripts
   scriptRoleList: (docId: string) =>
@@ -752,16 +738,6 @@ export const api = {
     safeInvoke<{ role: { id: string; name: string; color: string; assignedTo: string } }>("script_role_create", { docId, name, color, assignedTo }),
   scriptRoleDelete: (docId: string, roleId: string) =>
     safeInvoke<{ success: boolean }>("script_role_delete", { docId, roleId }),
-
-  // Heatmap/Analytics
-  analyticsHeatmapHourly: () =>
-    safeInvoke<number[]>("analytics_heatmap_hourly"),
-  analyticsHeatmapDaily: () =>
-    safeInvoke<number[]>("analytics_heatmap_daily"),
-  analyticsWordCountByWorkspace: () =>
-    safeInvoke<[string, number][]>("analytics_word_count_by_workspace"),
-  analyticsActivityTimeline: () =>
-    safeInvoke<{ date: string; words: number; docs: number }[]>("analytics_activity_timeline"),
 
   // Script-specific features
   scriptCharacterList: (docId: string) =>
