@@ -443,7 +443,7 @@
           <LockScreen doc={$currentDoc} />
         {/if}
         {#if $showSettings}
-          <LazyWorkspace loader={() => import("$lib/components/SettingsPane.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/SettingsPane.svelte")} label="Settings" />
         {:else if $currentWorkspace === "home"}
           <HomePane />
         {:else if $currentWorkspace === "logs"}
@@ -455,21 +455,21 @@
             <EmptyState />
           {/if}
         {:else if $currentWorkspace === "map"}
-          <LazyWorkspace loader={() => import("$lib/components/NodeMapWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/NodeMapWorkspace.svelte")} label="Node Map" />
         {:else if $currentWorkspace === "canvas"}
-          <LazyWorkspace loader={() => import("$lib/components/CanvasWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/CanvasWorkspace.svelte")} label="Canvas" />
         {:else if $currentWorkspace === "reader"}
-          <LazyWorkspace loader={() => import("$lib/components/ReaderWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/ReaderWorkspace.svelte")} label="Reader" />
         {:else if $currentWorkspace === "novel"}
-          <LazyWorkspace loader={() => import("$lib/components/NovelWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/NovelWorkspace.svelte")} label="Novel Studio" />
         {:else if $currentWorkspace === "script"}
-          <LazyWorkspace loader={() => import("$lib/components/ScriptWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/ScriptWorkspace.svelte")} label="Script" />
         {:else if $currentWorkspace === "projects"}
-          <LazyWorkspace loader={() => import("$lib/components/ProjectsWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/ProjectsWorkspace.svelte")} label="Projects" />
         {:else if $currentWorkspace === "inbox"}
           <InboxWorkspace />
         {:else if $currentWorkspace === "properties"}
-          <LazyWorkspace loader={() => import("$lib/components/LibraryWorkspace.svelte")} />
+          <LazyWorkspace loader={() => import("$lib/components/LibraryWorkspace.svelte")} label="Library" />
         {:else if $currentWorkspace === "files"}
           {#if viewedFile}
             <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />
@@ -492,11 +492,11 @@
       {#if isMobile}
         <div class="mobile-ai-overlay" onclick={(e) => { if (e.target === e.currentTarget) $aiPanelOpen = false; }} role="presentation" onkeydown={(e) => { if (e.key === 'Escape') $aiPanelOpen = false; }}>
           <div class="mobile-ai-container" role="dialog" tabindex="-1">
-            <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} />
+            <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} label="AI panel" />
           </div>
         </div>
       {:else}
-        <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} />
+        <LazyWorkspace loader={() => import("$lib/components/AiPanel.svelte")} label="AI panel" />
       {/if}
     {/if}
 

@@ -387,6 +387,13 @@ async function batchWiring() {
   const novel = await readFile(join(root, "src/lib/components/NovelWorkspace.svelte"), "utf8");
   check("novel has project picker", novel.includes("Select a project") && novel.includes("createProject"));
   check("beat board drag-reorders", novel.includes("dropSceneOnto") && novel.includes("persistSceneOrder"));
+  check("new project bootstraps first scene + opens it", novel.includes("startWriting()") && novel.includes("Sequence 1") && novel.includes("Scene 1"));
+  check("empty board offers Start writing", novel.includes("empty-board") && novel.includes("Start writing"));
+  check("import lands in first scene editor", novel.includes("board.scenes[0]") && novel.includes("selectBeat(firstScene)"));
+  const lazy = await readFile(join(root, "src/lib/components/LazyWorkspace.svelte"), "utf8");
+  check("lazy shell logs + times out + retries", lazy.includes("loadWithTimeout") && lazy.includes("lazy-retry") && lazy.includes("[LazyWorkspace]"));
+  check("lazy views are labeled", (await readFile(join(root, "src/App.svelte"), "utf8")).includes('label="Novel Studio"'));
+  check("preload errors are logged", (await readFile(join(root, "src/main.ts"), "utf8")).includes("vite:preloadError"));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
   check("app gates locked docs + restores places", app.includes("LockScreen") && app.includes("placeFor"));
   const inbox = await readFile(join(root, "src/lib/components/InboxWorkspace.svelte"), "utf8");

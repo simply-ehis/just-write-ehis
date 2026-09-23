@@ -26,6 +26,7 @@
   let loading = $state(false);
   let boardCollapsed = $state(false);
   let importing = $state(false);
+  let startingWriting = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
   let ghostCounts = $state<Record<string, number>>({});
   let activeGhostId = $state<string | null>(null);
@@ -120,6 +121,10 @@
       }
       await loadProject();
       showToast(`Imported "${title}" — ${chapters.length} chapter${chapters.length === 1 ? "" : "s"}`, "success");
+      // Land in the editor on the first imported chapter, not back on
+      // the beat board — otherwise a good import still feels broken.
+      const firstScene = board.scenes[0];
+      if (firstScene) selectBeat(firstScene);
     } catch (err) {
       showToast(`Import failed: ${err instanceof Error ? err.message : err}`, "error");
     } finally {
@@ -143,8 +148,34 @@
       projects = [...projects, doc];
       projectId = doc.id;
       $currentDoc = doc;
+      // A brand-new project has zero scenes — take the user straight to
+      // a writable editor instead of an empty board with nothing to click.
+      await startWriting();
     } catch (e) {
       showToast(`Couldn't create project: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
+
+  /**
+   * First-scene bootstrap: create Act 1 → Sequence 1 → Scene 1 (a scene
+   * only renders on the board inside a sequence) and open the scene in
+   * the editor immediately. Used for new projects and for the empty-board
+   * "Start writing" affordance below.
+   */
+  async function startWriting() {
+    if (!projectId || startingWriting) return;
+    startingWriting = true;
+    try {
+      await api.docCreate('novel', 'act', 'Act 1', projectId, '', JSON.stringify({ status: 'draft', act: 1, order: 1024 }));
+      await api.docCreate('novel', 'sequence', 'Sequence 1', projectId, '', JSON.stringify({ status: 'draft', act: 1, sequence: 1, order: 1536 }));
+      await api.docCreate('novel', 'scene', 'Scene 1', projectId, '', JSON.stringify({ status: 'idea', act: 1, sequence: 1, order: 2048 }));
+      await loadProject();
+      const first = board.scenes[0] ?? board.sequences[0] ?? board.acts[0] ?? null;
+      if (first) selectBeat(first);
+    } catch (e) {
+      showToast(`Couldn't start writing: ${e instanceof Error ? e.message : e}`, 'error');
+    } finally {
+      startingWriting = false;
     }
   }
 
@@ -530,6 +561,14 @@
         </div>
       {/if}
       {#if viewMode === 'board' && !boardCollapsed}
+      {#if !loading && board.acts.length === 0 && board.sequences.length === 0 && board.scenes.length === 0}
+        <div class="empty-board" role="status">
+          <p>This project has no scenes yet — nothing to write in.</p>
+          <button class="create-btn" onclick={startWriting} disabled={startingWriting} aria-label="Start writing">
+            {startingWriting ? "Starting…" : "Start writing"}
+          </button>
+        </div>
+      {/if}
       <div class="beat-board">
       {#each board.acts as act}
         <div
@@ -796,6 +835,21 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Empty project: unmissable single action into a writable editor. */
+  .empty-board {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: 28px 16px;
+    margin: 12px;
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    text-align: center;
   }
 
   /* Docked editor: fills the DockSplit bottom slot. */

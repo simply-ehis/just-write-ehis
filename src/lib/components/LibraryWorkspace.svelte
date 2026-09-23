@@ -49,7 +49,7 @@
   </div>
   <div class="lib-content">
     {#if tab === "views"}
-      <LazyWorkspace loader={() => import("$lib/components/PropertiesView.svelte")} />
+      <LazyWorkspace loader={() => import("$lib/components/PropertiesView.svelte")} label="Properties" />
     {:else if viewedFile}
       <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />
     {:else}

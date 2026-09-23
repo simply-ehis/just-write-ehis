@@ -852,17 +852,17 @@
 
     {:else if activeCategory === "skills"}
       <div class="settings-embed">
-        <LazyWorkspace loader={() => import("./SkillsPage.svelte")} />
+        <LazyWorkspace loader={() => import("./SkillsPage.svelte")} label="Skills" />
       </div>
 
     {:else if activeCategory === "craft"}
       <div class="settings-embed">
-        <LazyWorkspace loader={() => import("./CraftPage.svelte")} />
+        <LazyWorkspace loader={() => import("./CraftPage.svelte")} label="Craft" />
       </div>
 
     {:else if activeCategory === "stats"}
       <div class="settings-embed">
-        <LazyWorkspace loader={() => import("./UsageMemory.svelte")} />
+        <LazyWorkspace loader={() => import("./UsageMemory.svelte")} label="Usage" />
       </div>
 
     {:else if activeCategory === "keybindings"}

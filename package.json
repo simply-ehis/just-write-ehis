@@ -13,7 +13,10 @@
     "test:smoke": "node tests/smoke-dom.mjs --width=1280 && node tests/smoke-dom.mjs --width=390 && node tests/smoke-dom.mjs --width=390 --dirty",
     "test:write": "node tests/write-probe.mjs",
     "test:ghost": "node tests/ghost-widget.mjs",
-    "test:autocorrect": "node tests/autocorrect-unit.mjs"
+    "test:autocorrect": "node tests/autocorrect-unit.mjs",
+    "test:lazy": "node tests/lazy-load-probe.mjs",
+    "test:lazyfail": "node tests/lazy-load-failure.mjs",
+    "test:novel": "node tests/novel-surface.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",
