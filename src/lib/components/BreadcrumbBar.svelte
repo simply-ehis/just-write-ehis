@@ -10,6 +10,14 @@
     return parts.slice(0, -1);
   }
 
+  /** Promoted Home: always-visible top-level jump (Ehis sign-off —
+   * Home only; Write stays in the sidebar). Sidebar keeps its own
+   * pinned Home; this is the persistent one-click return. */
+  function goHome() {
+    $showSettings = false;
+    $currentWorkspace = "home";
+  }
+
   /** Global back: return to the previous workspace+doc. The App
    * workspace effect skips recording while suppressPush is set; it is
    * cleared on a macrotask so Svelte effects flush first. */
@@ -40,6 +48,9 @@
 </script>
 
 <div class="breadcrumb-bar">
+  <button class="icon-btn crumb-btn" class:active={$currentWorkspace === "home" && !$showSettings} onclick={goHome} title="Home" aria-label="Go to Home">
+    <Icon name="home" size={14} />
+  </button>
   <button class="icon-btn crumb-btn" onclick={goBack} disabled={$navDepth === 0} title="Back" aria-label="Back">
     <Icon name="arrow-left" size={14} />
   </button>

@@ -62,7 +62,7 @@
 
   // Workspaces that render the open doc's content: a locked-out doc
   // covers the pane with the PIN gate (lists/graphs show titles only).
-  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files", "inbox", "projects", "craft", "properties", "canvas"];
+  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files", "inbox", "projects", "properties", "canvas"];
   let lockCover = $derived(
     $settings.lockEnabled &&
     !$showSettings &&
@@ -503,7 +503,9 @@
     <CommandPalette />
     <QuickCaptureOverlay />
     <SkillNudges />
-    <StatusBar />
+    {#if !isMobile}
+      <StatusBar />
+    {/if}
   </div>
 {:else}
   <div class="empty-state">

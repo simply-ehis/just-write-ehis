@@ -4,9 +4,12 @@
    * Items: Capture+, Home, Search, Workspaces, More.
    * Shows only on mobile (isMobile breakpoint).
    */
-  import { currentWorkspace, showSettings, aiPanelOpen } from "$lib/stores/app";
+  import { currentWorkspace, showSettings, aiPanelOpen, workspaces } from "$lib/stores/app";
+  import { recordWorkspaceVisit } from "$lib/stores/uiState";
+  import { saveState } from "$lib/stores/saveState";
   import { settings } from "$lib/stores/settings";
   import type { AppSettings } from "$lib/stores/settings";
+  import { WORKSPACE_GROUPS } from "$lib/workspaceGroups";
   import Icon from "$lib/components/Icon.svelte";
 
   interface BottomBarItem {
@@ -40,25 +43,46 @@
     showMoreMenu = !showMoreMenu;
   }
 
+  // The More menu reads the SAME grouping as the desktop sidebar, so the
+  // two can never drift apart again. Write lives in the main row (not
+  // repeated here); Craft/Stats/Skills are Settings tabs, not
+  // destinations, so they get no entries (single Settings entry below).
+  interface MoreSection {
+    label: string;
+    items: { id: string; label: string; icon: string }[];
+  }
+
+  const moreSections: MoreSection[] = [
+    ...WORKSPACE_GROUPS.map((g) => ({
+      label: g.label,
+      items: g.members
+        .filter((id) => id !== "write")
+        .flatMap((id) => {
+          const meta = workspaces.find((w) => w.id === id);
+          return meta ? [{ id, label: meta.label, icon: meta.icon }] : [];
+        }),
+    })).filter((s) => s.items.length > 0),
+    {
+      label: "Tools",
+      items: [
+        { id: "ai", label: "AI Panel", icon: "sparkle" },
+        { id: "settings", label: "Settings", icon: "settings" },
+      ],
+    },
+  ];
+
   function handleMoreAction(action: string) {
     showMoreMenu = false;
-    switch (action) {
-      case "logs": $currentWorkspace = "logs"; break;
-      case "inbox": $currentWorkspace = "inbox"; break;
-      case "map": $currentWorkspace = "map"; break;
-      case "canvas": $currentWorkspace = "canvas"; break;
-      case "novel": $currentWorkspace = "novel"; break;
-      case "script": $currentWorkspace = "script"; break;
-      case "projects": $currentWorkspace = "projects"; break;
-      case "reader": $currentWorkspace = "reader"; break;
-      case "files": $currentWorkspace = "files"; break;
-      case "properties": $currentWorkspace = "properties"; break;
-      case "craft": $currentWorkspace = "craft"; break;
-      case "stats": $currentWorkspace = "stats"; break;
-      case "skills": $currentWorkspace = "skills"; break;
-      case "settings": $showSettings = true; break;
-      case "ai": $aiPanelOpen = !$aiPanelOpen; break;
+    if (action === "settings") {
+      $showSettings = true;
+      return;
     }
+    if (action === "ai") {
+      $aiPanelOpen = !$aiPanelOpen;
+      return;
+    }
+    $currentWorkspace = action;
+    recordWorkspaceVisit(action);
   }
 
   const mainItems: BottomBarItem[] = [
@@ -66,24 +90,6 @@
     { id: "home", label: "Home", icon: "home", action: handleHome },
     { id: "search", label: "Search", icon: "search", action: handleSearch },
     { id: "workspaces", label: "More", icon: "dots", action: handleWorkspaces },
-  ];
-
-  const moreItems = [
-    { id: "logs", label: "Logs", icon: "calendar" },
-    { id: "inbox", label: "Inbox", icon: "inbox" },
-    { id: "map", label: "Map", icon: "graph" },
-    { id: "canvas", label: "Canvas", icon: "board" },
-    { id: "novel", label: "Novel", icon: "book" },
-    { id: "script", label: "Script", icon: "film" },
-    { id: "projects", label: "Projects", icon: "folder" },
-    { id: "reader", label: "Reader", icon: "book-open" },
-    { id: "files", label: "Files", icon: "files" },
-    { id: "properties", label: "Library", icon: "table" },
-    { id: "craft", label: "Craft", icon: "chart" },
-    { id: "stats", label: "Stats", icon: "calendar" },
-    { id: "skills", label: "Skills", icon: "sparkle" },
-    { id: "ai", label: "AI Panel", icon: "sparkle" },
-    { id: "settings", label: "Settings", icon: "settings" },
   ];
 </script>
 
@@ -99,16 +105,27 @@
       <span class="bottom-bar-label">{item.label}</span>
     </button>
   {/each}
+  {#if $saveState !== "idle"}
+    <span
+      class="save-dot"
+      class:saving={$saveState === "saving"}
+      title={$saveState === "saving" ? "Saving…" : "Saved"}
+      aria-hidden="true"
+    ></span>
+  {/if}
 </nav>
 
 {#if showMoreMenu}
   <div class="more-overlay" onclick={() => showMoreMenu = false} role="presentation"></div>
   <div class="more-menu">
-    {#each moreItems as item}
-      <button class="more-item" onclick={() => handleMoreAction(item.id)} aria-label={item.label} title={item.label}>
-        <span class="more-icon"><Icon name={item.icon} size={22} /></span>
-        <span class="more-label">{item.label}</span>
-      </button>
+    {#each moreSections as section}
+      <div class="more-section-label" aria-hidden="true">{section.label}</div>
+      {#each section.items as item}
+        <button class="more-item" onclick={() => handleMoreAction(item.id)} aria-label={item.label} title={item.label}>
+          <span class="more-icon"><Icon name={item.icon} size={22} /></span>
+          <span class="more-label">{item.label}</span>
+        </button>
+      {/each}
     {/each}
   </div>
 {/if}
@@ -203,6 +220,33 @@
 
   .more-item:active {
     background: var(--surface-pressed);
+  }
+
+  .more-section-label {
+    grid-column: 1 / -1;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    padding: 10px 8px 2px;
+  }
+
+  /* Save-state signal (StatusBar is desktop-only): quiet proof the
+    vault persisted, without a second bottom strip on phones. */
+  .save-dot {
+    position: absolute;
+    top: 5px;
+    right: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    pointer-events: none;
+  }
+
+  .save-dot.saving {
+    background: var(--warning);
   }
 
   .more-icon {

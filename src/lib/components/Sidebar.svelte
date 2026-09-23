@@ -12,6 +12,7 @@
   import { settings } from "$lib/stores/settings";
   import { onMount } from "svelte";
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
+  import { groupOfWorkspace, groupRankOf } from "$lib/workspaceGroups";
   import Icon from "$lib/components/Icon.svelte";
 
   // New logo mark — same for all themes.
@@ -80,34 +81,34 @@
   // Files lives inside Library's Files tab.
   const HIDDEN_IDS = ["inbox", "canvas", "files"];
 
-  // Sidebar sections. Headers render when the group changes along the
+  // Sidebar sections come from the shared grouping module (same categories
+  // as mobile's More menu). Headers render when the group changes along the
   // (possibly user-sorted) list, so drag-reorder and auto-sort keep working.
-  function wsGroup(id: string): string | null {
-    if (id === "home") return null;
-    if (id === "write" || id === "novel" || id === "script") return "Create";
-    if (id === "logs") return "Capture";
-    if (id === "projects" || id === "properties") return "Organize";
-    return "Explore";
-  }
+  const wsGroup = groupOfWorkspace;
+  const groupRank = groupRankOf;
 
   let displayWorkspaces = $derived.by(() => {
     const all = [...workspaces].filter((w) => !HIDDEN_IDS.includes(w.id));
+    let ordered: typeof all;
     if (!$sidebarAutoSort && $sidebarOrder.length > 0) {
       const rank = new Map($sidebarOrder.map((id, i) => [id, i]));
-      return all.sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999));
+      ordered = all.sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999));
+    } else {
+      // Pinned first: Home stays visible above the recency sort.
+      const pinned = all.filter((w) => w.id === "home");
+      const rest = all.filter((w) => w.id !== "home");
+      rest.sort((a, b) => {
+        const ra = workspaceRecency[a.id] ?? 0;
+        const rb = workspaceRecency[b.id] ?? 0;
+        if (ra === rb) return a.label.localeCompare(b.label);
+        return rb - ra;
+      });
+      ordered = [...pinned, ...rest];
     }
-    // Pinned first: Home + Inbox stay visible above the recency sort so
-    // global capture (§4.8) is never buried by visit order.
-    const pinnedIds = ["home", "inbox"];
-    const pinned = pinnedIds.flatMap((id) => all.filter((w) => w.id === id));
-    const rest = all.filter((w) => !pinnedIds.includes(w.id));
-    rest.sort((a, b) => {
-      const ra = workspaceRecency[a.id] ?? 0;
-      const rb = workspaceRecency[b.id] ?? 0;
-      if (ra === rb) return a.label.localeCompare(b.label);
-      return rb - ra;
-    });
-    return [...pinned, ...rest];
+    return ordered
+      .map((w, i) => ({ w, i }))
+      .sort((a, b) => groupRank(a.w.id) - groupRank(b.w.id) || a.i - b.i)
+      .map(({ w }) => w);
   });
 
   function handleWsDragStart(id: string, e: DragEvent) {
