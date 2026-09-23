@@ -3,20 +3,20 @@
   import Icon from "./Icon.svelte";
 
   let {
-    ghostId,
+    forkId,
     originalId,
     onClose,
     onMerged,
   }: {
-    ghostId: string;
+    forkId: string;
     originalId: string;
     onClose: () => void;
     onMerged?: () => void;
   } = $props();
 
   let original = $state<Doc | null>(null);
-  let ghost = $state<Doc | null>(null);
-  let changedWords = $state<{ original: string; ghost: string }[]>([]);
+  let fork = $state<Doc | null>(null);
+  let changedWords = $state<{ original: string; fork: string }[]>([]);
   let loading = $state(true);
 
   $effect(() => {
@@ -26,26 +26,26 @@
   async function loadData() {
     loading = true;
     try {
-      const [o, g] = await Promise.all([api.docGet(originalId), api.docGet(ghostId)]);
+      const [o, g] = await Promise.all([api.docGet(originalId), api.docGet(forkId)]);
       original = o;
-      ghost = g;
+      fork = g;
       changedWords = computeWordDiff(o.content, g.content);
     } catch (e) {
-      console.error("Failed to load ghost data:", e);
+      console.error("Failed to load fork data:", e);
     }
     loading = false;
   }
 
-  function computeWordDiff(a: string, b: string): { original: string; ghost: string }[] {
+  function computeWordDiff(a: string, b: string): { original: string; fork: string }[] {
     const wordsA = a.split(/\s+/);
     const wordsB = b.split(/\s+/);
     const maxLen = Math.max(wordsA.length, wordsB.length);
-    const result: { original: string; ghost: string }[] = [];
+    const result: { original: string; fork: string }[] = [];
     for (let i = 0; i < maxLen; i++) {
       const wA = wordsA[i] ?? "";
       const wB = wordsB[i] ?? "";
       if (wA !== wB) {
-        result.push({ original: wA, ghost: wB });
+        result.push({ original: wA, fork: wB });
       }
     }
     return result.slice(0, 50); // cap at 50 changed words
@@ -53,64 +53,64 @@
 
   async function handleMerge() {
     try {
-      await api.ghostMerge(ghostId, originalId);
+      await api.ghostMerge(forkId, originalId);
       onMerged?.();
       onClose();
     } catch (e) {
-      console.error("Failed to merge ghost:", e);
+      console.error("Failed to merge fork:", e);
     }
   }
 
   async function handleDismiss() {
     try {
-      await api.ghostDismiss(ghostId);
+      await api.ghostDismiss(forkId);
       onClose();
     } catch (e) {
-      console.error("Failed to dismiss ghost:", e);
+      console.error("Failed to dismiss fork:", e);
     }
   }
 </script>
 
-<div class="ghost-panel">
-  <div class="ghost-header">
-    <span class="ghost-title">{original?.title ?? "Original"}</span>
+<div class="fork-panel">
+  <div class="fork-header">
+    <span class="fork-title">{original?.title ?? "Original"}</span>
     <Icon name="ghost" size={14} />
-    <span class="ghost-title">{ghost?.title ?? "Ghost"}</span>
-    <div class="ghost-actions">
-      <button class="ghost-btn merge" onclick={handleMerge} title="Copy ghost content into original">
-        <Icon name="check" size={12} /> Keep Ghost
+    <span class="fork-title">{fork?.title ?? "Fork"}</span>
+    <div class="fork-actions">
+      <button class="fork-btn merge" onclick={handleMerge} title="Copy fork content into original">
+        <Icon name="check" size={12} /> Keep Fork
       </button>
-      <button class="ghost-btn dismiss" onclick={handleDismiss} title="Delete this ghost">
+      <button class="fork-btn dismiss" onclick={handleDismiss} title="Delete this fork">
         <Icon name="trash" size={12} /> Dismiss
       </button>
-      <button class="ghost-btn close" onclick={onClose} title="Close comparison">
+      <button class="fork-btn close" onclick={onClose} title="Close comparison">
         <Icon name="x" size={12} />
       </button>
     </div>
   </div>
   {#if loading}
-    <div class="ghost-loading">Loading...</div>
-  {:else if original && ghost}
-    <div class="ghost-split">
-      <div class="ghost-pane">
-        <div class="ghost-pane-label">Original</div>
-        <div class="ghost-content">{original.content}</div>
+    <div class="fork-loading">Loading...</div>
+  {:else if original && fork}
+    <div class="fork-split">
+      <div class="fork-pane">
+        <div class="fork-pane-label">Original</div>
+        <div class="fork-content">{original.content}</div>
       </div>
-      <div class="ghost-pane">
-        <div class="ghost-pane-label">Ghost</div>
-        <div class="ghost-content">{ghost.content}</div>
+      <div class="fork-pane">
+        <div class="fork-pane-label">Fork</div>
+        <div class="fork-content">{fork.content}</div>
       </div>
     </div>
     {#if changedWords.length > 0}
-      <div class="ghost-diff-bar">
+      <div class="fork-diff-bar">
         <span class="diff-label">{changedWords.length} changes</span>
         <div class="diff-words">
           {#each changedWords.slice(0, 20) as diff}
             {#if diff.original}
               <span class="diff-removed">{diff.original}</span>
             {/if}
-            {#if diff.ghost}
-              <span class="diff-added">{diff.ghost}</span>
+            {#if diff.fork}
+              <span class="diff-added">{diff.fork}</span>
             {/if}
           {/each}
           {#if changedWords.length > 20}
@@ -123,14 +123,14 @@
 </div>
 
 <style>
-  .ghost-panel {
+  .fork-panel {
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     background: var(--surface-base);
     overflow: hidden;
   }
 
-  .ghost-header {
+  .fork-header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -141,18 +141,18 @@
     color: var(--text-muted);
   }
 
-  .ghost-title {
+  .fork-title {
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  .ghost-actions {
+  .fork-actions {
     margin-left: auto;
     display: flex;
     gap: 4px;
   }
 
-  .ghost-btn {
+  .fork-btn {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -165,45 +165,45 @@
     cursor: pointer;
   }
 
-  .ghost-btn:hover {
+  .fork-btn:hover {
     background: var(--surface-hover);
   }
 
-  .ghost-btn.merge {
+  .fork-btn.merge {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
   }
 
-  .ghost-btn.dismiss:hover {
+  .fork-btn.dismiss:hover {
     border-color: var(--danger, #B54434);
     color: var(--danger, #B54434);
   }
 
-  .ghost-loading {
+  .fork-loading {
     padding: 24px;
     text-align: center;
     color: var(--text-muted);
     font-size: 12px;
   }
 
-  .ghost-split {
+  .fork-split {
     display: grid;
     grid-template-columns: 1fr 1fr;
     max-height: 400px;
     overflow: auto;
   }
 
-  .ghost-pane {
+  .fork-pane {
     padding: 12px;
     border-right: 1px solid var(--border-subtle);
     overflow: auto;
   }
 
-  .ghost-pane:last-child {
+  .fork-pane:last-child {
     border-right: none;
   }
 
-  .ghost-pane-label {
+  .fork-pane-label {
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -212,7 +212,7 @@
     font-weight: 600;
   }
 
-  .ghost-content {
+  .fork-content {
     font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.6;
@@ -221,7 +221,7 @@
     word-break: break-word;
   }
 
-  .ghost-diff-bar {
+  .fork-diff-bar {
     padding: 8px 12px;
     border-top: 1px solid var(--border-subtle);
     background: var(--surface-raised);

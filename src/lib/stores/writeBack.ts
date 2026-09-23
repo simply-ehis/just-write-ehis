@@ -17,40 +17,44 @@ let _id = 0;
 function createWriteBackStore() {
   const { subscribe, set } = writable<WriteBackEvent | null>(null);
 
+  // Tiny FIFO queue (not last-wins): rapid Insert/Replace/Append clicks
+  // used to overwrite the single slot and silently drop all but the last
+  // event. The head is what subscribers see; clear() advances to the next
+  // queued event instead of nulling. Consumers are unchanged — they still
+  // read one event and clear it (guarded by docId as before).
+  const queue: WriteBackEvent[] = [];
+
+  function pump() {
+    set(queue.length > 0 ? queue[0] : null);
+  }
+
+  function push(action: WriteBackAction, content: string, docId?: string | null) {
+    queue.push({
+      id: `wb-${++_id}`,
+      action,
+      content,
+      docId: docId ?? null,
+      timestamp: Date.now(),
+    });
+    pump();
+  }
+
   return {
     subscribe,
 
     /** Insert text at the editor's current cursor position */
     insert(content: string, docId?: string | null) {
-      set({
-        id: `wb-${++_id}`,
-        action: "insert",
-        content,
-        docId: docId ?? null,
-        timestamp: Date.now(),
-      });
+      push("insert", content, docId);
     },
 
     /** Replace the editor's current selection */
     replace(content: string, docId?: string | null) {
-      set({
-        id: `wb-${++_id}`,
-        action: "replace",
-        content,
-        docId: docId ?? null,
-        timestamp: Date.now(),
-      });
+      push("replace", content, docId);
     },
 
     /** Append text to the end of the document */
     append(content: string, docId?: string | null) {
-      set({
-        id: `wb-${++_id}`,
-        action: "append",
-        content,
-        docId: docId ?? null,
-        timestamp: Date.now(),
-      });
+      push("append", content, docId);
     },
 
     /** Copy text to clipboard (handled by AiPanel directly, but available here for consistency) */
@@ -58,9 +62,15 @@ function createWriteBackStore() {
       navigator.clipboard.writeText(content).catch(() => {});
     },
 
-    /** Clear the current event after an editor has processed it */
+    /** Clear the processed head event, advancing to the next queued one */
     clear() {
-      set(null);
+      queue.shift();
+      pump();
+    },
+
+    /** Queued depth (introspection for tests/diagnostics). */
+    depth() {
+      return queue.length;
     },
   };
 }

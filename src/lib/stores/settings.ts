@@ -48,6 +48,10 @@ export interface AppSettings {
 
   smallModelEndpoint: string;
   smallModelName: string;
+  /** llama-server --ctx-size for the bundled small model (takes effect on next sidecar start). */
+  smallModelContextLength: number;
+  /** Route the AI panel's main slot (chat/composer/structurize) at the small model. */
+  useSmallAsMain: boolean;
   mainModelEndpoint: string;
   mainModelName: string;
   /** Minimum milliseconds between AI sends (0 = no limit). */
@@ -138,6 +142,8 @@ const defaultSettings: AppSettings = {
 
   smallModelEndpoint: "http://127.0.0.1:8093/v1",
   smallModelName: "lfm2.5-350m",
+  smallModelContextLength: 8192,
+  useSmallAsMain: false,
   mainModelEndpoint: "http://localhost:11434/v1",
   mainModelName: "llama3.2",
   aiRateLimitCooldown: 3000,

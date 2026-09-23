@@ -98,13 +98,9 @@ import VersionHistory from "./VersionHistory.svelte";
     }
     const lastSentence = lastSentenceOf(content);
     if (!lastSentence) return;
-    const suggestion = await requestGhostContinuation(lastSentence, {
-      workspace: $currentWorkspace,
-      provider: $settings.smallModelEndpoint || undefined,
-      model: $settings.smallModelName || undefined,
-      apiKey: $settings.apiKey || undefined,
-      useLocalLlm: $settings.llmEnabled,
-    });
+    // Provider routing is fixed inside ghost.ts (local :8093 if enabled,
+    // else the small slot) — callers only pass privacy metadata.
+    const suggestion = await requestGhostContinuation(lastSentence, $currentWorkspace);
     if (suggestion) {
       ghostSuggestion = suggestion;
       ghostVisible = true;

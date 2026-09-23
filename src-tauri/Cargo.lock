@@ -2383,6 +2383,7 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tempfile",
+ "tokio",
  "uuid",
  "zerocopy",
 ]

@@ -459,7 +459,7 @@ impl LlmManager {
         }
     }
 
-    pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>) -> Result<(), String> {
+    pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>, ctx_size: Option<u32>) -> Result<(), String> {
         let mut proc = self.process.lock().map_err(|e| e.to_string())?;
         if proc.is_some() { return Ok(()); }
 
@@ -484,7 +484,7 @@ impl LlmManager {
         cmd.arg("-m").arg(model_file)
             .arg("--port").arg(self.port.to_string())
             .arg("--host").arg("127.0.0.1")
-            .arg("--ctx-size").arg("8192")
+            .arg("--ctx-size").arg(ctx_size.unwrap_or(8192).to_string())
             .arg("--n-gpu-layers").arg("0")
             .arg("--threads").arg("4")
             .arg("--parallel").arg("2");

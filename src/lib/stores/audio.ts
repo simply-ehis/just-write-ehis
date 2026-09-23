@@ -189,7 +189,8 @@ export async function ensureLlm(): Promise<boolean> {
     return true;
   }
   try {
-    await api.llmStart(await getSidecarsDir(), get(settings).llmModel || undefined);
+    const s = get(settings);
+    await api.llmStart(await getSidecarsDir(), s.llmModel || undefined, s.smallModelContextLength || undefined);
     llmRunning.set(true);
     await new Promise((r) => setTimeout(r, 1000));
     const health = await api.llmHealth();

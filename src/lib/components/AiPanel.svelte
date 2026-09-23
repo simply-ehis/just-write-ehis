@@ -9,10 +9,43 @@
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import { isBrowserPreview } from "$lib/api";
-  import { ensureHarness } from "$lib/harness";
+  import { ensureHarness } from "$lib/memorySidecar";
   import { testProvider } from "$lib/providerTest";
+  import { friendlyEndpointError, rateLimited } from "$lib/aiRequest";
+  import { ghostStatus } from "$lib/ghost";
+  import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
   import Icon from "$lib/components/Icon.svelte";
+
+  /**
+   * ONE rate guard for chat/composer/structurize (was ×3 copies).
+   * Returns true when the send may proceed.
+   */
+  function guardRate(): boolean {
+    if (rateLimited(Date.now(), lastSendTime, $settings.aiRateLimitCooldown)) {
+      showToast("Wait a moment before sending again", "warning");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Main-slot resolution: the small bundled model (lfm2.5-350m) can serve
+   * as the panel's main model when settings.useSmallAsMain is on.
+   * Ghost routing is separate and fixed (see ghost.ts) — it never reads this.
+   */
+  function mainSlot(): { provider: string | undefined; model: string | undefined } {
+    if ($settings.useSmallAsMain) {
+      return {
+        provider: $settings.smallModelEndpoint || undefined,
+        model: $settings.smallModelName || undefined,
+      };
+    }
+    return {
+      provider: $settings.mainModelEndpoint || undefined,
+      model: $settings.mainModelName || undefined,
+    };
+  }
 
   function cancelGeneration() {
     if (abortController) {
@@ -31,16 +64,18 @@
   async function preparePrompt(
     prompt: string,
     system: string
-  ): Promise<{ prompt: string; system: string }> {
-    if (blankMode) return { prompt, system };
+  ): Promise<{ prompt: string; system: string; notices: string[] }> {
+    if (blankMode) return { prompt, system, notices: [] };
     let nextPrompt = prompt;
     let nextSystem = system;
+    const notices: string[] = [];
     if ($settings.aiMemoryEnabled && !isBrowserPreview()) {
       try {
         const facts = await api.memoryRecall(nextPrompt);
         if (facts.trim()) nextSystem += `\n\n${facts}`;
-      } catch {
-        /* memory is enhancement; absence never blocks */
+      } catch (e) {
+        // Enhancement, never blocking — but surfaced in the context chip.
+        notices.push(`memory recall unavailable (${e instanceof Error ? e.message : e})`);
       }
     }
     if ($settings.scrubSecrets) {
@@ -51,7 +86,7 @@
       nextPrompt = await api.memoryRedact(nextPrompt);
       nextSystem = await api.memoryRedact(nextSystem);
     }
-    return { prompt: nextPrompt, system: nextSystem };
+    return { prompt: nextPrompt, system: nextSystem, notices };
   }
 
   async function toggleSidecar() {
@@ -119,12 +154,70 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   let generating = $state(false);
   let composerPrompt = $state("");
   let composerOutput = $state("");
-  let hoveredMsgIdx = $state<number | null>(null);
   let sidecarRunning = $state(false);
   let sidecarConfidence = $state<number | null>(null);
   let abortController = $state<AbortController | null>(null);
   let lastSendTime = $state(0);
   let lastUserMessage = $state("");
+
+  // Generation clock: "Thinking… {elapsed}s / {total}s" (totals mirror the
+  // Rust timeouts: 120s streams, 180s structurize). Driven by `generating`
+  // so every path stays in sync without per-call-site timers.
+  let genStartAt = $state(0);
+  let genElapsed = $state(0);
+  let genTimeoutTotal = $state(120);
+  let genTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (generating) {
+      genStartAt = Date.now();
+      genElapsed = 0;
+      if (genTimer) clearInterval(genTimer);
+      genTimer = setInterval(() => {
+        genElapsed = Math.floor((Date.now() - genStartAt) / 1000);
+      }, 1000);
+    } else if (genTimer) {
+      clearInterval(genTimer);
+      genTimer = null;
+    }
+  });
+
+  // One-line context shortfall notice (RAG/memory recall failures surface
+  // in the context chip, not console-only).
+  let contextNotice = $state("");
+
+  // Replace confirmation: which replace control is awaiting explicit
+  // confirmation (the panel can't see editor selection, so Replace always
+  // confirms, with Insert-instead one click away).
+  let confirmReplace = $state<{ kind: string; id: string } | null>(null);
+
+  // Ghost tab live probe state (small-slot latency + model presence).
+  let ghostProbe = $state<{ running: boolean; text: string }>({ running: false, text: "" });
+
+  function ghostStatusText(): string {
+    const s = $ghostStatus;
+    if (s.state === "idle") return "No suggestion requested yet.";
+    const ago = s.at ? `${Math.max(0, Math.round((Date.now() - s.at) / 1000))}s ago` : "";
+    const ms = s.latencyMs != null ? ` (${s.latencyMs}ms)` : "";
+    return s.state === "ok"
+      ? `Last suggestion ok ${ago}${ms}.`
+      : `Last suggestion unavailable ${ago}${ms}: ${s.detail}`;
+  }
+
+  async function probeGhostSlot() {
+    if (ghostProbe.running) return;
+    ghostProbe = { running: true, text: "" };
+    try {
+      const r = await testProvider($settings.smallModelEndpoint, $settings.smallModelName);
+      ghostProbe = {
+        running: false,
+        text: r.ok
+          ? `${r.latencyMs}ms · model ${r.modelFound ? "found" : "not found"} (${r.models.slice(0, 3).join(", ") || "no models listed"})`
+          : `Unreachable: ${r.error}`,
+      };
+    } catch (e) {
+      ghostProbe = { running: false, text: `Unreachable: ${e instanceof Error ? e.message : e}` };
+    }
+  }
 
   let endpointUnreachable = $state(false);
 
@@ -279,17 +372,14 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
 
   async function handleStructurize() {
     if (!structurizeInput.trim() || generating) return;
-
-    const now = Date.now();
-    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
-      showToast("Wait a moment before sending again", "warning");
-      return;
-    }
+    if (!guardRate()) return;
 
     generating = true;
+    genTimeoutTotal = 180;
     globalLoading.set(true);
     structurizeOutput = "";
     structurizeAccepted = false;
+    contextNotice = "";
     try {
       let structurizeText = structurizeInput;
       if ($settings.scrubSecrets) {
@@ -297,21 +387,17 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         if (!ok) throw new Error("Secret scrubbing is on but the memory sidecar isn't running.");
         structurizeText = await api.memoryRedact(structurizeInput);
       }
+      const slot = mainSlot();
       const response = await api.aiStructurize({
         text: structurizeText,
         workspace: $currentWorkspace,
-        provider: $settings.mainModelEndpoint || undefined,
-        model: $settings.mainModelName || undefined,
+        provider: slot.provider,
+        model: slot.model,
         api_key: $settings.apiKey || undefined,
       });
       structurizeOutput = response.result;
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      let friendly = msg;
-      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
-      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
-      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
-      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      const friendly = friendlyEndpointError(e);
       showToast(`Structurize failed: ${friendly}`, "error");
       structurizeOutput = `Error: ${friendly}`;
     } finally {
@@ -336,13 +422,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
 
   async function sendMessage() {
     if (!input.trim() || generating) return;
-
-    // Rate limit: minimum 3s between sends
-    const now = Date.now();
-    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
-      showToast("Wait a moment before sending again", "warning");
-      return;
-    }
+    if (!guardRate()) return;
 
     if (!blankMode) {
       try {
@@ -380,7 +460,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     messages = [...messages, userMsg];
 
     generating = true;
+    genTimeoutTotal = 120;
     globalLoading.set(true);
+    contextNotice = "";
     try {
       let systemPrompt = blankMode
         ? "You are a helpful writing assistant."
@@ -391,8 +473,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         systemPrompt += `\n\nYour persona:\n${$settings.aiPersona}`;
       }
 
-      // Inject workspace-specific context
-      if (!blankMode && $currentDoc) {
+        // Inject workspace-specific context
+        if (!blankMode && $currentDoc) {
+        const shortfalls: string[] = [];
         try {
           const wsContext = await api.getWorkspaceContext($currentDoc.id, $currentWorkspace);
           if (wsContext.trim()) {
@@ -400,6 +483,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           }
         } catch (e) {
           console.warn('Workspace context failed, continuing without:', e);
+          shortfalls.push("workspace context unavailable");
         }
 
         // RAG context as well
@@ -410,11 +494,18 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           }
         } catch (e) {
           console.warn('RAG context failed, continuing without:', e);
+          shortfalls.push("RAG unavailable");
+        }
+        if (shortfalls.length > 0) {
+          contextNotice = (contextNotice ? contextNotice + " · " : "") + shortfalls.join(" · ");
         }
       }
 
       // Memory recall + secret scrub run before anything leaves the app.
       const prepared = await preparePrompt(userContent, systemPrompt);
+      if (prepared.notices.length > 0) {
+        contextNotice = (contextNotice ? contextNotice + " · " : "") + prepared.notices.join(" · ");
+      }
 
       // Stream tokens live into a placeholder, persist the full text once done.
       const placeholder: ChatMessage = {
@@ -427,13 +518,14 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       messages = [...messages, placeholder];
       let streamed = "";
       abortController = new AbortController();
+      const slot = mainSlot();
       const full = await api.aiGenerateStream(
         {
           prompt: prepared.prompt,
           system_prompt: prepared.system,
           mode,
-          provider: $settings.mainModelEndpoint || undefined,
-          model: $settings.mainModelName || undefined,
+          provider: slot.provider,
+          model: slot.model,
           max_tokens: mode === "composer" ? 4096 : 2048,
           api_key: $settings.apiKey || undefined,
         },
@@ -452,12 +544,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         api.memoryLearn(`User: ${userContent}\nAssistant: ${full.slice(0, 1000)}`).catch(() => {});
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      let friendly = msg;
-      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
-      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
-      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
-      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      const friendly = friendlyEndpointError(e);
       showToast(`AI generation failed: ${friendly}`, "error");
       const errorMsg = await api.conversationAddMessage(
         conversation.id,
@@ -475,12 +562,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
 
   async function handleComposerGenerate() {
     if (!composerPrompt.trim() || generating) return;
-
-    const now = Date.now();
-    if ($settings.aiRateLimitCooldown > 0 && now - lastSendTime < $settings.aiRateLimitCooldown) {
-      showToast("Wait a moment before sending again", "warning");
-      return;
-    }
+    if (!guardRate()) return;
 
     try {
       assertAiAllowedForDoc($currentDoc);
@@ -490,21 +572,25 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     }
 
     generating = true;
+    genTimeoutTotal = 120;
     globalLoading.set(true);
     composerOutput = "";
+    contextNotice = "";
     abortController = new AbortController();
     try {
       const prepared = await preparePrompt(
         composerPrompt,
         "You are a professional writing assistant. Generate well-crafted prose based on the user's instructions."
       );
+      if (prepared.notices.length > 0) contextNotice = prepared.notices.join(" · ");
+      const slot = mainSlot();
       await api.aiGenerateStream(
         {
           prompt: prepared.prompt,
           system_prompt: prepared.system,
           mode: "composer",
-          provider: $settings.mainModelEndpoint || undefined,
-          model: $settings.mainModelName || undefined,
+          provider: slot.provider,
+          model: slot.model,
           max_tokens: 4096,
           api_key: $settings.apiKey || undefined,
         },
@@ -514,12 +600,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         }
       );
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      let friendly = msg;
-      if (msg.includes("401") || msg.includes("403")) friendly = "API key rejected — check your provider settings";
-      else if (msg.includes("429")) friendly = "Rate limited — wait a moment";
-      else if (msg.includes("408") || msg.includes("timed out")) friendly = "Request timed out — the model may be overloaded";
-      else if (msg.includes("ECONNREFUSED") || msg.includes("network")) friendly = "Can't reach AI server — is it running?";
+      const friendly = friendlyEndpointError(e);
       showToast(`Composer failed: ${friendly}`, "error");
       composerOutput = `Error: ${friendly}`;
     } finally {
@@ -557,6 +638,15 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
 
 <div class="ai-panel" class:minimized>
   <div class="ai-header">
+    {#if $currentWorkspace && isWorkspacePrivate($currentWorkspace)}
+      <span
+        class="privacy-badge"
+        title="This workspace is local-only: AI calls stay on-device and locked docs are excluded from context."
+      >
+        <Icon name="lock" size={12} />
+        <span>Private</span>
+      </span>
+    {/if}
     <div class="mode-tabs">
       {#if !minimized}
       <button class:active={mode === "chat"} onclick={() => mode = "chat"}>Chat</button>
@@ -604,6 +694,52 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           title="Write into {splitLive.title}"
         >Split</button>
       </div>
+    {/if}
+  {/snippet}
+
+  <!--
+    Replace confirmation: the panel cannot see editor selection, so
+    Replace always asks first (Insert-instead one click away).
+    kind/id scope the pending confirm to one control at a time.
+  -->
+  {#snippet replaceBtn(kind: string, id: string, content: string, doConfirm: () => void)}
+    {#if confirmReplace?.kind === kind && confirmReplace?.id === id}
+      <span class="replace-confirm" role="alertdialog" aria-label="Confirm replace">
+        <span class="replace-q">Replace selection?</span>
+        <button
+          class="action-btn icon-btn"
+          onclick={() => { confirmReplace = null; doConfirm(); }}
+          title="Replace the current selection"
+          aria-label="Confirm replace selection"
+        >
+          <Icon name="check" size={14} />
+        </button>
+        <button
+          class="action-btn icon-btn"
+          onclick={() => { confirmReplace = null; handleWriteBack("insert", content); }}
+          title="Insert at cursor instead"
+          aria-label="Insert at cursor instead"
+        >
+          <Icon name="plus" size={14} />
+        </button>
+        <button
+          class="action-btn icon-btn"
+          onclick={() => (confirmReplace = null)}
+          title="Cancel"
+          aria-label="Cancel replace"
+        >
+          <Icon name="x" size={14} />
+        </button>
+      </span>
+    {:else}
+      <button
+        class="action-btn icon-btn"
+        onclick={() => (confirmReplace = { kind, id })}
+        title="Replace selection"
+        aria-label="Replace selection"
+      >
+        <Icon name="refresh" size={14} />
+      </button>
     {/if}
   {/snippet}
 
@@ -658,9 +794,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
               <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", composerOutput)} title="Insert at cursor" aria-label="Insert at cursor">
                 <Icon name="plus" size={14} />
               </button>
-              <button class="action-btn icon-btn" onclick={() => handleWriteBack("replace", composerOutput)} title="Replace selection" aria-label="Replace selection">
-                <Icon name="refresh" size={14} />
-              </button>
+              {@render replaceBtn("composer", "composer", composerOutput, () => handleWriteBack("replace", composerOutput))}
               <button class="action-btn icon-btn" onclick={() => handleWriteBack("append", composerOutput)} title="Append to doc" aria-label="Append to doc">
                 <Icon name="send" size={14} />
               </button>
@@ -699,9 +833,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
             <span>Result</span>
             {@render wbTargetToggle()}
             <div class="output-actions">
-              <button class="action-btn icon-btn" onclick={acceptStructurize} title="Replace current selection with this" aria-label="Accept structurize result">
-                <Icon name="check" size={14} />
-              </button>
+              {@render replaceBtn("structurize", "structurize", structurizeOutput, acceptStructurize)}
               <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", structurizeOutput)} title="Insert at cursor" aria-label="Insert at cursor">
                 <Icon name="plus" size={14} />
               </button>
@@ -725,7 +857,22 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       <div class="ghost-info">
         <span class="icon"><Icon name="sparkle" size={28} /></span>
         <p>Ghost mode provides inline autocomplete as you type in the editor.</p>
-        <p class="ghost-status">{$settings.ghostEnabled ? 'Enabled' : 'Disabled'} in settings</p>
+        <label class="ghost-toggle">
+          <input type="checkbox" bind:checked={$settings.ghostEnabled} />
+          <span>Enabled</span>
+        </label>
+        <button
+          class="generate-btn ghost-test"
+          onclick={probeGhostSlot}
+          disabled={ghostProbe.running}
+        >
+          {ghostProbe.running ? "Probing…" : "Test small slot"}
+        </button>
+        {#if ghostProbe.text}
+          <p class="ghost-status">{ghostProbe.text}</p>
+        {/if}
+        <p class="ghost-status">{ghostStatusText()}</p>
+        <p class="ghost-route">Routes to the local model (:8093) when enabled, else the small slot — never the main slot.</p>
       </div>
     </div>
   {:else}
@@ -746,8 +893,6 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
             class="message"
             class:user={msg.role === "user"}
             role="article"
-            onmouseenter={() => hoveredMsgIdx = idx}
-            onmouseleave={() => hoveredMsgIdx = null}
           >
             <div class="role">{msg.role === "user" ? "You" : "AI"}</div>
             <div class="content">{msg.content}</div>
@@ -756,14 +901,12 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
                 <Icon name="refresh" size={12} /> Retry
               </button>
             {/if}
-            {#if msg.role === "assistant" && hoveredMsgIdx === idx}
+            {#if msg.role === "assistant" && !msg.content.startsWith("Error:") && !msg.content.startsWith("Locked:")}
               <div class="writeback-bar">
                 <button class="icon-btn" onclick={() => handleWriteBack("insert", msg.content)} title="Insert at cursor (Ctrl+Enter)" aria-label="Insert at cursor">
                   <Icon name="plus" size={14} />
                 </button>
-                <button class="icon-btn" onclick={() => handleWriteBack("replace", msg.content)} title="Replace selection" aria-label="Replace selection">
-                  <Icon name="refresh" size={14} />
-                </button>
+                {@render replaceBtn("msg", msg.id, msg.content, () => handleWriteBack("replace", msg.content))}
                 <button class="icon-btn" onclick={() => handleWriteBack("append", msg.content)} title="Append to doc" aria-label="Append to doc">
                   <Icon name="send" size={14} />
                 </button>
@@ -777,7 +920,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         {#if generating}
           <div class="message generating">
             <div class="role">AI</div>
-            <div class="content">Thinking...</div>
+            <div class="content">Thinking… {genElapsed}s / {genTimeoutTotal}s</div>
             <button class="icon-btn cancel-btn" onclick={cancelGeneration} title="Cancel generation" aria-label="Cancel generation">
               <Icon name="x" size={14} />
             </button>
@@ -792,6 +935,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           <span class="chip-icon"><Icon name="files" size={13} /></span>
           <span>{$currentDoc.title}</span>
           <span class="ws-label">{$currentWorkspace}</span>
+          {#if contextNotice}
+            <span class="chip-notice" title={contextNotice}>Notice: {contextNotice}</span>
+          {/if}
         </div>
         {@render wbTargetToggle()}
       {/if}
@@ -864,6 +1010,72 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   .header-actions {
     display: flex;
     gap: 4px;
+  }
+
+  .privacy-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border: 1px solid var(--accent-semantic-yellow);
+    border-radius: var(--radius-sm);
+    color: var(--accent-semantic-yellow);
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .chip-notice {
+    color: var(--warning);
+    font-style: italic;
+  }
+
+  .ghost-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .ghost-test {
+    margin-top: 8px;
+  }
+
+  .ghost-route {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* Mobile: header wraps to two rows, action bars stay visible on touch,
+    and the sheet grows so the send flow is thumb-reachable with the
+    keyboard open. The sheet container lives in App.svelte. */
+  @media (max-width: 480px) {
+    .ai-header {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+
+    .output-actions {
+      opacity: 1;
+    }
+
+    /* Thumb-reachable write-back targets on touch / small screens.
+      Desktop hover styling above is untouched. */
+    .writeback-bar button,
+    .output-actions button,
+    .replace-confirm button {
+      min-height: 44px;
+      min-width: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    :global(.mobile-ai-container) {
+      height: 88vh;
+    }
   }
 
   .toggle-blank {
@@ -1098,12 +1310,42 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     white-space: pre-wrap;
   }
 
+  /* Always rendered (keyboard/touch reachable), revealed on hover or
+    keyboard focus — never hover-only. Touch devices show it outright. */
   .writeback-bar {
     display: flex;
     gap: 4px;
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--border-subtle);
+    opacity: 0;
+  }
+
+  .message:hover .writeback-bar,
+  .message:focus-within .writeback-bar,
+  .writeback-bar:focus-within {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .writeback-bar {
+      opacity: 1;
+    }
+  }
+
+  .replace-confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-sm);
+  }
+
+  .replace-q {
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
   }
 
   .writeback-bar button,

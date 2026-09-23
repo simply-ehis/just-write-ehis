@@ -9,7 +9,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import LazyWorkspace from "./LazyWorkspace.svelte";
   import { stopStt, stopTts, stopLlm } from "$lib/stores/audio";
-  import { stopHarness } from "$lib/harness";
+  import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
 
   /** Toggling a voice/memory feature off also stops its sidecar. */
@@ -458,6 +458,16 @@
           <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="llama3.2" />
         </div>
         <p class="setting-desc">Light-task picks: <code>LFM2.5-350M</code> (GGUF, tool-use specialist) · <code>qwen3:0.6b</code> · <code>gemma3:270m</code>. See docs/MODELS.md.</p>
+        <div class="setting-row">
+          <label for="setting-small-model-ctx">Small Model Context Length</label>
+          <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} />
+        </div>
+        <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Takes effect on the next sidecar start — restart the small model to apply.</p>
+        <div class="setting-row">
+          <label for="setting-use-small-as-main">Use Small Model as Main</label>
+          <input id="setting-use-small-as-main" type="checkbox" bind:checked={$settings.useSmallAsMain} />
+        </div>
+        <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small model instead of the main slot. Ghost routing is unchanged (local :8093 if enabled, else small slot).</p>
         <div class="setting-row">
           <label for="setting-main-model-endpoint">Main Model Endpoint</label>
           <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="http://localhost:11434/v1" />

@@ -204,15 +204,17 @@ async function integrityWiring() {
   const reader = await readFile(join(root, "src/lib/components/ReaderWorkspace.svelte"), "utf8");
   check("reader parses books (no raw binary import)", reader.includes("parseBookFile") && reader.includes(".epub,.pdf,.docx"));
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("ghost passes workspace for privacy", editor.includes("workspace: $currentWorkspace"));
+  check("ghost passes workspace for privacy", editor.includes("requestGhostContinuation(lastSentence, $currentWorkspace)"));
 }
 
 async function modelWiring() {
   const panel = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
-  const mainUses = (panel.match(/mainModelEndpoint \|\| undefined/g) ?? []).length;
-  check("chat/composer/structurize use main slot", mainUses >= 3, `${mainUses} sites`);
+  const slotUses = (panel.match(/const slot = mainSlot\(\);/g) ?? []).length;
+  check("chat/composer/structurize use main slot", slotUses >= 3, `${slotUses} sites`);
+  check("main slot honors small-as-main", panel.includes("useSmallAsMain") && panel.includes("smallModelEndpoint || undefined"));
+  const ghost = await readFile(join(root, "src/lib/ghost.ts"), "utf8");
+  check("ghost autocomplete uses small slot", ghost.includes("s.smallModelEndpoint") && !ghost.includes("mainModelEndpoint"));
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("ghost autocomplete uses small slot", editor.includes("$settings.smallModelEndpoint"));
   const settings = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
   check("provider test buttons exist", settings.includes("testSlot") && settings.includes("Test Main Slot"));
   check("voice model fields exist", settings.includes("sttModel") && settings.includes("ttsModel"));
@@ -343,10 +345,20 @@ async function auditBatchWiring() {
   check("startup runs maintenance", app.includes("runStartupMaintenance"));
   const ai = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
   check("chat/composer stream tokens", ai.includes("aiGenerateStream"));
+  check("single rate guard + friendly map", ai.includes("guardRate()") && ai.includes("friendlyEndpointError(e)") && !ai.includes("minimum 3s between sends"));
+  check("stream alias documented, no fake case", (await readFile(join(root, "src/lib/api.ts"), "utf8")).includes("this alias is intentional"));
+  check("ghost routing enforced in ghost.ts", (await readFile(join(root, "src/lib/ghost.ts"), "utf8")).includes("ROUTING (canonical") && (await readFile(join(root, "src/lib/ghost.ts"), "utf8")).includes("ghostStatus"));
+  const novel = await readFile(join(root, "src/lib/components/NovelWorkspace.svelte"), "utf8");
+  check("doc-fork rename complete", !novel.includes("GhostPanel") && !novel.includes("GhostBadge") && novel.includes("DocForkPanel") && novel.includes("ForkBadge") && novel.includes("forkId="));
+  check("replace confirms before clobbering", ai.includes("replaceBtn(") && ai.includes("Confirm replace selection"));
+  check("privacy badge in panel header", ai.includes("privacy-badge") && ai.includes("isWorkspacePrivate"));
+  check("thinking countdown + mobile sheet", ai.includes("genElapsed") && ai.includes("88vh") && ai.includes("max-width: 480px"));
+  check("small-model ctx + use-as-main settings", (await readFile(join(root, "src/lib/stores/settings.ts"), "utf8")).includes("smallModelContextLength") && (await readFile(join(root, "src/lib/stores/settings.ts"), "utf8")).includes("useSmallAsMain"));
   const props = await readFile(join(root, "src/lib/components/PropertiesView.svelte"), "utf8");
   check("saved views + calendar", props.includes("saveCurrentView") && props.includes("calendarCells"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust streams SSE deltas", commands.includes("ai_generate_stream") && commands.includes("delta"));
+  check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("harness_dir is empty") && commands.includes("ctx_size"));
 }
 
 async function secretsWiring() {

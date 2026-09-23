@@ -361,7 +361,10 @@ export const api = {
 
   /**
    * Streaming generation: `onToken` fires per delta, resolves with the
-   * full text. Browser preview falls back to one shot + one callback.
+   * full text. Browser preview falls back to one shot + one callback via
+   * the "ai_generate" case — this alias is intentional (no separate
+   * "ai_generate_stream" browser case exists, and the api ⊆ backend
+   * invariant check must keep allowing it).
    */
   aiGenerateStream: async (request: AiGenerateRequest, onToken: (token: string) => void): Promise<string> => {
     assertAiAllowed(request.workspace);
@@ -596,8 +599,8 @@ export const api = {
     safeInvoke<void>("tts_stop_playback"),
 
   // ── LLM: llama.cpp server (LFM 2.5-350M) ───────────────────────────
-  llmStart: (sidecarsDir: string, model?: string) =>
-    safeInvoke<void>("llm_start", { sidecarsDir, model }),
+  llmStart: (sidecarsDir: string, model?: string, ctxSize?: number) =>
+    safeInvoke<void>("llm_start", { sidecarsDir, model, ctxSize }),
 
   llmStop: () =>
     safeInvoke<void>("llm_stop"),

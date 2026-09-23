@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (Area 5: AI core dedupe + hardening)
+
+### Changed
+- **Slot duplication deleted**: one `resolveSlot()` in commands.rs (was ×3 endpoint/model pairs), one `post_chat_completions()` for ai_generate/structurize, one `guardRate()` + shared `friendlyEndpointError()` via `src/lib/aiRequest.ts` (was ×3 copies each in AiPanel), providerTest.ts confirmed as the single `/models` probe (Settings + panel mount)
+- **Silent failures fixed**: ai_generate/structurize check HTTP status like the stream path (401/403 key, 429 rate, 408 timeout) with one 429/503 retry + backoff, never `""` on empty choices; ghost failures record to a `ghostStatus` store (surfaced in the panel's Ghost tab) instead of warn→null; RAG/memory shortfalls show a one-line notice in the context chip; structurize remote-fallback warns with reason; `sidecar_start("")` is a typed error at the Rust boundary
+- **Ghost disambiguated**: GhostPanel→DocForkPanel, GhostBadge→ForkBadge (fork UI, not autocomplete); Ghost tab is live (enable toggle, small-slot probe with latency, last-suggestion status, routing note); routing enforced — ghost reads local :8093 if enabled else small slot, callers pass workspace only
+- **harness.ts→memorySidecar.ts** (port 8092, not legacy 8080) with a deprecated re-export shim; llm sidecar takes `--ctx-size` from settings
+- **Panel UX**: privacy lock badge on private workspaces; Replace always confirms (Insert-instead one click away); write-back bar keyboard/touch reachable (was hover-only) and hidden on Error/Locked messages; writeBack is a FIFO queue (rapid clicks no longer drop events); Thinking… shows elapsed/total per path timeouts; mobile header wraps ≤480px, sheet 88vh, action bars visible on touch
+- **Small model as first-class**: `smallModelContextLength` (llama-server ctx, applies on restart) + `useSmallAsMain` route chat/Composer/Structurize at lfm2.5-350m, with Settings controls
+
+### Tests
+- `cargo test ai_slot`: resolveSlot defaults/blanks/explicit + status map (4 passed)
+- `tests/ai-request-unit.mjs` (19), `tests/writeback-queue.mjs` (8), `tests/ai-error-probe.mjs` (dead-endpoint reject friendly + structurize local fallback)
+- e2e anchors updated to the new contracts (slot routing, fork rename, confirm, badge, countdown, ctx setting, Rust hardening)
+
 ## Unreleased (Area 4: brutalist + glass as real themes)
 
 ### Changed

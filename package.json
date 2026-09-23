@@ -18,7 +18,11 @@
     "test:lazyfail": "node tests/lazy-load-failure.mjs",
     "test:novel": "node tests/novel-surface.mjs",
     "test:shell": "node tests/shell-nav.mjs",
-    "test:themes": "node tests/theme-sweep.mjs"
+    "test:themes": "node tests/theme-sweep.mjs",
+    "test:ai": "node tests/ai-request-unit.mjs",
+    "test:writeback": "node tests/writeback-queue.mjs",
+    "test:aierror": "node tests/ai-error-probe.mjs",
+    "test:aipanel": "node tests/ai-panel-error.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

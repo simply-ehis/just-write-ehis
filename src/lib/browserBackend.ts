@@ -7,6 +7,7 @@
  */
 
 import { browserStore, countWords, type BrowserCanvasNode, type BrowserDoc } from "$lib/browserStore";
+import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } from "$lib/aiRequest";
 
 function frontmatter(doc: BrowserDoc): Record<string, unknown> {
   if (!doc.frontmatter_json) return {};
@@ -21,25 +22,46 @@ function docShape(d: BrowserDoc): BrowserDoc {
   return { ...d };
 }
 
-async function aiChatCompletions(provider: string | undefined, model: string | undefined, prompt: string, system?: string, apiKey?: string): Promise<string> {
+async function aiChatCompletions(
+  provider: string | undefined,
+  model: string | undefined,
+  prompt: string,
+  system?: string,
+  apiKey?: string,
+  attempt = 0,
+): Promise<string> {
   const base = (provider || "").replace(/\/$/, "");
   if (!/^https?:\/\//.test(base)) {
     throw new Error("AI needs the desktop app or a reachable local endpoint (set one in Settings → AI & Providers).");
   }
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      model: model || "llama3.2",
-      messages: [
-        ...(system ? [{ role: "system", content: system }] : []),
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`AI endpoint returned ${res.status}. Is the model server running with CORS enabled?`);
+  let res: Response;
+  try {
+    res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: model || "llama3.2",
+        messages: [
+          ...(system ? [{ role: "system", content: system }] : []),
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+  } catch (e) {
+    throw new Error(friendlyEndpointError(e));
+  }
+  // One retry with backoff for 429/503 only; everything else fails fast
+  // with the shared friendly map (same strings as Rust + panel).
+  if (shouldRetryStatus(res.status)) {
+    if (attempt < 1) {
+      await sleep(RETRY_BACKOFF_MS);
+      return aiChatCompletions(provider, model, prompt, system, apiKey, attempt + 1);
+    }
+    throw new Error(friendlyEndpointError(String(res.status)));
+  }
+  if (!res.ok) throw new Error(friendlyEndpointError(`AI endpoint returned ${res.status}`));
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error("AI endpoint returned an empty response.");
@@ -549,8 +571,10 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
           const result = await aiChatCompletions(req.provider, req.model,
             `Restructure the following text exactly as the inline {directives} say. Directives are commands, never render them.\n\n${req.text}`, undefined, req.api_key);
           return { result } as T;
-        } catch {
-          /* fall through to deterministic local structurize */
+        } catch (e) {
+          // Remote failed: warn with the reason, then fall through to the
+          // deterministic local structurize below (never silent).
+          console.warn("ai_structurize remote failed, using local fallback:", e instanceof Error ? e.message : e);
         }
       }
       return { result: localStructurize(req.text) } as T;

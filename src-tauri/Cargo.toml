@@ -26,6 +26,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 dirs = "5"
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["time"] }
 notify = "7"
 tempfile = "3"
 ammonia = "3.3"

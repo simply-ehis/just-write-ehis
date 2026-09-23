@@ -8,9 +8,9 @@
   import DocDetail from './DocDetail.svelte';
   import DeleteButton from './DeleteButton.svelte';
   import DockSplit from './DockSplit.svelte';
-  import GhostPanel from './GhostPanel.svelte';
-  import GhostBadge from './GhostBadge.svelte';
+  import DocForkPanel from './DocForkPanel.svelte';
 
+  import ForkBadge from './ForkBadge.svelte';
   let projectId = $state<string | null>(null);
   let projects = $state<Doc[]>([]);
   let board = $state<BeatBoard>({ acts: [], sequences: [], scenes: [] });
@@ -639,7 +639,7 @@
                   </button>
                   <div class="scene-card-actions">
                     {#if ghostCounts[scene.doc.id]}
-                      <GhostBadge count={ghostCounts[scene.doc.id]} />
+                      <ForkBadge count={ghostCounts[scene.doc.id]} />
                     {/if}
                     <button class="fork-btn" onclick={() => forkScene(scene)} title="Fork this scene" aria-label="Fork scene">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
@@ -708,8 +708,8 @@
       {#if selectedBeat}
         <div class="beat-dock">
           {#if activeGhostId && activeGhostParentId}
-            <GhostPanel
-              ghostId={activeGhostId}
+            <DocForkPanel
+              forkId={activeGhostId}
               originalId={activeGhostParentId}
               onClose={() => { activeGhostId = null; activeGhostParentId = null; }}
               onMerged={() => { loadProject(); loadGhostCounts(); }}

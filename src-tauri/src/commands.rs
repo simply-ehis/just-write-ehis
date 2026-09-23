@@ -303,10 +303,103 @@ pub fn conversation_get_messages(db: State<'_, Database>, conversation_id: Strin
     db.conversation_get_messages(&conversation_id)
 }
 
+/// Default model slot: the shared Ollama-compatible endpoint + model.
+/// ONE definition — ai_generate, ai_generate_stream, and ai_structurize
+/// all resolve through here instead of repeating the fallback pair.
+fn resolve_slot(provider: Option<String>, model: Option<String>) -> (String, String) {
+    let endpoint = provider
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+    let model = model
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| "llama3.2".to_string());
+    (endpoint, model)
+}
+
+/// Friendly HTTP-status map shared by every chat-completions call.
+fn friendly_http_status(status: u16) -> String {
+    match status {
+        401 | 403 => "API key rejected — check your provider settings".to_string(),
+        429 => "Rate limited — wait a moment".to_string(),
+        408 => "Request timed out — the model may be overloaded".to_string(),
+        503 => "Model server overloaded — try again in a moment".to_string(),
+        _ => format!("AI endpoint returned HTTP {}", status),
+    }
+}
+
+fn authed_post(
+    client: &reqwest::Client,
+    endpoint: &str,
+    body: &serde_json::Value,
+    api_key: &Option<String>,
+) -> reqwest::RequestBuilder {
+    let mut req_builder = client
+        .post(format!("{}/chat/completions", endpoint))
+        .header("Content-Type", "application/json")
+        .json(body);
+    if let Some(key) = api_key.as_ref().filter(|k| !k.is_empty()) {
+        req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
+    }
+    req_builder
+}
+
+/// ONE non-streaming chat-completions call shared by ai_generate and
+/// ai_structurize: status-checked like the stream path, one retry with
+/// backoff on 429/503 only, and NEVER an empty string on empty choices.
+async fn post_chat_completions(
+    endpoint: &str,
+    model: &str,
+    messages: Vec<serde_json::Value>,
+    max_tokens: u32,
+    api_key: &Option<String>,
+    timeout_secs: u64,
+) -> Result<(String, Option<u32>), String> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "stream": false,
+    });
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // One retry with backoff for 429/503 only; everything else fails fast.
+    let mut attempts = 0;
+    let resp = loop {
+        attempts += 1;
+        let resp = authed_post(&client, endpoint, &body, api_key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        if (status == 429 || status == 503) && attempts < 2 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        if !resp.status().is_success() {
+            return Err(friendly_http_status(status));
+        }
+        break resp;
+    };
+
+    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    let content = data["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "AI endpoint returned an empty response.".to_string())?;
+
+    let tokens = data["usage"]["total_tokens"].as_u64().map(|v| v as u32);
+
+    Ok((content, tokens))
+}
+
 #[tauri::command]
 pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateResponse, String> {
-    let endpoint = request.provider.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
-    let model = request.model.unwrap_or_else(|| "llama3.2".to_string());
+    let (endpoint, model) = resolve_slot(request.provider, request.model);
 
     let mut messages = Vec::new();
     if let Some(sys) = &request.system_prompt {
@@ -314,33 +407,15 @@ pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateRespons
     }
     messages.push(serde_json::json!({"role": "user", "content": request.prompt}));
 
-    let body = serde_json::json!({
-        "model": model,
-        "messages": messages,
-        "max_tokens": request.max_tokens.unwrap_or(2048),
-        "stream": false,
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(90))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
-        .header("Content-Type", "application/json")
-        .json(&body);
-    if let Some(key) = request.api_key.filter(|k| !k.is_empty()) {
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
-    }
-    let resp = req_builder.send().await.map_err(|e| e.to_string())?;
-
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    let content = data["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    let tokens = data["usage"]["total_tokens"].as_u64().map(|v| v as u32);
+    let (content, tokens) = post_chat_completions(
+        &endpoint,
+        &model,
+        messages,
+        request.max_tokens.unwrap_or(2048),
+        &request.api_key,
+        90,
+    )
+    .await?;
 
     Ok(AiGenerateResponse { content, tokens_used: tokens })
 }
@@ -353,8 +428,7 @@ pub async fn ai_generate_stream(
     request: AiGenerateRequest,
     on_event: tauri::ipc::Channel<String>,
 ) -> Result<(), String> {
-    let endpoint = request.provider.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
-    let model = request.model.unwrap_or_else(|| "llama3.2".to_string());
+    let (endpoint, model) = resolve_slot(request.provider, request.model);
 
     let mut messages = Vec::new();
     if let Some(sys) = &request.system_prompt {
@@ -373,23 +447,25 @@ pub async fn ai_generate_stream(
         .timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| e.to_string())?;
-    let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
-        .header("Content-Type", "application/json")
-        .json(&body);
-    if let Some(key) = request.api_key.filter(|k| !k.is_empty()) {
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
-    }
-    let mut resp = req_builder.send().await.map_err(|e| e.to_string())?;
+
+    // One retry with backoff for 429/503 only; everything else fails fast.
+    let mut attempts = 0;
+    let mut resp = loop {
+        attempts += 1;
+        let resp = authed_post(&client, &endpoint, &body, &request.api_key)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        if (status == 429 || status == 503) && attempts < 2 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        break resp;
+    };
 
     if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let msg = match status {
-            401 | 403 => "API key rejected — check your provider settings".to_string(),
-            429 => "Rate limited — wait a moment and try again".to_string(),
-            408 => "Request timed out — the model may be overloaded".to_string(),
-            _ => format!("AI endpoint returned HTTP {}", status),
-        };
-        return Err(msg);
+        return Err(friendly_http_status(resp.status().as_u16()));
     }
 
     // `chunk()` needs no extra stream traits; split SSE frames manually.
@@ -417,8 +493,7 @@ pub async fn ai_generate_stream(
 
 #[tauri::command]
 pub async fn ai_structurize(request: StructurizeRequest) -> Result<StructurizeResponse, String> {
-    let endpoint = request.provider.unwrap_or_else(|| "http://localhost:11434/v1".to_string());
-    let model = request.model.unwrap_or_else(|| "llama3.2".to_string());
+    let (endpoint, model) = resolve_slot(request.provider, request.model);
 
     let target_format = match request.workspace.as_str() {
         "novel" => "chapter outline, beat sheet, character sheets, scene cards, or bible facts",
@@ -451,38 +526,22 @@ Target format for this workspace: {target_format}
 Output the final transformed document. Use markdown where appropriate."#
     );
 
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": request.text}
-        ],
-        "max_tokens": 4096,
-        "stream": false,
-    });
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": request.text}),
+    ];
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let mut req_builder = client.post(format!("{}/chat/completions", endpoint))
-        .header("Content-Type", "application/json")
-        .json(&body);
-    if let Some(key) = request.api_key.filter(|k| !k.is_empty()) {
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
-    }
-    let resp = req_builder.send().await.map_err(|e| e.to_string())?;
+    let (result, tokens) = post_chat_completions(
+        &endpoint,
+        &model,
+        messages,
+        4096,
+        &request.api_key,
+        180,
+    )
+    .await?;
 
-    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    let content = data["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    let tokens = data["usage"]["total_tokens"].as_u64().map(|v| v as u32);
-
-    Ok(StructurizeResponse { result: content, tokens_used: tokens })
+    Ok(StructurizeResponse { result, tokens_used: tokens })
 }
 
 #[tauri::command]
@@ -754,6 +813,11 @@ pub fn setup_file_watcher(db: State<'_, Database>, app: tauri::AppHandle) -> Res
 
 #[tauri::command]
 pub fn sidecar_start(sidecar: State<'_, sidecar::SidecarManager>, python_path: String, harness_dir: String) -> Result<(), String> {
+    // Guard at the Rust boundary: an empty dir must be a typed error,
+    // never Command::current_dir("") (which spawns in an undefined cwd).
+    if harness_dir.trim().is_empty() {
+        return Err("sidecar_start: harness_dir is empty — set the harness directory in Settings → AI & Providers first.".to_string());
+    }
     sidecar.start(&python_path, &harness_dir)
 }
 
@@ -1438,8 +1502,9 @@ pub fn llm_start(
     llm: State<'_, sidecar::LlmManager>,
     sidecars_dir: String,
     model: Option<String>,
+    ctx_size: Option<u32>,
 ) -> Result<(), String> {
-    llm.start(&sidecars_dir, model.as_deref())
+    llm.start(&sidecars_dir, model.as_deref(), ctx_size)
 }
 
 #[tauri::command]
@@ -1638,5 +1703,43 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
         Ok(v) => Ok(Some(v)),
         Err(keyring::Error::NoEntry) => Ok(None),
         Err(_) => Err("keychain read failed".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod ai_slot_tests {
+    use super::*;
+
+    #[test]
+    fn resolve_slot_defaults() {
+        let (e, m) = resolve_slot(None, None);
+        assert_eq!(e, "http://localhost:11434/v1");
+        assert_eq!(m, "llama3.2");
+    }
+
+    #[test]
+    fn resolve_slot_blank_means_default() {
+        let (e, m) = resolve_slot(Some("  ".to_string()), Some("".to_string()));
+        assert_eq!(e, "http://localhost:11434/v1");
+        assert_eq!(m, "llama3.2");
+    }
+
+    #[test]
+    fn resolve_slot_keeps_explicit_values() {
+        let (e, m) = resolve_slot(
+            Some("http://127.0.0.1:8093/v1".to_string()),
+            Some("lfm2.5-350m".to_string()),
+        );
+        assert_eq!(e, "http://127.0.0.1:8093/v1");
+        assert_eq!(m, "lfm2.5-350m");
+    }
+
+    #[test]
+    fn friendly_status_mapping() {
+        assert!(friendly_http_status(401).contains("API key"));
+        assert!(friendly_http_status(403).contains("API key"));
+        assert!(friendly_http_status(429).contains("Rate limited"));
+        assert!(friendly_http_status(408).contains("timed out"));
+        assert!(friendly_http_status(500).contains("500"));
     }
 }
