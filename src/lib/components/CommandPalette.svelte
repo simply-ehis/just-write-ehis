@@ -30,7 +30,7 @@
     { id: 'script', label: 'Go to Scripts', icon: 'film', action: () => { $currentWorkspace = 'script'; close(); } },
     { id: 'projects', label: 'Go to Projects', icon: 'folder', action: () => { $currentWorkspace = 'projects'; close(); } },
     { id: 'reader', label: 'Go to Reader', icon: 'book-open', action: () => { $currentWorkspace = 'reader'; close(); } },
-    { id: 'files', label: 'Go to Files', icon: 'files', action: () => { $currentWorkspace = 'files'; close(); } },
+    { id: 'files', label: 'Go to Files', icon: 'files', action: () => { $currentWorkspace = 'properties'; window.dispatchEvent(new CustomEvent('open-library-files')); close(); } },
     { id: 'inbox', label: 'Open Inbox', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
     { id: 'craft', label: 'Open Craft Analytics (Settings)', icon: 'chart', action: () => { openSettingsAt('craft'); $showSettings = true; close(); } },
     { id: 'stats', label: 'Open Usage Stats (Settings)', icon: 'calendar', action: () => { openSettingsAt('stats'); $showSettings = true; close(); } },
@@ -51,7 +51,7 @@
     { id: 'vault-rename', label: 'Vault-Wide Rename', icon: 'edit', action: () => { showRename = true; close(); } },
     { id: 'publish', label: 'Publish Static Site…', icon: 'send', action: () => { publishSite(); close(); } },
     { id: 'compile-tabs', label: 'Compile Open Tabs…', icon: 'download', action: () => { compileOpenTabs(); close(); } },
-    { id: 'export-tabs-zip', label: 'Export Open Tabs (.zip)…', icon: 'download', action: () => { exportTabsZip(); close(); } },
+    { id: 'export-tabs-zip', label: 'Export Open Tabs (.zip)…', icon: 'download', action: () => { exportTabsZip(); } },
   ];
 
   /** Saved templates appear as first-class palette entries — no popups. */
@@ -98,6 +98,14 @@
     results = [];
     selectedIndex = 0;
     markUsed('palette');
+    api.convertStatus().then(
+      (s) => {
+        compilePandoc = s.pandoc;
+      },
+      () => {
+        compilePandoc = false;
+      },
+    );
     setTimeout(() => inputEl?.focus(), 10);
   }
 
@@ -223,11 +231,14 @@
     });
   }
 
-  /** Global Publish (§10): the orphaned publishStaticSite store, now reachable. */
+  /** Global Publish (§10): single Rust implementation (pulldown + ammonia). */
   async function publishSite() {
     try {
-      const { publishStaticSite } = await import("$lib/stores/publish");
-      const result = await publishStaticSite();
+      const result = await api.publishStaticSite({});
+      const extra =
+        typeof result.imagesSkipped === "number" && result.imagesSkipped > 0
+          ? ` (${result.imagesInlined ?? 0} images inlined, ${result.imagesSkipped} skipped as too large)`
+          : "";
       const blob = new Blob([result.indexHtml], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -235,9 +246,33 @@
       a.download = "index.html";
       a.click();
       URL.revokeObjectURL(url);
+      showToast(`Published index.html${extra}`, "success");
     } catch (e) {
       showToast(`Publish failed: ${e instanceof Error ? e.message : e}`, "error");
     }
+  }
+
+  const BULK_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
+  const BULK_PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
+  let compileFormat = $state("md");
+  let compilePandoc = $state(true);
+  let bulkOp = $state<{ label: string; done: number; total: number } | null>(null);
+  let bulkCancelFlag = $state<{ cancelled: boolean } | null>(null);
+
+  /** Preflight pandoc formats before any click can throw at the backend. */
+  async function preflightBulkFormat(fmt: string): Promise<boolean> {
+    if (!BULK_PANDOC_FORMATS.has(fmt)) return true;
+    try {
+      const status = await api.convertStatus();
+      compilePandoc = status.pandoc;
+    } catch {
+      compilePandoc = false;
+    }
+    if (!compilePandoc) {
+      showToast(`.${fmt} needs pandoc — see Settings → About → Export setup`, "warning");
+      return false;
+    }
+    return true;
   }
 
   /** Global Compile (A5.1): manuscript from the open tab strip, any workspace. */
@@ -247,9 +282,10 @@
       showToast("No open tabs to compile", "warning");
       return;
     }
+    if (!(await preflightBulkFormat(compileFormat))) return;
     try {
       const title = tabs.length === 1 ? tabs[0].title : "compiled";
-      const out = await api.compileRun(tabs.map((t) => t.id), "md", title);
+      const out = await api.compileRun(tabs.map((t) => t.id), compileFormat, title);
       const { downloadConvertOutput } = await import("$lib/download");
       downloadConvertOutput(out);
       showToast(`Compiled ${out.filename}`, "success");
@@ -265,20 +301,31 @@
       showToast("No open tabs to export", "warning");
       return;
     }
+    const cancelState = { cancelled: false };
+    bulkCancelFlag = cancelState;
+    bulkOp = { label: "Exporting", done: 0, total: tabs.length };
     try {
       const { batchExport } = await import("$lib/import");
-      const out = await batchExport(tabs.map((t) => t.id), "zip");
+      const out = await batchExport(tabs.map((t) => t.id), "zip", {
+        onProgress: (p) => {
+          bulkOp = { label: "Exporting", done: p.done, total: p.total };
+        },
+        shouldCancel: () => cancelState.cancelled,
+      });
       const { downloadConvertOutput } = await import("$lib/download");
       downloadConvertOutput({ filename: out.filename, mime: "application/zip", base64: out.base64 });
-      const attachRefs = tabs.reduce((n, t) => n + ((t.content || "").match(/\.attachments\//g) || []).length, 0);
-      showToast(
-        attachRefs > 0
-          ? `Exported ${out.filename} — ${attachRefs} attachment${attachRefs === 1 ? "" : "s"} referenced, copy .attachments/ alongside`
-          : `Exported ${out.filename}`,
-        "success"
-      );
+      const attachNote =
+        out.attachmentsBundled > 0 || out.attachmentsSkipped > 0
+          ? ` (${out.attachmentsBundled} attachments bundled${out.attachmentsSkipped > 0 ? `, ${out.attachmentsSkipped} skipped` : ""})`
+          : "";
+      showToast(`Exported ${out.filename}${attachNote}`, "success");
+      close();
     } catch (e) {
-      showToast(`Export failed: ${e instanceof Error ? e.message : e}`, "error");
+      if (cancelState.cancelled) showToast("Export cancelled", "info");
+      else showToast(`Export failed: ${e instanceof Error ? e.message : e}`, "error");
+    } finally {
+      bulkOp = null;
+      bulkCancelFlag = null;
     }
   }
 
@@ -329,6 +376,37 @@
           class="palette-input"
         />
         <span class="palette-hint">Esc</span>
+      </div>
+      <div class="palette-footer">
+        <label class="compile-format" title="Format for Compile Open Tabs">
+          Compile:
+          <select
+            bind:value={compileFormat}
+            aria-label="Compile format"
+            onclick={(e) => e.stopPropagation()}
+          >
+            {#each BULK_FORMATS as fmt}
+              <option
+                value={fmt}
+                disabled={BULK_PANDOC_FORMATS.has(fmt) && !compilePandoc}
+                title={BULK_PANDOC_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
+              >.{fmt}</option>
+            {/each}
+          </select>
+        </label>
+        {#if bulkOp}
+          <div class="bulk-progress" role="status" aria-label="Export progress">
+            <span>{bulkOp.label} {bulkOp.done}/{bulkOp.total}</span>
+            <span class="bulk-bar"><span class="bulk-fill" style="width: {bulkOp.total ? Math.round((bulkOp.done / bulkOp.total) * 100) : 0}%"></span></span>
+            <button
+              class="bulk-cancel"
+              onclick={() => {
+                if (bulkCancelFlag) bulkCancelFlag.cancelled = true;
+              }}
+              aria-label="Cancel export"
+            >Cancel</button>
+          </div>
+        {/if}
       </div>
       <div class="palette-results">
         {#each allResults as item, i}
@@ -429,6 +507,65 @@
   .palette-results {
     overflow-y: auto;
     padding: 8px;
+  }
+
+  .palette-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .compile-format {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .compile-format select {
+    font-size: 12px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+  }
+
+  .bulk-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .bulk-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--surface-overlay);
+    overflow: hidden;
+  }
+
+  .bulk-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent-primary);
+    transition: width 0.2s ease;
+  }
+
+  .bulk-cancel {
+    font-size: 12px;
+    padding: 2px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
   }
 
   .palette-result {

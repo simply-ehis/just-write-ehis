@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (Area 8: export fidelity + pandoc bundle)
+
+### Changed
+- **Shared export preprocess** (convert.rs, used by convert_run + compile_run): `![[embeds]]` inlined (missing/locked → note), `[[links]]` → display text (standalone files, documented), frontmatter YAML block + title default, `.attachments/` staged into the pandoc tempdir with `--resource-path` (built-in HTML keeps `<img>` + vault note)
+- **Compile join**: per-doc `# Title` + content demoted one level (no collisions), `---` separators, 5M-char cap refusing with zip-of-chapters guidance
+- **Pandoc decision: bundle** (signed off). 3.11 measured 41.8 MB download / **233.6 MB exe** — budget ~90–120 MB installer, not 30–50; binary git-ignored with fetch docs, `externalBin` registered, `convert_status.bundled` distinguishes sidecar vs PATH
+- **Menus show all six formats always**, pandoc-gated disabled with inline reason; Novel compile select gated the same; palette gains a compile-format select + preflight (no throw-at-click) + bulk progress/cancel; fountain via one shared `downloadFountain`
+- **batchExport**: 4-way `mapLimit` (same shape as chapter batches), progress, cancel, streamed DEFLATE zip, attachments bundled via binary-safe `attachment_read` (dedupe helper exported + tested)
+- **Publish: Rust wins** — TS twin deleted (regex markdown, raw customJs). Rust now honors customCss/customJs (breakout-neutralized), inlines images as data URIs (2 MB cap, counted), single-file scope documented
+
+### Tests
+- `cargo test convert_`: join/demote, slugify, frontmatter, wikilinks, embeds, attachments, preprocess order, bundled detection (8 passed)
+- `tests/export-batch.mjs` (12): dedupe, bounded concurrency, 20-tab unique zip + bundled attachments, no-pandoc friendly failure, cancel
+
 ## Unreleased (Area 7: Reader structure + controls)
 
 ### Changed

@@ -7,7 +7,7 @@
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
   import DeleteButton from '$lib/components/DeleteButton.svelte';
   import Icon from '$lib/components/Icon.svelte';
-  import { downloadConvertOutput } from '$lib/download';
+  import { downloadConvertOutput, downloadFountain } from '$lib/download';
   import { readImportFile } from '$lib/importFile';
 
   let scripts = $state<Doc[]>([]);
@@ -25,8 +25,10 @@
   // an $effect), so it can't resubscribe anything.
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const ALL_EXPORT_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
+  const PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
   let showExportMenu = $state(false);
-  let exportFormats = $state<string[]>(["md", "txt", "html"]);
+  let pandocAvailable = $state(true);
   let exportMenuLoaded = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
 
@@ -47,27 +49,26 @@
     if (showExportMenu && !exportMenuLoaded) {
       try {
         const status = await api.convertStatus();
-        exportFormats = status.formats;
+        pandocAvailable = status.pandoc;
       } catch {
-        exportFormats = ["md", "txt", "html"];
+        pandocAvailable = false;
       }
       exportMenuLoaded = true;
     }
+  }
+
+  function formatDisabled(fmt: string): string | null {
+    if (PANDOC_FORMATS.has(fmt) && !pandocAvailable) {
+      return "Needs pandoc — see Settings → About → Export setup";
+    }
+    return null;
   }
 
   async function exportAs(format: string) {
     if (!selectedScript) return;
     showExportMenu = false;
     if (format === 'fountain') {
-      const content = rawContent;
-      const title = selectedScript.title || 'untitled';
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title}.fountain`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadFountain(selectedScript.title || 'untitled', rawContent);
       return;
     }
     try {
@@ -263,6 +264,14 @@
         continue;
       }
 
+      // Fountain production notes live in [[double brackets]] — surface
+      // them as notes instead of swallowing them into action lines.
+      if (trimmed.match(/^\[\[[\s\S]*\]\]$/)) {
+        elements.push({ type: 'note', content: trimmed.replace(/^\[\[\s*|\s*\]\]$/g, ''), raw: line });
+        i++;
+        continue;
+      }
+
       elements.push({ type: 'action', content: trimmed, raw: line });
       i++;
     }
@@ -378,8 +387,13 @@
           </button>
           {#if showExportMenu}
             <div class="export-menu" role="menu" aria-label="Export formats">
-              {#each exportFormats as fmt}
-                <button onclick={() => exportAs(fmt)} title="Export as {exportLabel(fmt)}">{exportLabel(fmt)}</button>
+              {#each ALL_EXPORT_FORMATS as fmt}
+                {@const reason = formatDisabled(fmt)}
+                <button
+                  onclick={() => exportAs(fmt)}
+                  disabled={reason !== null}
+                  title={reason ?? `Export as ${exportLabel(fmt)}`}
+                >{exportLabel(fmt)}</button>
               {/each}
               <button onclick={() => exportAs('fountain')} title="Export raw Fountain source">Fountain (.fountain)</button>
             </div>
@@ -448,6 +462,8 @@
               <div class="sp-transition">{el.content}</div>
             {:else if el.type === 'centered'}
               <div class="sp-centered">{el.content}</div>
+            {:else if el.type === 'note'}
+              <div class="sp-note">{el.content}</div>
             {:else if el.type === 'empty'}
               <div class="sp-empty"></div>
             {/if}
@@ -751,6 +767,14 @@
     margin-bottom: var(--space-2);
   }
 
+  .sp-note {
+    font-style: italic;
+    color: var(--text-muted);
+    border-left: 2px solid var(--border-subtle);
+    padding-left: var(--space-2);
+    margin-bottom: var(--space-2);
+  }
+
   .sp-empty {
     height: var(--space-3);
   }
@@ -955,5 +979,10 @@
 
   .export-menu button:hover {
     background: var(--surface-overlay);
+  }
+
+  .export-menu button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 </style>

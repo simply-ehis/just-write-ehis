@@ -13,6 +13,23 @@
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
 
+  // Export setup probe (Settings → About): surfaces pandoc presence +
+  // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
+  let exportStatus = $state<{ pandoc: boolean; bundled: boolean; formats: string[] } | null>(null);
+  let exportProbing = $state(false);
+
+  async function probeExportSetup() {
+    if (exportProbing) return;
+    exportProbing = true;
+    try {
+      exportStatus = await api.convertStatus();
+    } catch (e) {
+      showToast(`Export probe failed: ${e instanceof Error ? e.message : e}`, "error");
+    } finally {
+      exportProbing = false;
+    }
+  }
+
   // Sidecar input validation: shape-checked on blur with inline errors
   // (existence/shape at start still fails closed server-side — see
   // sidecar.rs ManagedSidecar + the python _resolve_model guards).
@@ -942,6 +959,18 @@
           <span class="setting-label">Vault Path</span>
           <span class="value">{$settings.vaultPath}</span>
         </div>
+
+        <h3>Export setup</h3>
+        <div class="setting-row">
+          <span class="setting-label">Pandoc (.docx/.epub/.pdf)</span>
+          <span class="value">{exportStatus == null ? "…" : exportStatus.pandoc ? (exportStatus.bundled ? "bundled ✓" : "found on PATH ✓") : "missing"}</span>
+          <button class="clear-btn" onclick={probeExportSetup} disabled={exportProbing}>
+            {exportProbing ? "Probing…" : "Probe"}
+          </button>
+        </div>
+        {#if exportStatus != null && !exportStatus.pandoc}
+          <p class="setting-desc">Word/eBook/PDF export needs pandoc: install it (`winget install pandoc` / `brew install pandoc`) and press Probe. PDF additionally needs a PDF engine (LaTeX, Typst, or WeasyPrint) — pandoc reports the missing piece verbatim on failure.</p>
+        {/if}
 
         <h3>Performance Budget (§14)</h3>
         <div class="perf-grid">

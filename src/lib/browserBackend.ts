@@ -157,7 +157,66 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-/** Built-in browser conversions (md/txt/html). Pandoc formats need the desktop app. */
+/**
+ * Preview mirror of the Rust export preprocess (convert.rs): embeds
+ * inlined via the local store (locked/missing → note), wikilinks
+ * resolved to display text, frontmatter injected as a YAML block.
+ * Same contract, browser data source. Built-in conversions only
+ * (md/txt/html) — pandoc formats need the desktop app.
+ */
+function previewLookup(title: string): string | null {
+  const hit = browserStore.docs.find((d) => d.title.toLowerCase() === title.trim().toLowerCase());
+  if (!hit || hit.locked) return null;
+  return hit.content;
+}
+
+function previewResolveWikilinks(md: string): string {
+  return md.replace(/!?\[\[([^\]]+)\]\]/g, (m, inner: string) => {
+    if (m.startsWith("!")) {
+      const body = previewLookup(inner.split("|")[0]);
+      return body != null ? `\n${body}\n` : `\n> [embed missing: ${inner.replace(/[[\]]/g, "")}]\n`;
+    }
+    const parts = String(inner).split("|");
+    return parts[parts.length - 1];
+  });
+}
+
+function previewInjectFrontmatter(title: string, md: string, frontmatterJson: string | null): string {
+  const lines: string[] = [];
+  let hasTitle = false;
+  if (frontmatterJson) {
+    try {
+      const obj = JSON.parse(frontmatterJson) as Record<string, unknown>;
+      if (obj && typeof obj === "object") {
+        for (const [k, v] of Object.entries(obj)) {
+          if (typeof v !== "string" || v.includes("\n")) continue;
+          if (k === "title") hasTitle = true;
+          lines.push(`${k}: "${v.replace(/"/g, "'")}"`);
+        }
+      }
+    } catch {
+      /* garbage JSON = no block */
+    }
+  }
+  if (!hasTitle && title) lines.unshift(`title: "${title.replace(/"/g, "'")}"`);
+  if (lines.length === 0) return md;
+  return `---\n${lines.join("\n")}\n---\n\n${md}`;
+}
+
+function previewPrepareExport(title: string, content: string, frontmatterJson: string | null): string {
+  return previewInjectFrontmatter(title, previewResolveWikilinks(content), frontmatterJson);
+}
+
+function demoteHeadings(md: string): string {
+  return md
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^(#{1,5})(\s+)/);
+      return m ? `${"#".repeat(m[1].length + 1)}${m[2]}${line.slice(m[0].length)}` : line;
+    })
+    .join("\n");
+}
+
 function convertMarkdown(title: string, markdown: string, outFmt: string): { filename: string; mime: string; base64: string } {
   const enc = new TextEncoder();
   const slug = slugify(title);
@@ -638,6 +697,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "attachment_save":
       throw new Error("No vault folder in this preview — small images embed inline instead.");
 
+    case "attachment_read":
+      throw new Error("No vault files in this preview — attachments bundle on desktop only.");
+
     case "fs_rename":
     case "fs_delete":
     case "fs_move":
@@ -1001,11 +1063,12 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return { configured: false, endpoint: null } as T;
 
     case "convert_status":
-      return { pandoc: false, formats: ["md", "txt", "html"] } as T;
+      return { pandoc: false, bundled: false, formats: ["md", "txt", "html"] } as T;
 
     case "convert_run": {
       const doc = store.get(String(payload.docId));
-      return convertMarkdown(doc.title, doc.content, String(payload.outFmt)) as T;
+      const prepared = previewPrepareExport(doc.title, doc.content, doc.frontmatter_json);
+      return convertMarkdown(doc.title, prepared, String(payload.outFmt)) as T;
     }
 
     case "compile_run": {
@@ -1013,10 +1076,15 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       if (ids.length === 0) throw new Error("Nothing to compile: no documents selected.");
       const parts = ids.map((id) => {
         const d = store.get(id);
-        return `# ${d.title}\n\n${d.content}`;
+        const body = previewPrepareExport(d.title, d.content, null);
+        return `# ${d.title}\n\n${demoteHeadings(body)}`;
       });
       const title = String((payload.title as string) ?? "manuscript");
-      return convertMarkdown(title, parts.join("\n\n"), String(payload.outFmt)) as T;
+      const manuscript = parts.join("\n\n---\n\n");
+      if (manuscript.length > 5_000_000) {
+        throw new Error("Manuscript is too large to compile — export a zip of chapters instead (Export Open Tabs).");
+      }
+      return convertMarkdown(title, manuscript, String(payload.outFmt)) as T;
     }
 
     case "setup_file_watcher":

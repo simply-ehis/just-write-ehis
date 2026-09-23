@@ -191,6 +191,7 @@ pub fn run() {
             commands::fs_create_dir,
             commands::fs_write_file,
             commands::attachment_save,
+            commands::attachment_read,
             commands::fs_reveal,
             commands::clear_conversations,
             commands::clear_messages,

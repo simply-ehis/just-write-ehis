@@ -939,6 +939,8 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
         .unwrap_or(vec!["write".into(), "novel".into(), "projects".into()]);
     let include_drafts = config.get("includeDrafts").and_then(|v| v.as_bool()).unwrap_or(false);
     let toc_depth = config.get("tocDepth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+    let custom_css = config.get("customCss").and_then(|v| v.as_str()).unwrap_or("");
+    let custom_js = config.get("customJs").and_then(|v| v.as_str()).unwrap_or("");
 
     // Fetch all docs from included workspaces
     let mut all_docs = Vec::new();
@@ -955,6 +957,8 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
     // Generate HTML for each workspace
     let mut html_parts = Vec::new();
     let mut files = Vec::new();
+    let mut images_inlined: u64 = 0;
+    let mut images_skipped: u64 = 0;
 
     for ws in &include_workspaces {
         let ws_docs: Vec<_> = all_docs.iter().filter(|d| d.workspace == *ws).collect();
@@ -967,6 +971,9 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
 
             // Process transclusions
             let processed = process_transclusions(content, &db)?;
+            let (processed, inlined, skipped) = inline_attachments(&processed, &db);
+            images_inlined += inlined;
+            images_skipped += skipped;
 
             // Build TOC
             let toc = build_toc(&processed, toc_depth);
@@ -989,13 +996,16 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
         html_parts.push("</section>".to_string());
     }
 
-    // Generate full HTML
+    // Generate full HTML (single-file scope: one index.html, images
+    // inlined as data URIs — documented in docs/EXPORT.md).
     let body_html = html_parts.join("\n");
-    let full_html = render_publish_html(title, description, theme, &include_workspaces, &body_html);
+    let full_html = render_publish_html(title, description, theme, &include_workspaces, &body_html, custom_css, custom_js);
     files.push("index.html".to_string());
 
     Ok(serde_json::json!({
         "indexHtml": full_html,
+        "imagesInlined": images_inlined,
+        "imagesSkipped": images_skipped,
         "files": files
     }))
 }
@@ -1088,13 +1098,83 @@ fn sanitize_body(html: &str) -> String {
     ammonia::clean(html)
 }
 
+/// Inline `.attachments/` refs as data URIs (single-file publish scope).
+/// Files over 2 MB are skipped and counted, never inlined silently.
+/// Returns (rewritten_markdown, inlined_count, skipped_count).
+fn inline_attachments(content: &str, db: &State<'_, Database>) -> (String, u64, u64) {
+    let vault = match db.vault_path.lock().map(|v| v.clone()) {
+        Ok(v) => v,
+        Err(_) => return (content.to_string(), 0, 0),
+    };
+    let mut out = content.to_string();
+    let mut inlined = 0u64;
+    let mut skipped = 0u64;
+    for r in crate::convert::attachment_refs(content) {
+        let path = vault.join(&r);
+        let mime = match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            _ => {
+                skipped += 1;
+                continue;
+            }
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) if bytes.len() <= 2 * 1024 * 1024 => {
+                use base64::Engine as _;
+                let uri = format!(
+                    "data:{};base64,{}",
+                    mime,
+                    base64::engine::general_purpose::STANDARD.encode(&bytes)
+                );
+                out = out.replace(&r, &uri);
+                inlined += 1;
+            }
+            _ => {
+                skipped += 1;
+            }
+        }
+    }
+    (out, inlined, skipped)
+}
+
+/// Sanitize user-supplied inline CSS: neutralize `</style` breakouts.
+/// Anything else passes through (it runs inside a <style> block).
+fn sanitize_inline_css(css: &str) -> String {
+    css.replace("</style", "<\\/style").replace("</STYLE", "<\\/STYLE")
+}
+
+/// Sanitize user-supplied inline JS: neutralize `</script` breakouts so
+/// customJs can never escape its own script element.
+fn sanitize_inline_js(js: &str) -> String {
+    js.replace("</script", "<\\/script")
+        .replace("</SCRIPT", "<\\/SCRIPT")
+}
+
 fn render_publish_html(
     title: &str,
     description: &str,
     theme: &str,
     nav_workspaces: &[String],
     body: &str,
+    custom_css: &str,
+    custom_js: &str,
 ) -> String {
+    let custom_css = sanitize_inline_css(custom_css);
+    let custom_js = sanitize_inline_js(custom_js);
+    let custom_css_block = if custom_css.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n    /* site custom CSS */\n    {}", custom_css)
+    };
+    let custom_js_block = if custom_js.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n  <script>\n  // site custom JS (breakouts neutralized)\n  {}\n  </script>", custom_js)
+    };
     format!(r#"<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1178,8 +1258,8 @@ fn render_publish_html(
     .toc li {{ margin: var(--space-1) 0; }}
     .toc a {{ text-decoration: none; color: var(--color-text); }}
     .toc a:hover {{ color: var(--color-primary); }}
-    @media (max-width: 600px) {{ body {{ font-size: 16px; padding: var(--space-3); }} header h1 {{ font-size: 1.8rem; }} }}
-  </style>
+    @media (max-width: 600px) {{ body {{ font-size: 16px; padding: var(--space-3); }} header h1 {{ font-size: 1.8rem; }} }}{6}
+  </style>{7}
 </head>
 <body data-theme="{2}">
   <header>
@@ -1202,7 +1282,9 @@ fn render_publish_html(
         html_escape(theme),
         &nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", html_escape(w), html_escape(w))).collect::<Vec<_>>().join(""),
         body,
-        chrono::Utc::now().format("%B %d, %Y")
+        chrono::Utc::now().format("%B %d, %Y"),
+        custom_css_block,
+        custom_js_block,
     )
 }
 
@@ -1597,8 +1679,23 @@ pub async fn llm_chat_completion(
     llm.chat_completion(messages, max_tokens, temperature).await
 }
 
+/// Title → raw markdown lookup for export preprocessing (embeds and
+/// wikilink targets). Locked/missing docs resolve to None so the
+/// preprocessors emit notes instead of leaking or failing.
+fn export_lookup<'a>(db: &'a State<'a, Database>) -> impl Fn(&str) -> Option<String> + 'a {
+    move |title: &str| {
+        let doc = db.get_doc_by_title(title).ok().flatten()?;
+        if doc.locked {
+            return None;
+        }
+        Some(doc.content.clone())
+    }
+}
+
 /// Convert one doc's current content into md/txt/html (built in) or
-/// docx/epub/pdf (pandoc). Returns filename + mime + base64 for download.
+/// docx/epub/pdf (pandoc). Content runs through the shared export
+/// preprocess (embeds, wikilinks, frontmatter, attachments) first.
+/// Returns filename + mime + base64 for download.
 #[tauri::command]
 pub fn convert_run(
     db: State<'_, Database>,
@@ -1607,17 +1704,22 @@ pub fn convert_run(
     out_fmt: String,
 ) -> Result<crate::convert::ConvertOutput, String> {
     let doc = db.get_doc(&doc_id)?;
+    let lookup = export_lookup(&db);
+    let prepared = crate::convert::prepare_export(&doc.title, &doc.content, doc.frontmatter_json.as_deref(), &lookup);
     let resource_dir = app
         .path()
         .resource_dir()
         .map_err(|e| e.to_string())
         .ok();
     let pandoc = crate::convert::find_pandoc(resource_dir);
-    crate::convert::convert_markdown(&doc.title, &doc.content, &out_fmt, pandoc)
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
+    crate::convert::convert_markdown(&doc.title, &prepared, &out_fmt, pandoc, Some(&vault))
 }
 
 /// Compile an explicitly ordered set of docs into one manuscript file
-/// (spec Amendment 5: `compile.run`). Order = the given id sequence.
+/// (spec Amendment 5: `compile.run`). Order = the given id sequence
+/// (caller-owned: board order). Each doc gets an H1 title with its
+/// content demoted a level, so titles can never collide with content.
 #[tauri::command]
 pub fn compile_run(
     db: State<'_, Database>,
@@ -1629,12 +1731,23 @@ pub fn compile_run(
     if doc_ids.is_empty() {
         return Err("Nothing to compile: no documents selected.".into());
     }
-    let mut parts = Vec::with_capacity(doc_ids.len());
+    let lookup = export_lookup(&db);
+    let mut prepared = Vec::with_capacity(doc_ids.len());
     for id in &doc_ids {
         let doc = db.get_doc(id)?;
-        parts.push(format!("# {}\n\n{}", doc.title, doc.content));
+        prepared.push((
+            doc.title.clone(),
+            crate::convert::prepare_export(&doc.title, &doc.content, None, &lookup),
+        ));
     }
-    let manuscript = parts.join("\n\n");
+    let refs: Vec<(&str, &str)> = prepared.iter().map(|(t, c)| (t.as_str(), c.as_str())).collect();
+    let manuscript = crate::convert::join_manuscript(&refs);
+    if manuscript.len() > crate::convert::COMPILE_CHAR_CAP {
+        return Err(format!(
+            "Manuscript is {:.1} MB of source — past the compile cap. Export a zip of chapters instead (Export Open Tabs).",
+            manuscript.len() as f64 / 1_000_000.0
+        ));
+    }
     let name = title.unwrap_or_else(|| "manuscript".into());
     let resource_dir = app
         .path()
@@ -1642,18 +1755,42 @@ pub fn compile_run(
         .map_err(|e| e.to_string())
         .ok();
     let pandoc = crate::convert::find_pandoc(resource_dir);
-    crate::convert::convert_markdown(&name, &manuscript, &out_fmt, pandoc)
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
+    crate::convert::convert_markdown(&name, &manuscript, &out_fmt, pandoc, Some(&vault))
 }
 
 /// Which export formats are available right now (pandoc present or not).
 #[tauri::command]
 pub fn convert_status(app: tauri::AppHandle) -> Result<crate::convert::ConvertStatus, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string()).ok();
-    let pandoc = crate::convert::find_pandoc(resource_dir).is_some();
+    let pandoc = crate::convert::find_pandoc(resource_dir);
+    let available = pandoc.is_some();
     Ok(crate::convert::ConvertStatus {
-        formats: crate::convert::all_formats(pandoc),
-        pandoc,
+        formats: crate::convert::all_formats(available),
+        pandoc: available,
+        bundled: crate::convert::is_bundled(&pandoc),
     })
+}
+
+/// Binary-safe vault attachment read for export bundling (zip/publish).
+/// Vault-relative `.attachments/` refs only; `..` fails closed. 25 MB cap
+/// mirrors attachment_save. fs_read_file stays text-only by design.
+#[tauri::command]
+pub fn attachment_read(db: State<'_, Database>, path: String) -> Result<String, String> {
+    if path.contains("..") {
+        return Err("Refusing path escaping the vault.".into());
+    }
+    let rel = path.trim_start_matches(['/', '\\']);
+    if !rel.starts_with(".attachments/") {
+        return Err("Only .attachments/ refs can be bundled.".into());
+    }
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
+    let bytes = std::fs::read(vault.join(rel)).map_err(|e| format!("Attachment unreadable: {}", e))?;
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err("Attachment over 25 MB — link the file instead.".into());
+    }
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
 /// Reports whether the Tauri updater is configured (endpoints + a real

@@ -229,6 +229,7 @@ export interface ConvertOutput {
 
 export interface ConvertStatus {
   pandoc: boolean;
+  bundled: boolean;
   formats: string[];
 }
 
@@ -448,6 +449,10 @@ export const api = {
    */
   attachmentSave: (filename: string, base64Data: string) =>
     safeInvoke<string>("attachment_save", { filename, base64Data }),
+
+  /** Binary-safe vault attachment read for export bundling. */
+  attachmentRead: (path: string) =>
+    safeInvoke<string>("attachment_read", { path }),
 
   /** Reveal in the OS file manager (desktop shell only — throws in preview). */
   fsReveal: (path: string) =>
@@ -715,7 +720,7 @@ export const api = {
 
   // ── Publish: Static site generation ───────────────────────────────
   publishStaticSite: (config: Record<string, unknown>) =>
-    safeInvoke<{ indexHtml: string; files: string[] }>("publish_static_site", { config }),
+    safeInvoke<{ indexHtml: string; files: string[]; imagesInlined?: number; imagesSkipped?: number }>("publish_static_site", { config }),
 
   // ── Import/Export ────────────────────────────────────────────────
 // Telemetry/Analytics

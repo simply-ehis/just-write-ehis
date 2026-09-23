@@ -364,6 +364,20 @@ async function auditBatchWiring() {
   check("section splitter + TTS strip + chunker", rsec.includes("splitSections") && rsec.includes("stripForTts") && rsec.includes("chunkText"));
   const raloud = await readFile(join(root, "src/lib/components/ReadAloudButton.svelte"), "utf8");
   check("read-aloud section mode", raloud.includes("getSections") && raloud.includes("onSection") && raloud.includes("chunkText"));
+  const convert = await readFile(join(root, "src-tauri/src/convert.rs"), "utf8");
+  check("export preprocess shared", convert.includes("fn prepare_export") && convert.includes("fn resolve_wikilinks") && convert.includes("fn inline_embeds") && convert.includes("fn inject_frontmatter"));
+  check("compile join demotes + caps", convert.includes("fn demote_headings") && convert.includes("fn join_manuscript") && convert.includes("COMPILE_CHAR_CAP"));
+  check("attachment staging + bundled flag", convert.includes("fn stage_attachments") && convert.includes("fn attachment_refs") && convert.includes("fn is_bundled"));
+  const dl = await readFile(join(root, "src/lib/download.ts"), "utf8");
+  check("fountain helper shared", dl.includes("downloadFountain"));
+  const ed = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
+  check("export menus list all six gated", ed.includes("ALL_EXPORT_FORMATS") && ed.includes("Needs pandoc"));
+  const imp = await readFile(join(root, "src/lib/import.ts"), "utf8");
+  check("batch concurrency + cancel + dedupe", imp.includes("mapLimit") && imp.includes("shouldCancel") && imp.includes("dedupeFilename") && imp.includes("streamFiles"));
+  const pub_ = await readFile(join(root, "src/lib/stores/publish.ts"), "utf8");
+  check("TS publish twin deleted", !pub_.includes("function renderHtml") && !pub_.includes("processMarkdown"));
+  const pal = await readFile(join(root, "src/lib/components/CommandPalette.svelte"), "utf8");
+  check("palette compile select + preflight + progress", pal.includes("compileFormat") && pal.includes("preflightBulkFormat") && pal.includes("bulkOp"));
   const sidecar = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
   check("one managed sidecar core", sidecar.includes("pub struct ManagedSidecar") && sidecar.includes("impl Drop for ManagedSidecar") && !sidecar.includes("reqwest::Client::new()"));
   check("sidecar timeouts + reap/orphan", sidecar.includes("fn http_client") && sidecar.includes("reclaim_stale_port") && sidecar.includes("child.wait()"));
@@ -402,7 +416,8 @@ async function secretsWiring() {
   check("Rust keychain errors are static", commands.includes('"unknown secret key"') && !commands.includes("unknown secret key: {}"));
   check("Rust publish escapes + sanitizes", commands.includes("sanitize_body(&body_raw)") && commands.includes("html_escape(ws)") && commands.includes("fn sanitize_body"));
   const publish = await readFile(join(root, "src/lib/stores/publish.ts"), "utf8");
-  check("TS publish guards URIs + locked docs", publish.includes("javascript:") && publish.includes("!d.locked"));
+  check("TS publish twin deleted (Rust owns publish)", !publish.includes("function renderHtml") && !publish.includes("processMarkdown") && publish.includes("single implementation"));
+  check("Rust publish sanitizes + inlines", commands.includes("sanitize_inline_js") && commands.includes("inline_attachments") && commands.includes("imagesInlined"));
 }
 
 async function canvasWiring() {

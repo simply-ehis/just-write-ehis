@@ -23,7 +23,7 @@
   import MicButton from "./MicButton.svelte";
   import ReadAloudButton from "./ReadAloudButton.svelte";
   import Icon from "./Icon.svelte";
-  import { downloadConvertOutput } from "$lib/download";
+  import { downloadConvertOutput, downloadFountain } from "$lib/download";
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { filterWordRatio } from "$lib/browserBackend";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
@@ -585,7 +585,9 @@
     ghostVisible = false;
   }
 
-  let exportFormats = $state<string[]>(["md", "txt", "html"]);
+  const ALL_EXPORT_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
+  const PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
+  let pandocAvailable = $state(true);
   let exportMenuLoaded = $state(false);
 
   /** Export what's on screen: flush live editor content, then convert. */
@@ -594,14 +596,7 @@
     showExportMenu = false;
     if (format === 'fountain') {
       const content = editorView?.state.doc.toString() ?? $currentDoc.content ?? '';
-      const title = $currentDoc.title || 'untitled';
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title}.fountain`;
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadFountain($currentDoc.title || 'untitled', content);
       markUsed('export');
       return;
     }
@@ -622,12 +617,19 @@
     if (showExportMenu && !exportMenuLoaded) {
       try {
         const status = await api.convertStatus();
-        exportFormats = status.formats;
+        pandocAvailable = status.pandoc;
       } catch {
-        exportFormats = ["md", "txt", "html"];
+        pandocAvailable = false;
       }
       exportMenuLoaded = true;
     }
+  }
+
+  function formatDisabled(fmt: string): string | null {
+    if (PANDOC_FORMATS.has(fmt) && !pandocAvailable) {
+      return "Needs pandoc — see Settings → About → Export setup";
+    }
+    return null;
   }
 
   function closeExportOnOutside(e: MouseEvent) {
@@ -839,8 +841,13 @@
           </button>
           {#if showExportMenu}
             <div class="export-menu" role="menu" aria-label="Export formats">
-              {#each exportFormats as fmt}
-                <button onclick={() => exportAs(fmt)} title="Export as {exportLabel(fmt)}">{exportLabel(fmt)}</button>
+              {#each ALL_EXPORT_FORMATS as fmt}
+                {@const reason = formatDisabled(fmt)}
+                <button
+                  onclick={() => exportAs(fmt)}
+                  disabled={reason !== null}
+                  title={reason ?? `Export as ${exportLabel(fmt)}`}
+                >{exportLabel(fmt)}</button>
               {/each}
               {#if $currentDoc?.kind === 'fountain'}
                 <button onclick={() => exportAs('fountain')} title="Export raw Fountain source">Fountain (.fountain)</button>
@@ -1002,6 +1009,11 @@
 
   .export-menu button:hover {
     background: var(--surface-overlay);
+  }
+
+  .export-menu button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
   }
 
   .craft-toggle {

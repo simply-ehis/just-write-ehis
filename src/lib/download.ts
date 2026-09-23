@@ -20,3 +20,15 @@ export function downloadConvertOutput(out: ConvertOutput): void {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** Raw Fountain source download (no backend: fountain IS the source). */
+export function downloadFountain(title: string, content: string): void {
+  const safe = (title || "untitled").trim() || "untitled";
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${safe}.fountain`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

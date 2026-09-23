@@ -12,6 +12,7 @@
 
   import ForkBadge from './ForkBadge.svelte';
   import { readImportFile, contentHash } from '$lib/importFile';
+  import { statusColor } from '$lib/status';
   let splitMode = $state<'chapters' | 'scenes'>('chapters');
   let castEntities = $state<EntitySummary[]>([]);
   let castLoading = $state(false);
@@ -98,8 +99,10 @@
   let selectedBeat = $state<BeatNode | null>(null);
   let viewMode = $state<'board' | 'bible' | 'cast'>('board');
   let compiledOutput = $state('');
+  const ALL_COMPILE_FORMATS = ['md', 'txt', 'html', 'docx', 'epub', 'pdf'];
+  const PANDOC_COMPILE_FORMATS = new Set(['docx', 'epub', 'pdf']);
   let compileFormat = $state('md');
-  let compileFormats = $state<string[]>(['md', 'txt', 'html']);
+  let compilePandoc = $state(true);
   let compiling = $state(false);
   let loading = $state(false);
   let boardCollapsed = $state(false);
@@ -410,9 +413,10 @@
       compiledOutput = await api.novelCompile(projectId);
       try {
         const status = await api.convertStatus();
-        compileFormats = status.formats;
+        compilePandoc = status.pandoc;
+        if (!compilePandoc && PANDOC_COMPILE_FORMATS.has(compileFormat)) compileFormat = 'md';
       } catch {
-        compileFormats = ['md', 'txt', 'html'];
+        compilePandoc = false;
       }
     } catch (e) {
       console.error('Compile failed:', e);
@@ -605,15 +609,8 @@
     return board.scenes.filter(s => s.act === act && s.sequence === seq);
   }
 
-  function statusColor(status: string): string {
-    switch (status) {
-      case 'draft': return 'var(--accent-primary)';
-      case 'revised': return 'var(--accent-semantic-green)';
-      case 'final': return 'var(--accent-semantic-purple)';
-      case 'cut': return 'var(--accent-semantic-red)';
-      default: return 'var(--text-muted)';
-    }
-  }
+  // Note: `done` reads purple via the shared map now, matching
+  // Projects/Properties (this file's old copy left it muted).
 </script>
 
 <div class="novel-workspace">
@@ -933,8 +930,12 @@
           <h2>Compiled Manuscript</h2>
           <div class="compiled-actions">
             <select bind:value={compileFormat} title="Manuscript format" aria-label="Manuscript format">
-              {#each compileFormats as fmt}
-                <option value={fmt}>.{fmt}</option>
+              {#each ALL_COMPILE_FORMATS as fmt}
+                <option
+                  value={fmt}
+                  disabled={PANDOC_COMPILE_FORMATS.has(fmt) && !compilePandoc}
+                  title={PANDOC_COMPILE_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
+                >.{fmt}</option>
               {/each}
             </select>
             <button class="download-btn" onclick={downloadManuscript} disabled={compiling} title="Download the compiled manuscript in the selected format">

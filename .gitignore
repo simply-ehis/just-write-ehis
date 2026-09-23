@@ -8,6 +8,10 @@ src-tauri/target/
 src-tauri/sidecars/models/*
 !src-tauri/sidecars/models/README.md
 
+# Bundled pandoc sidecar (233 MB for 3.11 Windows — fetched, not committed).
+# Release builds need it: see docs/EXPORT.md "Bundling pandoc as a sidecar".
+src-tauri/binaries/*
+
 # Python caches
 __pycache__/
 *.pyc
@@ -22,3 +26,8 @@ Thumbs.db
 # Local logs
 *.log
 just-write-ehis.key
+
+# Patchi local config
+.patchi/
+.patchi/.env
+.patchi/keys.json
