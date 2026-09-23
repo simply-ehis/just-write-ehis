@@ -10,7 +10,10 @@
     "tauri": "tauri",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test:e2e": "node tests/e2e-browser.mjs",
-    "test:smoke": "node tests/smoke-dom.mjs --width=1280 && node tests/smoke-dom.mjs --width=390 && node tests/smoke-dom.mjs --width=390 --dirty"
+    "test:smoke": "node tests/smoke-dom.mjs --width=1280 && node tests/smoke-dom.mjs --width=390 && node tests/smoke-dom.mjs --width=390 --dirty",
+    "test:write": "node tests/write-probe.mjs",
+    "test:ghost": "node tests/ghost-widget.mjs",
+    "test:autocorrect": "node tests/autocorrect-unit.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

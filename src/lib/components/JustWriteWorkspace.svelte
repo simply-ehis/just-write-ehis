@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
   import { EditorView, keymap } from "@codemirror/view";
-  import { EditorState } from "@codemirror/state";
+  import { Compartment, EditorState } from "@codemirror/state";
+  import { ghostField, ghostInlinePlugin, setGhostEffect } from "$lib/ghostWidget";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
@@ -50,9 +51,25 @@ import VersionHistory from "./VersionHistory.svelte";
 
   // Ghost autocomplete (same board behavior as the main editor; longer
   // pause per spec — Just Write must never interrupt active typing).
+  // Rendered INLINE at the cursor (Copilot-style greyed text), not as a
+  // detached popup: a StateField holds the text, a ViewPlugin draws the
+  // widget at the live selection head so it tracks the cursor.
   let ghostSuggestion = $state("");
   let ghostVisible = $state(false);
   let ghostDebounce: ReturnType<typeof setTimeout> | null = null;
+
+
+
+  // Appearance/behavior compartments: theme, focus-dimming, typewriter
+  // margins, and autocorrect reconfigure IN PLACE via reconfigureAppearance().
+  // Destroying the EditorView (createEditor) resets CodeMirror's history()
+  // — so settings changes must never take the destroy path, or every
+  // font-size tweak silently wipes the session's undo/redo stack.
+  // Full destroy/recreate is reserved for DOCUMENT changes (new doc.id).
+  let themeCompartment = new Compartment();
+  let focusCompartment = new Compartment();
+  let typewriterCompartment = new Compartment();
+  let autocorrectCompartment = new Compartment();
 
   // Story Bible vocabulary for autocorrect's custom dictionary (A8.8).
   let bibleWords = $state<Set<string>>(new Set());
@@ -90,6 +107,8 @@ import VersionHistory from "./VersionHistory.svelte";
     if (suggestion) {
       ghostSuggestion = suggestion;
       ghostVisible = true;
+      // Publish to the inline widget (no-op if the doc closed mid-flight).
+      if (editorView) editorView.dispatch({ effects: setGhostEffect.of(suggestion) });
     }
   }
 
@@ -98,6 +117,7 @@ import VersionHistory from "./VersionHistory.svelte";
     const pos = editorView.state.selection.main.head;
     editorView.dispatch({
       changes: { from: pos, insert: ghostSuggestion },
+      effects: setGhostEffect.of(null),
     });
     ghostSuggestion = "";
     ghostVisible = false;
@@ -108,6 +128,7 @@ import VersionHistory from "./VersionHistory.svelte";
   function dismissGhost() {
     ghostSuggestion = "";
     ghostVisible = false;
+    if (editorView) editorView.dispatch({ effects: setGhostEffect.of(null) });
   }
 
   // Slash commands (A11.7)
@@ -241,19 +262,59 @@ import VersionHistory from "./VersionHistory.svelte";
   });
   }
 
+  function currentThemeExt() {
+    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
+  }
+
+  function currentAutocorrectExt() {
+    return $settings.autocorrectEnabled
+      ? createAutocorrectPlugin({
+          enabled: () => $settings.autocorrectEnabled,
+          useEnglishTable: () => $settings.dictionaryLanguage !== "off",
+          getCustomWords: () => bibleWords,
+        })
+      : [];
+  }
+
+  function currentFocusExt() {
+    return focusDimming ? focusDimmingPlugin(() => focusDimming) : [];
+  }
+
+  function currentTypewriterExt() {
+    return typewriterEnabled
+      ? EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))
+      : [];
+  }
+
+  /**
+   * Apply theme/font/autocorrect/focus/typewriter changes WITHOUT
+   * destroying the view — history, cursor, and scroll position survive.
+   */
+  function reconfigureAppearance() {
+    const effects = [
+      themeCompartment.reconfigure(currentThemeExt()),
+      focusCompartment.reconfigure(currentFocusExt()),
+      typewriterCompartment.reconfigure(currentTypewriterExt()),
+      autocorrectCompartment.reconfigure(currentAutocorrectExt()),
+    ];
+    if (editorView) editorView.dispatch({ effects });
+    if (splitView) splitView.dispatch({ effects });
+  }
+
   function createEditor(doc: any) {
     if (editorView) {
       editorView.destroy();
     }
 
     const content = doc?.content ?? "";
-    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
     const extensions = [
       basicSetup,
       markdown(),
-      darkTheme,
+      themeCompartment.of(currentThemeExt()),
       search({ top: true }),
       highlightSelectionMatches(),
+      ghostField,
+      ghostInlinePlugin(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           handleContentChange(update.state.doc.toString());
@@ -283,19 +344,12 @@ import VersionHistory from "./VersionHistory.svelte";
       }),
     ];
 
-    if (focusDimming) {
-      extensions.push(focusDimmingPlugin(() => focusDimming));
-    }
-
-    if (typewriterEnabled) {
-      extensions.push(
-        EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))
-      );
-    }
+    extensions.push(focusCompartment.of(currentFocusExt()));
+    extensions.push(typewriterCompartment.of(currentTypewriterExt()));
 
     extensions.push(
       keymap.of([
-        // Paid for in package.json but never wired: find/replace (Ctrl+F).
+        // Find/replace (Ctrl+F) via @codemirror/search; panel themed below.
         ...searchKeymap,
         {
           key: "Tab",
@@ -346,15 +400,7 @@ import VersionHistory from "./VersionHistory.svelte";
       ])
     );
 
-    if ($settings.autocorrectEnabled) {
-      extensions.push(
-        createAutocorrectPlugin({
-          enabled: () => $settings.autocorrectEnabled,
-          useEnglishTable: () => $settings.dictionaryLanguage !== "off",
-          getCustomWords: () => bibleWords,
-        })
-      );
-    }
+    extensions.push(autocorrectCompartment.of(currentAutocorrectExt()));
 
     const state = EditorState.create({
       doc: content,
@@ -396,9 +442,14 @@ import VersionHistory from "./VersionHistory.svelte";
       requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
     }
     // Ghost waits for a real pause here (3s) — flow comes first.
+    // The doc-id guard stops a stale timer from publishing one doc's
+    // suggestion into another doc opened within the pause window.
     if ($settings.ghostEnabled && content.length > 20) {
       if (ghostDebounce) clearTimeout(ghostDebounce);
-      ghostDebounce = setTimeout(() => requestGhostSuggestion(content), 3000);
+      const docId = $currentDoc?.id;
+      ghostDebounce = setTimeout(() => {
+        if ($currentDoc?.id === docId) requestGhostSuggestion(content);
+      }, 3000);
     } else if (ghostVisible) {
       dismissGhost();
     }
@@ -412,8 +463,10 @@ import VersionHistory from "./VersionHistory.svelte";
         focus: focusDimming,
       });
     }
-    if (editorView) {
-      createEditor($currentDoc);
+    // Reconfigure in place: keeps undo history, cursor, and scroll.
+    reconfigureAppearance();
+    if (typewriterEnabled && editorView) {
+      centerCursorIn(editorView, editorContainer);
     }
   }
 
@@ -425,9 +478,8 @@ import VersionHistory from "./VersionHistory.svelte";
         focus: focusDimming,
       });
     }
-    if (editorView) {
-      createEditor($currentDoc);
-    }
+    // Reconfigure in place: keeps undo history, cursor, and scroll.
+    reconfigureAppearance();
   }
 
   function openSplit(id: string) {
@@ -461,14 +513,13 @@ import VersionHistory from "./VersionHistory.svelte";
     if (splitView) {
       splitView.destroy();
     }
-    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme !== "light");
     const docId = doc.id;
     const state = EditorState.create({
       doc: doc.content ?? "",
       extensions: [
         basicSetup,
         markdown(),
-        darkTheme,
+        themeCompartment.of(currentThemeExt()),
         search({ top: true }),
         highlightSelectionMatches(),
         EditorView.updateListener.of((update) => {
@@ -477,10 +528,8 @@ import VersionHistory from "./VersionHistory.svelte";
           }
           return false;
         }),
-        ...(focusDimming ? [focusDimmingPlugin(() => focusDimming)] : []),
-        ...(typewriterEnabled
-          ? [EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))]
-          : []),
+        focusCompartment.of(currentFocusExt()),
+        typewriterCompartment.of(currentTypewriterExt()),
         keymap.of([
           // Find/replace, same as every other edit surface (Ctrl+F).
           ...searchKeymap,
@@ -510,15 +559,7 @@ import VersionHistory from "./VersionHistory.svelte";
             },
           },
         ]),
-        ...($settings.autocorrectEnabled
-          ? [
-              createAutocorrectPlugin({
-                enabled: () => $settings.autocorrectEnabled,
-                useEnglishTable: () => $settings.dictionaryLanguage !== "off",
-                getCustomWords: () => bibleWords,
-              }),
-            ]
-          : []),
+        autocorrectCompartment.of(currentAutocorrectExt()),
       ],
     });
 
@@ -579,6 +620,15 @@ import VersionHistory from "./VersionHistory.svelte";
     elapsed = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
+  // Id of the doc the live EditorView was built for. The effect below
+  // re-fires on EVERY $currentDoc assignment — including the autosave
+  // metadata refresh ({...doc, word_count}) that handleContentChange does
+  // ~500ms after each pause in typing. Rebuilding there destroys the view
+  // mid-session (losing undo history AND visibly snapping back to stale
+  // store content, discarding what was just typed). Only a NEW doc id —
+  // or first mount — may take the destroy/recreate path.
+  let openDocId: string | null = null;
+
   $effect(() => {
     // Triggers: open doc or container mount ONLY. createEditor reads AND
     // writes editorView (destroy-guard + assign) — running it tracked would
@@ -587,29 +637,40 @@ import VersionHistory from "./VersionHistory.svelte";
     const doc = $currentDoc;
     if (doc && editorContainer) {
       untrack(() => {
-        const prefs = loadFocusPrefs(doc.id, {
-          typewriter: $settings.typewriterDefault,
-          focus: $settings.focusDimmingDefault,
-        });
-        typewriterEnabled = prefs.typewriter;
-        focusDimming = prefs.focus;
-        createEditor(doc);
+        if (openDocId !== doc.id) {
+          openDocId = doc.id;
+          const prefs = loadFocusPrefs(doc.id, {
+            typewriter: $settings.typewriterDefault,
+            focus: $settings.focusDimmingDefault,
+          });
+          typewriterEnabled = prefs.typewriter;
+          focusDimming = prefs.focus;
+          createEditor(doc);
+          // A pending suggestion belongs to the previous doc — never let
+          // it render (or Tab-accept) into the newly opened one.
+          if (ghostDebounce) clearTimeout(ghostDebounce);
+          dismissGhost();
+          refreshBibleWords(doc);
+          sessionStartTime = Date.now();
+          sessionWords = doc.word_count;
+        }
       });
-      refreshBibleWords(doc);
-      sessionStartTime = Date.now();
-      sessionWords = doc.word_count;
     } else {
+      untrack(() => {
+        openDocId = null;
+      });
       refreshBibleWords(null);
     }
   });
 
-  // Rebuild the editor live on theme/type changes (without resetting the session).
-  // Same untrack rule: the rebuild must not resubscribe to what it rewrites.
+  // Apply theme/type changes live WITHOUT rebuilding: reconfigure keeps
+  // document history, cursor, and scroll position (a full rebuild would
+  // silently wipe the session's undo/redo stack on every font-size tweak).
+  // Same untrack rule: the reconfigure must not resubscribe to what it rewrites.
   $effect(() => {
     void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
-      if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
-      if (splitView && splitContainer && splitDoc) createSplitEditor(splitDoc);
+      reconfigureAppearance();
     });
   });
 
@@ -799,19 +860,7 @@ import VersionHistory from "./VersionHistory.svelte";
   <div class="split-wrap" class:split-on={!!splitDocId}>
     <div class="split-pane">
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
-      <div class="editor-container" bind:this={editorContainer} onkeydown={handleSlashKeydown} ondrop={handleFileDrop} onpaste={handlePaste} ondragover={(e) => e.preventDefault()} role="application">
-        {#if ghostVisible && ghostSuggestion}
-          <div class="ghost-overlay">
-            <div class="ghost-suggestion">
-              <span class="ghost-text">{ghostSuggestion}</span>
-              <div class="ghost-actions">
-                <button class="ghost-accept" onclick={acceptGhost}>Tab to accept</button>
-                <button class="ghost-dismiss" onclick={dismissGhost}>Esc to dismiss</button>
-              </div>
-            </div>
-          </div>
-        {/if}
-      </div>
+      <div class="editor-container" bind:this={editorContainer} onkeydown={handleSlashKeydown} ondrop={handleFileDrop} onpaste={handlePaste} ondragover={(e) => e.preventDefault()} role="application"></div>
     </div>
     {#if splitDocId}
       <div class="split-pane split-second">
@@ -1018,59 +1067,10 @@ import VersionHistory from "./VersionHistory.svelte";
     }
   }
 
-  .ghost-overlay {
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
-    pointer-events: auto;
-  }
-
-  .ghost-suggestion {
-    background: var(--surface-raised);
-    border: 1px solid var(--accent-primary);
-    border-radius: var(--radius-lg);
-    padding: 12px 16px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    max-width: 500px;
-  }
-
-  .ghost-text {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    color: var(--text-primary);
-    line-height: 1.5;
-    display: block;
-    margin-bottom: 8px;
+  /* Inline ghost autocomplete (rendered by CodeMirror at the cursor). */
+  :global(.cm-ghost-inline) {
+    opacity: 0.55;
     font-style: italic;
-    opacity: 0.9;
-  }
-
-  .ghost-actions {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-  }
-
-  .ghost-accept {
-    padding: 4px 10px;
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-    border: none;
-    border-radius: var(--radius-sm);
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .ghost-dismiss {
-    padding: 4px 10px;
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-size: 11px;
-    cursor: pointer;
   }
 
   .slash-menu {

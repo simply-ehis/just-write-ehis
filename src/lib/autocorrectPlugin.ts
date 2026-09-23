@@ -89,6 +89,43 @@ export function createAutocorrectPlugin(hooks: AutocorrectHooks) {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet = Decoration.none;
+      private pendingFix = false;
+
+      /**
+       * Apply idempotent replacements one microtask AFTER the current
+       * update cycle. view.dispatch() is illegal synchronously inside
+       * ViewPlugin.update (CodeMirror throws "Calls to EditorView.update
+       * are not allowed while an update is in progress" and the fix is
+       * silently dropped) — deferring keeps Layer 1/2 corrections working.
+       * Each fix is re-validated against the live doc so a deferred fix
+       * can never clobber text the user typed in between.
+       */
+      private scheduleFixes(
+        view: EditorView,
+        fixes: { from: number; to: number; insert: string; expect: string }[]
+      ) {
+        if (this.pendingFix) return;
+        this.pendingFix = true;
+        queueMicrotask(() => {
+          this.pendingFix = false;
+          const valid: { from: number; to: number; insert: string }[] = [];
+          for (const f of fixes) {
+            try {
+              if (f.to <= view.state.doc.length && view.state.sliceDoc(f.from, f.to) === f.expect) {
+                valid.push({ from: f.from, to: f.to, insert: f.insert });
+              }
+            } catch {
+              /* doc reshaped mid-flight: skip this fix */
+            }
+          }
+          if (valid.length === 0) return;
+          try {
+            view.dispatch({ changes: valid, sequential: true });
+          } catch {
+            /* view destroyed mid-flight: drop the fix */
+          }
+        });
+      }
 
       update(update: ViewUpdate) {
         if (!update.docChanged) return;
@@ -100,7 +137,7 @@ export function createAutocorrectPlugin(hooks: AutocorrectHooks) {
         const state = view.state;
         const useEnglish = hooks.useEnglishTable();
         const custom = hooks.getCustomWords();
-        const fixes: { from: number; to: number; insert: string }[] = [];
+        const fixes: { from: number; to: number; insert: string; expect: string }[] = [];
         const suggests: { from: number; to: number }[] = [];
 
         update.changes.iterChangedRanges((_fromA, toA, _fromB, _toB) => {
@@ -120,7 +157,7 @@ export function createAutocorrectPlugin(hooks: AutocorrectHooks) {
           // pass finds nothing to change, so dispatch terminates).
           const normalized = normalizeCharacters(before);
           if (normalized !== before) {
-            fixes.push({ from: lineFrom, to: lineFrom + before.length, insert: normalized });
+            fixes.push({ from: lineFrom, to: lineFrom + before.length, insert: normalized, expect: before });
             return;
           }
 
@@ -136,7 +173,7 @@ export function createAutocorrectPlugin(hooks: AutocorrectHooks) {
           if (useEnglish && isKnownTypo(lower)) {
             const fixed = getAutocorrectSuggestions(lower, custom, true);
             if (fixed && fixed !== word) {
-              fixes.push({ from: start, to: start + word.length, insert: fixed });
+              fixes.push({ from: start, to: start + word.length, insert: fixed, expect: word });
               return;
             }
           }
@@ -149,7 +186,7 @@ export function createAutocorrectPlugin(hooks: AutocorrectHooks) {
         });
 
         if (fixes.length > 0) {
-          view.dispatch({ changes: fixes, sequential: true });
+          this.scheduleFixes(view, fixes);
           this.decorations = Decoration.none;
           return;
         }

@@ -336,7 +336,10 @@ impl Database {
             let disk_path = std::path::PathBuf::from(&doc.path);
             let full_path = if disk_path.is_absolute() { disk_path } else { vault.join(&doc.path) };
             drop(vault);
-            let _ = write_to_disk(&full_path, &doc.content);
+            // Files are the source of truth (ARCHITECTURE.md): a failed
+            // disk write must surface, never pass as a successful save.
+            // (Derived indexes stay best-effort below.)
+            write_to_disk(&full_path, &doc.content)?;
             let _ = self.extract_backlinks(&req.id, &doc.content);
         }
 
@@ -2471,6 +2474,10 @@ impl Database {
                 }
             }
         });
+
+        // notify watchers stop on drop: intentionally leak for app lifetime
+        // (previously the watcher died here and no file-changed ever fired).
+        std::mem::forget(watcher);
 
         Ok(())
     }

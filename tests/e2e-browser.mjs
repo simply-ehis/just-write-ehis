@@ -301,7 +301,9 @@ async function writePathWiring() {
   const ghost = await readFile(join(root, "src/lib/ghost.ts"), "utf8");
   check("shared ghost request helper", ghost.includes("requestGhostContinuation") && ghost.includes("lastSentenceOf"));
   const jw = await readFile(join(root, "src/lib/components/JustWriteWorkspace.svelte"), "utf8");
-  check("JustWrite has ghost autocomplete", jw.includes("requestGhostSuggestion") && jw.includes("ghost-overlay"));
+  check("JustWrite has ghost autocomplete", jw.includes("requestGhostSuggestion") && jw.includes("ghostInlinePlugin"));
+  const gw = await readFile(join(root, "src/lib/ghostWidget.ts"), "utf8");
+  check("ghost renders inline at cursor", gw.includes("cm-ghost-inline") && gw.includes("setGhostEffect") && gw.includes("ghostField"));
   const rs = await readFile(join(root, "src-tauri/src/doc_store.rs"), "utf8");
   check("saves re-chunk retrieval", rs.includes("refresh_rag_chunks(&req.id)") && rs.includes("refresh_rag_chunks(doc_id)"));
   check("deletes purge vectors", rs.includes("DELETE FROM rag_vec WHERE chunk_id NOT IN"));
