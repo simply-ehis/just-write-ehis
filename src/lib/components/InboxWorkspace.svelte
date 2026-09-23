@@ -1,13 +1,10 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount } from "svelte";
   import { api, type Doc } from "$lib/api";
-  import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
-  import { settings } from "$lib/stores/settings";
-  import { showToast } from "$lib/stores/notifications";
+  import { currentDoc, openTabs } from "$lib/stores/app";
   import { capturePrefill, captureFocus } from "$lib/stores/capture";
-  import { voiceSupported, startDictation, type VoiceHandle } from "$lib/voice";
   import Icon from "$lib/components/Icon.svelte";
-  import MicButton from "$lib/components/MicButton.svelte";
+  import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
 
@@ -22,11 +19,6 @@
   let captureInput = $state<HTMLInputElement | null>(null);
   // Last consumed focus request (monotonic counter from the capture store).
   let lastFocusSeen = $state(0);
-  // Web Speech dictation (PWA/mobile fallback when the STT sidecar is off).
-  let webVoiceAvailable = $state(false);
-  let voiceActive = $state(false);
-  let voiceHandle: VoiceHandle | null = null;
-  let voiceBase = "";
 
   const triageTargets = ["logs", "write", "novel", "script", "projects", "reader"];
 
@@ -51,13 +43,6 @@
       quickCapture = "";
     } catch (e) {
       console.error("Quick capture failed:", e);
-    }
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleQuickCapture();
     }
   }
 
@@ -148,41 +133,8 @@
     return `${days}d ago`;
   }
 
-  function toggleVoice() {
-    if (voiceActive) {
-      voiceHandle?.stop();
-      voiceHandle = null;
-      voiceActive = false;
-      return;
-    }
-    try {
-      voiceBase = quickCapture ? quickCapture + " " : "";
-      quickCapture = voiceBase;
-      voiceHandle = startDictation(
-        (text, isFinal) => {
-          if (isFinal) {
-            voiceBase = voiceBase + text + " ";
-            quickCapture = voiceBase;
-          } else {
-            quickCapture = voiceBase + text;
-          }
-        },
-        (reason) => showToast(reason, "warning"),
-      );
-      voiceActive = true;
-    } catch {
-      showToast("Voice input isn't supported in this browser.", "warning");
-    }
-  }
-
   onMount(() => {
-    webVoiceAvailable = voiceSupported();
     loadInbox();
-  });
-
-  onDestroy(() => {
-    voiceHandle?.stop();
-    voiceHandle = null;
   });
 
   // Launch handoff: prefill queued by share target / shortcuts /
@@ -227,7 +179,7 @@
     </button>
   </div>
 
-  {#if selectedIds.size > 0 && !viewing}
+  {#if selectedIds.size > 0}
     <div class="bulk-bar">
       <span class="bulk-count">{selectedIds.size} selected</span>
       <select bind:value={bulkTarget} title="Move target workspace" aria-label="Move target workspace">
@@ -249,33 +201,14 @@
 
   {#if !viewing}
   <div class="quick-capture">
-    {#if $settings.sttEnabled}
-      <MicButton onTranscribe={(text) => {
-        quickCapture = (quickCapture ? quickCapture + ' ' : '') + text;
-      }} />
-    {:else if webVoiceAvailable}
-      <button
-        class="voice-btn"
-        class:active={voiceActive}
-        onclick={toggleVoice}
-        title={voiceActive ? "Stop dictation" : "Dictate (browser speech recognition)"}
-        aria-label={voiceActive ? "Stop dictation" : "Dictate with voice"}
-        aria-pressed={voiceActive}
-      >
-        <Icon name="mic" size={16} />
-      </button>
-    {/if}
-    <input
-      bind:this={captureInput}
+    <QuickCaptureInput
       bind:value={quickCapture}
-      onkeydown={handleKeydown}
+      bind:inputRef={captureInput}
       placeholder="Quick capture... (Enter to save to inbox)"
-      aria-label="Quick capture text"
       disabled={loading}
+      webFallback={true}
+      onSubmit={handleQuickCapture}
     />
-    <button class="capture-btn" onclick={handleQuickCapture} disabled={loading || !quickCapture.trim()}>
-      +
-    </button>
   </div>
   {/if}
 
@@ -328,9 +261,18 @@
             </div>
           </div>
           <div class="item-actions">
-            <button class="action-btn move" onclick={() => moveItem(item, 'logs')} title="Move to Logs" aria-label="Move to Logs"><Icon name="calendar" size={15} /></button>
-            <button class="action-btn move" onclick={() => moveItem(item, 'write')} title="Move to Write" aria-label="Move to Write"><Icon name="pencil" size={15} /></button>
-            <button class="action-btn move" onclick={() => moveItem(item, 'novel')} title="Move to Novel" aria-label="Move to Novel"><Icon name="book" size={15} /></button>
+            <select
+              class="move-select"
+              value=""
+              onchange={(e) => { const t = (e.target as HTMLSelectElement).value; if (t) { moveItem(item, t); (e.target as HTMLSelectElement).value = ""; } }}
+              title="Move to workspace"
+              aria-label="Move {item.title} to workspace"
+            >
+              <option value="" disabled>Move to…</option>
+              {#each triageTargets as ws}
+                <option value={ws}>{ws}</option>
+              {/each}
+            </select>
             <button class="action-btn delete" onclick={() => deleteItem(item)} title="Delete" aria-label="Delete"><Icon name="trash" size={15} /></button>
           </div>
         </div>
@@ -425,68 +367,6 @@
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .quick-capture input {
-    flex: 1;
-    height: 36px;
-    padding: 0 var(--space-3);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font-size: var(--font-size-sm);
-  }
-
-  .quick-capture input:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-  }
-
-  .capture-btn {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-    border: none;
-    font-size: 18px;
-    cursor: pointer;
-  }
-
-  .voice-btn {
-    width: 36px;
-    height: 36px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-subtle);
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-
-  .voice-btn:hover {
-    background: var(--surface-overlay);
-  }
-
-  .voice-btn.active {
-    border-color: var(--accent-semantic-red);
-    color: var(--accent-semantic-red);
-  }
-
-  .capture-btn:hover:not(:disabled) {
-    opacity: 0.9;
-  }
-
-  .capture-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .inbox-list {
@@ -662,8 +542,20 @@
 
   .item-actions {
     display: flex;
-    flex-direction: column;
-    border-left: 1px solid var(--border-subtle);
+    align-items: center;
+    gap: 4px;
+    padding-right: var(--space-2);
+  }
+
+  .move-select {
+    height: 30px;
+    max-width: 110px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
   }
 
   .action-btn {

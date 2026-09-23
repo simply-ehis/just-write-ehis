@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settings, settingsCategory, IMPORTABLE_SETTINGS_KEYS, type SettingsCategory } from "$lib/stores/settings";
+  import { settings, settingsCategory, IMPORTABLE_SETTINGS_KEYS, DEFAULT_HIDDEN_WORKSPACES, type SettingsCategory } from "$lib/stores/settings";
+  import { workspaces } from "$lib/stores/app";
   import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
@@ -97,6 +98,18 @@
 
   let activeCategory = $derived($settingsCategory);
   let aboutLogo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+
+  /** Workspace tabs on/off (sidebar + top bar). Null = defaults. */
+  function workspaceHidden(id: string): boolean {
+    return ($settings.hiddenIds ?? DEFAULT_HIDDEN_WORKSPACES).includes(id);
+  }
+  function toggleWorkspaceVisible(id: string) {
+    const cur = $settings.hiddenIds ?? [...DEFAULT_HIDDEN_WORKSPACES];
+    $settings = {
+      ...$settings,
+      hiddenIds: cur.includes(id) ? cur.filter((h) => h !== id) : [...cur, id],
+    };
+  }
   let benchResults = $state<Record<string, number> | null>(null);
   let benchRunning = $state(false);
   let coldStartTime = $state(0);
@@ -441,6 +454,18 @@
         <div class="setting-row">
           <span class="setting-label">Setup flow</span>
           <button class="secondary-btn" onclick={() => window.dispatchEvent(new CustomEvent("replay-onboarding"))}>Replay onboarding</button>
+        </div>
+        <div class="setting-row column">
+          <span class="setting-label">Workspace tabs</span>
+          <span class="setting-hint">Uncheck to hide a workspace from the sidebar and top bar. Hidden workspaces stay one Ctrl+K away.</span>
+          <div class="ws-toggles">
+            {#each workspaces.filter((w) => w.id !== "files") as w}
+              <label class="check-row">
+                <input type="checkbox" checked={!workspaceHidden(w.id)} onchange={() => toggleWorkspaceVisible(w.id)} />
+                <span>{w.label}</span>
+              </label>
+            {/each}
+          </div>
         </div>
       </div>
 
@@ -1253,6 +1278,34 @@
     justify-content: space-between;
     padding: 12px 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .setting-row.column {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .setting-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .ws-toggles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 4px 12px;
+    margin-top: 4px;
+  }
+
+  .ws-toggles .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-height: 32px;
+    cursor: pointer;
   }
 
   .setting-row label,

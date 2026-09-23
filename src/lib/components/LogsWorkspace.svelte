@@ -5,7 +5,7 @@
   import { settings } from "$lib/stores/settings";
   import { fetchPlaceStamp } from "$lib/stamp";
   import { showToast } from "$lib/stores/notifications";
-  import MicButton from "$lib/components/MicButton.svelte";
+  import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
   import EditorPane from "$lib/components/EditorPane.svelte";
   import DeleteButton from "$lib/components/DeleteButton.svelte";
 
@@ -34,11 +34,13 @@
   async function loadTouchedToday() {
     try {
       const recent = await api.dashboardRecentDocs(50);
-      // Local date, not UTC: toISOString is a day off near midnight.
-      const prefix = formatDate(new Date());
+      // Real date math: string compare breaks on non-ISO timestamps.
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const endOfToday = new Date(startOfToday.getTime() + 86400000);
       touchedToday = recent.filter(([, , updatedAt]) => {
-        const day = updatedAt.slice(0, 10);
-        return day >= prefix && day <= formatDate(new Date(Date.now() + 86400000));
+        const t = Date.parse(updatedAt);
+        return !Number.isNaN(t) && t >= startOfToday.getTime() && t < endOfToday.getTime();
       });
     } catch {
       touchedToday = [];
@@ -122,6 +124,8 @@
         $openTabs = [doc, ...$openTabs];
       }
       await api.usageRecord(doc.id, "open");
+      // logGetOrCreate may have minted the day — keep dots + list fresh.
+      await refreshEntries();
       stampFreshLog(doc, dateStr).catch(() => {});
     } catch (e) {
       console.error("Failed to open log:", e);
@@ -155,16 +159,12 @@
         $currentDoc = updated;
       }
       logEntries = logEntries.map((e) => (e.id === doc.id ? updated : e));
+      // A capture can create the day (logGetOrCreate) — refresh so the
+      // calendar dots + Recent Days never go stale.
+      await refreshEntries();
       await loadTouchedToday();
     } catch (e) {
       console.error("Quick capture failed:", e);
-    }
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleQuickCapture();
     }
   }
 
@@ -212,6 +212,9 @@
 
     <div class="day-list">
       <div class="day-list-header">Recent Days</div>
+      {#if logEntries.length === 0}
+        <p class="day-empty">No entries yet — pick today to start your first daily note.</p>
+      {/if}
       {#each logEntries.slice(0, 14) as entry}
         <button
           class="day-item"
@@ -234,20 +237,12 @@
       </div>
     {/if}
     <div class="quick-capture">
-      {#if $settings.sttEnabled}
-        <MicButton onTranscribe={(text) => {
-          quickCapture = (quickCapture ? quickCapture + ' ' : '') + text;
-        }} />
-      {/if}
-      <input
+      <QuickCaptureInput
         bind:value={quickCapture}
-        onkeydown={handleKeydown}
         placeholder="Quick capture... (Enter to save)"
         disabled={loading}
+        onSubmit={handleQuickCapture}
       />
-      <button class="capture-btn" onclick={handleQuickCapture} disabled={loading || !quickCapture.trim()}>
-        +
-      </button>
     </div>
 
     <div class="current-log">
@@ -422,6 +417,14 @@
     margin-bottom: 4px;
   }
 
+  .day-empty {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 4px 8px;
+    margin: 0 0 8px;
+  }
+
   .day-item {
     width: 100%;
     padding: 8px;
@@ -462,27 +465,6 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .quick-capture input {
-    flex: 1;
-    height: 36px;
-  }
-
-  .capture-btn {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    background: var(--accent);
-    color: var(--text-on-accent);
-    font-size: 18px;
-  }
-
-  .capture-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-  }
-
   .touched-today {
     border-top: 1px solid var(--border);
     padding: 10px 16px 16px;
@@ -520,11 +502,6 @@
 
   .touched-item:hover {
     color: var(--accent);
-  }
-
-  .capture-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .current-log {

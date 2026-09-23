@@ -100,8 +100,9 @@
   }
 
   function heatOpacity(key: string): number {
-    // Single hue, varied intensity: today counts more than a passing touch.
-    // Writing-days list has no per-day counts, so recency weights it.
+    // Recency shading (not per-day intensity): the writing-days list has
+    // no per-day counts, so later entries read brighter. The label below
+    // says exactly this — brightness must never imply word counts.
     const idx = writingDays.indexOf(key);
     if (idx < 0) return 0;
     return 0.45 + (idx / Math.max(1, writingDays.length)) * 0.55;
@@ -195,8 +196,6 @@
   const workspaceIcons: Record<string, string> = {
     map: "graph",
     canvas: "board",
-    notes: "files",
-    justwrite: "pencil",
     write: "pencil",
     novel: "book",
     script: "film",
@@ -209,15 +208,12 @@
     stats: "calendar",
     skills: "sparkle",
     properties: "table",
-    files: "files",
   };
 
   function workspaceLabel(ws: string): string {
     const labels: Record<string, string> = {
       map: "Node Map",
       canvas: "Canvas",
-      notes: "Notes",
-      justwrite: "Just Write",
       novel: "Novel",
       script: "Script",
       reader: "Reader",
@@ -227,7 +223,6 @@
       craft: "Craft",
       stats: "Stats",
       skills: "Skills",
-      files: "Files",
     };
     return labels[ws] ?? ws;
   }
@@ -404,7 +399,7 @@
         {/each}
       </div>
       <p class="streak-label">
-        {writingDays.length} of last 90 days with writing activity
+        {writingDays.length} of last 90 days with writing activity — brighter means more recent
       </p>
     </section>
 
@@ -446,10 +441,11 @@
       </section>
     {/if}
 
-    <!-- Goals -->
+    <!-- Goals (read-only here — set per doc in the inspector's Goal & Deadline section) -->
     {#if goals.length > 0}
       <section class="home-section">
         <h2>Goals</h2>
+        <p class="section-note">Tracked here, set per document in the inspector (Goal & Deadline).</p>
         <div class="goals-grid">
           {#each goals as goal}
             <div class="goal-card">
@@ -482,6 +478,11 @@
         <div class="atlas-canvas-wrap">
           <canvas bind:this={atlasCanvas} class="atlas-canvas"></canvas>
         </div>
+      </section>
+    {:else}
+      <section class="home-section atlas-section">
+        <h2>Atlas</h2>
+        <p class="section-note">Your vault as a star-sky unlocks at 20 writing days and 30 documents — currently {writingDays.length} days. Keep writing; it appears here on its own.</p>
       </section>
     {/if}
   </div>
@@ -520,6 +521,12 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+
+  .section-note {
+    font-size: 12px;
     color: var(--text-muted);
     margin: 0 0 10px;
   }

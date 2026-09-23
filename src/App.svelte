@@ -28,8 +28,6 @@
   import QuickCaptureOverlay from "$lib/components/QuickCaptureOverlay.svelte";
   import SkillNudges from "$lib/components/SkillNudges.svelte";
   import HomePane from "$lib/components/HomePane.svelte";
-  import FileBrowser from "$lib/components/FileBrowser.svelte";
-  import MarkdownViewer from "$lib/components/MarkdownViewer.svelte";
   import Toast from "$lib/components/Toast.svelte";
   import Banner from "$lib/components/Banner.svelte";
   import OnboardingOverlay from "$lib/components/OnboardingOverlay.svelte";
@@ -41,7 +39,6 @@
   import { showConflict } from "$lib/stores/conflict";
   import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
-  let viewedFile = $state<string | null>(null);
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
   // currentWorkspace) pollute featuresUsed before the async boot block
@@ -58,15 +55,9 @@
     }
   });
 
-  // Leaving Files drops the raw-file view so returning later starts at the
-  // browser, not a stale file with no Back context.
-  $effect(() => {
-    if ($currentWorkspace !== "files" && viewedFile) viewedFile = null;
-  });
-
   // Workspaces that render the open doc's content: a locked-out doc
   // covers the pane with the PIN gate (lists/graphs show titles only).
-  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "files", "inbox", "projects", "properties", "canvas"];
+  const lockCoveredWorkspaces = ["write", "novel", "script", "reader", "logs", "inbox", "projects", "properties", "canvas"];
   let lockCover = $derived(
     $settings.lockEnabled &&
     !$showSettings &&
@@ -495,12 +486,6 @@
           <InboxWorkspace />
         {:else if $currentWorkspace === "properties"}
           <LazyWorkspace loader={() => import("$lib/components/LibraryWorkspace.svelte")} label="Library" />
-        {:else if $currentWorkspace === "files"}
-          {#if viewedFile}
-            <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />
-          {:else}
-            <FileBrowser onSelect={(path, isDir) => { if (!isDir && (path.endsWith('.md') || path.endsWith('.txt'))) { viewedFile = path; } else if (!isDir) { api.docGet(path).then(d => { $currentDoc = d; if (!$openTabs.find(t => t.id === d.id)) $openTabs = [d, ...$openTabs]; }).catch(() => {}); } }} />
-          {/if}
         {:else if $currentDoc}
           <EditorPane />
         {:else}

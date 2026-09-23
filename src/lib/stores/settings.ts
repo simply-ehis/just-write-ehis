@@ -261,6 +261,8 @@ export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
 
 /** Current onboarding flow version. Bump when the steps change enough to re-prompt. */
 export const ONBOARD_VERSION = 1;
+/** Sidebar default hides (null hiddenIds): power-user surfaces reachable via palette. */
+export const DEFAULT_HIDDEN_WORKSPACES: readonly string[] = ["inbox", "canvas"];
 /** Resolves once keychain hydration + legacy migration finished. */
 let resolveSecretsReady!: () => void;
 export const secretsReady = new Promise<void>((resolve) => {

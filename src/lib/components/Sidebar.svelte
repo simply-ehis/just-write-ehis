@@ -9,7 +9,7 @@
     showSettings,
   } from "$lib/stores/app";
   import { api } from "$lib/api";
-  import { settings } from "$lib/stores/settings";
+  import { settings, DEFAULT_HIDDEN_WORKSPACES } from "$lib/stores/settings";
   import { onMount } from "svelte";
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
   import { groupOfWorkspace, groupRankOf } from "$lib/workspaceGroups";
@@ -80,15 +80,16 @@
 
   // Hidden from the sidebar (still reachable via command palette Ctrl+K
   // and direct navigation): null = default hides (Inbox + Canvas are
-  // power-user surfaces, Files lives inside Library's Files tab).
-  // Onboarding can override both lists; pins always win over hides.
-  const DEFAULT_HIDDEN_IDS = ["inbox", "canvas", "files"];
+  // power-user surfaces). "files" is not a route anymore — it deep-links
+  // to Library's Files tab — so it never renders here, hidden or not.
+  const DEFAULT_HIDDEN_IDS = DEFAULT_HIDDEN_WORKSPACES;
   let effectiveHidden = $derived($settings.hiddenIds ?? DEFAULT_HIDDEN_IDS);
   // Pinned top-bar ids, validated against known workspaces (pins win
   // over hides by construction: the grouped list below excludes them).
+  // "files" is virtual (Library Files tab) and can never pin.
   let topPins = $derived(
     $settings.topBarIds
-      .filter((id) => workspaces.some((w) => w.id === id))
+      .filter((id) => id !== "files" && workspaces.some((w) => w.id === id))
       .slice(0, 4)
   );
   let pinnedWorkspaces = $derived(
@@ -105,8 +106,9 @@
   const groupRank = groupRankOf;
 
   let displayWorkspaces = $derived.by(() => {
+    // "files" has no route (Library Files tab owns it) — never list it.
     const all = [...workspaces].filter(
-      (w) => !effectiveHidden.includes(w.id) && !topPins.includes(w.id)
+      (w) => w.id !== "files" && !effectiveHidden.includes(w.id) && !topPins.includes(w.id)
     );
     let ordered: typeof all;
     if (!$sidebarAutoSort && $sidebarOrder.length > 0) {

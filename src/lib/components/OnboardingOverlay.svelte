@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { settings, ONBOARD_VERSION } from "$lib/stores/settings";
+  import { settings, ONBOARD_VERSION, DEFAULT_HIDDEN_WORKSPACES } from "$lib/stores/settings";
   import { workspaces } from "$lib/stores/app";
   import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
@@ -21,7 +21,7 @@
     script: ["write", "script", "projects"],
     mixed: [],
   };
-  const DEFAULT_HIDDEN = ["inbox", "canvas", "files"];
+  const DEFAULT_HIDDEN = [...DEFAULT_HIDDEN_WORKSPACES];
 
   let step = $state(0);
   let useCase = $state<UseCase>("novelist");
@@ -184,7 +184,7 @@ Delete this doc whenever you're ready. Happy writing.
         <h2>Pick your top bar</h2>
         <p class="step-desc">Pin up to 4 workspaces ({topBarIds.length}/4). Everything else lives in the grouped sidebar; hidden ones stay one Ctrl+K away.</p>
         <div class="check-grid">
-          {#each workspaces as w}
+          {#each workspaces.filter((w) => w.id !== "files") as w}
             <label class="check-row">
               <input type="checkbox" checked={topBarIds.includes(w.id)} onchange={() => toggleTop(w.id)} />
               <span>{w.label}</span>

@@ -81,13 +81,25 @@
       $aiPanelOpen = !$aiPanelOpen;
       return;
     }
+    // "files" is virtual (no route) — it deep-links to Library's Files tab.
+    if (action === "files") {
+      $currentWorkspace = "properties";
+      recordWorkspaceVisit("properties");
+      window.dispatchEvent(new CustomEvent("open-library-files"));
+      return;
+    }
     $currentWorkspace = action;
     recordWorkspaceVisit(action);
   }
 
   // Main row: onboarding top-bar pins (first 3) + Search + More.
   // Default ["write","home"] reproduces the classic row exactly.
+  // "files" can never pin (virtual destination) — filtered here.
   function navigateTo(id: string) {
+    if (id === "files") {
+      handleMoreAction("files");
+      return;
+    }
     $currentWorkspace = id;
     recordWorkspaceVisit(id);
     showMoreMenu = false;
@@ -95,7 +107,7 @@
 
   let pinnedIds = $derived(
     ($settings.topBarIds.length > 0 ? $settings.topBarIds : ["write", "home"])
-      .filter((id) => workspaces.some((w) => w.id === id))
+      .filter((id) => id !== "files" && workspaces.some((w) => w.id === id))
       .slice(0, 3)
   );
 

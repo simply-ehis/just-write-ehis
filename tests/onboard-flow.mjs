@@ -133,7 +133,7 @@ const btnByText = (dom, text) =>
   const saved = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
   check("finish persists hasOnboarded", saved.hasOnboarded === true);
   check("finish persists novelist topBarIds", JSON.stringify(saved.topBarIds) === JSON.stringify(["write", "novel", "map", "reader"]), (saved.topBarIds || []).join(","));
-  check("finish persists default hiddenIds", JSON.stringify(saved.hiddenIds) === JSON.stringify(["inbox", "canvas", "files"]));
+  check("finish persists default hiddenIds", JSON.stringify(saved.hiddenIds) === JSON.stringify(["inbox", "canvas"]));
 
   // Sidebar pins without duplicates.
   const pins = [...dom.window.document.querySelectorAll(".nav-pins .nav-item")].map((b) => b.getAttribute("aria-label"));

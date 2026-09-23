@@ -9,6 +9,8 @@
   import DocDetail from "./DocDetail.svelte";
   import DeleteButton from "./DeleteButton.svelte";
   import DockSplit from "./DockSplit.svelte";
+  import BoardColumn from "./BoardColumn.svelte";
+  import { statusColor } from "$lib/status";
 
   let projects = $state<Doc[]>([]);
   let selectedProject = $state<Doc | null>(null);
@@ -44,16 +46,6 @@
   }
 
   const statusOrder = ['idea', 'draft', 'revised', 'final', 'done'];
-
-  function statusColor(status: string): string {
-    switch (status) {
-      case 'draft': return 'var(--accent-primary)';
-      case 'revised': return 'var(--accent-semantic-green)';
-      case 'final': case 'done': return 'var(--accent-semantic-purple)';
-      case 'cut': return 'var(--accent-semantic-red)';
-      default: return 'var(--text-muted)';
-    }
-  }
 
   async function loadProjects() {
     try {
@@ -300,17 +292,19 @@
         <!-- Board view -->
         <div class="board-view">
           {#each statusOrder as status}
-            <div class="board-column">
-              <div class="column-header">
-                <span class="status-dot" style="background: {statusColor(status)}"></span>
-                <span>{status.charAt(0).toUpperCase() + status.slice(1)}</span>
-                <span class="column-count">{(boardColumns[status] || []).length}</span>
-              </div>
+            <BoardColumn
+              title={status.charAt(0).toUpperCase() + status.slice(1)}
+              count={(boardColumns[status] || []).length}
+              dotColor={statusColor(status)}
+            >
               {#each (boardColumns[status] || []) as doc}
                 <button class="task-card" onclick={() => openForEdit(doc)} title="Open task in editor" aria-label="Open {doc.title} in editor">
                   <div class="task-title">{doc.title}</div>
                   <div class="task-meta">
                     <span class="word-count">{doc.word_count}w</span>
+                    {#if doc.deadline}
+                      <span class="due" class:overdue={new Date(doc.deadline) < new Date()} title="Deadline (set in the inspector)">due {doc.deadline.slice(0, 10)}</span>
+                    {/if}
                     <select class="status-select" value={doc.status || 'idea'} onchange={(e) => moveTask(doc, (e.target as HTMLSelectElement).value)}>
                       {#each statusOrder as s}
                         <option value={s}>{s}</option>
@@ -319,10 +313,12 @@
                   </div>
                 </button>
               {/each}
-              {#if status === 'idea'}
-                <button class="add-task-btn" onclick={addTask}>+ Task</button>
-              {/if}
-            </div>
+              {#snippet footer()}
+                {#if status === 'idea'}
+                  <button class="add-task-btn" onclick={addTask}>+ Task</button>
+                {/if}
+              {/snippet}
+            </BoardColumn>
           {/each}
         </div>
       {/if}
@@ -685,37 +681,7 @@
     flex: 1;
   }
 
-  .board-column {
-    min-width: 260px;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .column-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .column-count {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-  }
+  /* Column shell lives in BoardColumn.svelte now. */
 
   .task-card {
     background: var(--surface-raised);
@@ -749,6 +715,17 @@
     font-size: 10px;
     color: var(--text-muted);
     font-family: var(--font-mono);
+  }
+
+  .due {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+  }
+
+  .due.overdue {
+    color: var(--accent-semantic-red);
+    font-weight: 600;
   }
 
   .status-select {

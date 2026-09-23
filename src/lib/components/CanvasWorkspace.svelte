@@ -46,8 +46,14 @@
   let boardEl = $state<HTMLElement | null>(null);
   let dragNode = $state<{ id: string; dx: number; dy: number } | null>(null);
   let panning = $state<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
-  let nodeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Per-node save timers: a single shared timer meant a fast A→B edit
+  // run silently dropped A's save (only the last closure ever fired).
+  const nodeSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let edgeSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Edge-label generation: the backend has no label-update command, so a
+  // label save is delete+reconnect. Overlapping saves (slow backend +
+  // fast typing) 404'd on the already-deleted id — stale generations bail.
+  let edgeLabelGen = 0;
   let editingNodeId = $state<string | null>(null);
   let editingTitle = $state("");
   let editingBody = $state("");
@@ -72,15 +78,17 @@
   }
 
   function scheduleSave(node: CanvasNode) {
-    if (nodeSaveTimer) clearTimeout(nodeSaveTimer);
-    nodeSaveTimer = setTimeout(async () => {
+    const prev = nodeSaveTimers.get(node.id);
+    if (prev) clearTimeout(prev);
+    nodeSaveTimers.set(node.id, setTimeout(async () => {
+      nodeSaveTimers.delete(node.id);
       try {
         const saved = await api.canvasUpsertNode(node);
         nodes = nodes.map((n) => (n.id === saved.id ? saved : n));
       } catch (e) {
         showToast(`Card save failed: ${e instanceof Error ? e.message : e}`, "error");
       }
-    }, 400);
+    }, 400));
   }
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
@@ -249,15 +257,21 @@
 
   function editEdgeLabel(label: string) {
     if (!selectedEdge) return;
+    const myGen = ++edgeLabelGen;
     // Labels persist with the edge; the backend stores them as given.
     selectedEdge.label = label;
     edges = [...edges];
     if (edgeSaveTimer) clearTimeout(edgeSaveTimer);
     edgeSaveTimer = setTimeout(async () => {
       try {
-        await api.canvasDeleteEdge(selectedEdge!.id);
-        const fresh = await api.canvasConnect(selectedEdge!.source_id, selectedEdge!.target_id, label);
-        edges = edges.map((e) => (e.id === selectedEdge!.id ? fresh : e));
+        // A newer keystroke scheduled its own save — it owns the outcome.
+        if (myGen !== edgeLabelGen) return;
+        const cur = selectedEdge;
+        if (!cur) return;
+        await api.canvasDeleteEdge(cur.id);
+        const fresh = await api.canvasConnect(cur.source_id, cur.target_id, label);
+        if (myGen !== edgeLabelGen) return;
+        edges = edges.map((e) => (e.id === cur.id ? fresh : e));
         selectedEdgeId = fresh.id;
       } catch (e) {
         showToast(`Label save failed: ${e instanceof Error ? e.message : e}`, "error");

@@ -1,9 +1,10 @@
 <script lang="ts">
   /**
    * LibraryWorkspace — Library database views + vault file browser in one
-   * place, switchable via tabs. The standalone Files route still exists
-   * (palette/back-compat) with its own viewer state.
+   * place, switchable via tabs. The standalone Files route is retired;
+   * "files" destinations deep-link here via the open-library-files event.
    */
+  import { onMount } from "svelte";
   import { currentDoc, openTabs } from "$lib/stores/app";
   import { api } from "$lib/api";
   import FileBrowser from "$lib/components/FileBrowser.svelte";
@@ -12,6 +13,16 @@
 
   let tab = $state<"views" | "files">("views");
   let viewedFile = $state<string | null>(null);
+
+  // Deep link target for the retired standalone Files route: palette,
+  // More menu, and old pins land here instead of a dead workspace.
+  onMount(() => {
+    const openFiles = () => {
+      tab = "files";
+    };
+    window.addEventListener("open-library-files", openFiles);
+    return () => window.removeEventListener("open-library-files", openFiles);
+  });
 
   async function handleSelect(path: string, isDir: boolean) {
     if (!isDir && (path.endsWith(".md") || path.endsWith(".txt"))) {

@@ -6,6 +6,8 @@
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
+  import BoardColumn from "$lib/components/BoardColumn.svelte";
+  import { statusColor } from "$lib/status";
 
   let allDocs = $state<Doc[]>([]);
   let filteredDocs = $state<Doc[]>([]);
@@ -202,15 +204,7 @@
     } catch { return iso; }
   }
 
-  function statusColor(status: string): string {
-    switch (status) {
-      case 'draft': return 'var(--accent-primary)';
-      case 'revised': return 'var(--accent-semantic-green)';
-      case 'final': case 'done': return 'var(--accent-semantic-purple)';
-      case 'cut': return 'var(--accent-semantic-red)';
-      default: return 'var(--text-muted)';
-    }
-  }
+  // Local statusColor deleted — template uses the shared map (status.ts).
 
   onMount(loadDocs);
 
@@ -390,14 +384,11 @@
     {:else}
       <div class="board-view">
         {#each getBoardGroups() as [group, docs]}
-          <div class="board-column">
-            <div class="column-header">
-              {#if boardGroupBy === 'status'}
-                <span class="status-dot" style="background: {statusColor(group)}"></span>
-              {/if}
-              <span>{group}</span>
-              <span class="column-count">{docs.length}</span>
-            </div>
+          <BoardColumn
+            title={group}
+            count={docs.length}
+            dotColor={boardGroupBy === 'status' ? statusColor(group) : null}
+          >
             {#each docs as doc}
               <button class="board-card" onclick={() => openDoc(doc)}>
                 <div class="card-title">{doc.title}</div>
@@ -407,7 +398,7 @@
                 </div>
               </button>
             {/each}
-          </div>
+          </BoardColumn>
         {/each}
       </div>
     {/if}
@@ -848,37 +839,7 @@
     height: 100%;
   }
 
-  .board-column {
-    min-width: 260px;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .column-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .column-count {
-    font-size: 11px;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-  }
+  /* Column shell lives in BoardColumn.svelte now. */
 
   .board-card {
     background: var(--surface-raised);
