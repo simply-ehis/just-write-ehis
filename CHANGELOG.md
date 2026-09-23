@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased (Area 6: voice sidecar lifecycle)
+
+### Changed
+- **One managed child owner**: `ManagedSidecar{port}` in sidecar.rs serves all 5 managers — dead handles reaped + respawned (never early-Ok on a corpse), stop() is kill()+wait() (no zombies), Drop kills best-effort so children die with the app, stale port holders reclaimed (orphan sidecar killed + restarted, foreign holders fail closed with a typed error)
+- **No indefinite hangs**: every sidecar reqwest client carries a timeout (30s default, 180s transcribe/synthesize/LLM); empty LLM/memory content is a real error, not `""`
+- **Startup without races**: one `ensureSidecar()` + `pollUntilHealthy()` (500ms/15s, "Starting Moonshine… Ns" progress) replaces the fixed 500ms/1s sleeps in STT/TTS/LLM/memory; LLM cold load awaits readiness so ghost can't cloud-fallback on first run; Mic/TTS buttons gate on model_loaded only after a probe (never disabled cold) with the fetch hint wired
+- **Validation**: `sidecarValidate.ts` (traversal rejected, shape-checked) on Settings blur with inline errors; new `sidecar_python_probe` command (`python --version`, preview degrades readable); STT/TTS servers fail closed on `..` escapes and missing explicit picks (no silent bundled fallback); empty-path guards on stt/tts start
+- **TTS stop actually stops**: live source handle with stop()+disconnect() + mid-decode generation guard (decode caveat documented); ReadAloudButton gains a real loading state; MicButton offers one-tap browser dictation on sidecar failure (explicit tap = consent, never auto-switch — panel holds no position either way)
+- **Mobile/voice**: 44px mic/TTS targets under 480px; Web Speech errors surface one-line reasons (not-allowed/no-speech/network)
+
+### Tests
+- `cargo test managed_`: invalid spawn, foreign-port fail-closed, dead-handle respawn, stop-reaps (4 passed)
+- `tests/sidecar-validate.mjs` (18), `tests/ensure-poll.mjs` (9: flaky-health boot, cap, short-circuit, failure), `tests/sidecar-resolve.py` (16 against the real server code)
+
 ## Unreleased (Area 5: AI core dedupe + hardening)
 
 ### Changed

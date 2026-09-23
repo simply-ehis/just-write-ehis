@@ -195,6 +195,7 @@ pub fn run() {
             commands::clear_usage_events,
             commands::clear_tab_states,
             commands::sidecar_start,
+            commands::sidecar_python_probe,
             commands::sidecar_stop,
             commands::sidecar_is_running,
             commands::sidecar_set_endpoint,

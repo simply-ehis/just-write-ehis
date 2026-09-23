@@ -1388,12 +1388,24 @@ pub fn get_vault_path(db: State<'_, Database>) -> Result<String, String> {
 // ── STT: Moonshine Voice ─────────────────────────────────────────
 
 #[tauri::command]
+fn require_sidecar_paths(python_path: &str, sidecars_dir: &str) -> Result<(), String> {
+    if python_path.trim().is_empty() {
+        return Err("python path is empty — set it in Settings → AI & Providers → System.".to_string());
+    }
+    if sidecars_dir.trim().is_empty() {
+        return Err("sidecars directory is empty — reinstall or re-fetch the sidecar bundle.".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn stt_start(
     stt: State<'_, sidecar::SttManager>,
     python_path: String,
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
+    require_sidecar_paths(&python_path, &sidecars_dir)?;
     stt.start(&python_path, &sidecars_dir, model.as_deref())
 }
 
@@ -1454,7 +1466,30 @@ pub fn tts_start(
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
+    require_sidecar_paths(&python_path, &sidecars_dir)?;
     tts.start(&python_path, &sidecars_dir, model.as_deref())
+}
+
+/// Probe a python interpreter (`python --version`). Used by the Settings
+/// voice section on blur so a missing/broken python shows an inline
+/// error instead of failing later at sidecar start.
+#[tauri::command]
+pub fn sidecar_python_probe(python_path: String) -> Result<String, String> {
+    if python_path.trim().is_empty() {
+        return Err("Python path is empty — STT/TTS/memory sidecars need it; app features besides sidecars still work.".to_string());
+    }
+    let out = std::process::Command::new(python_path.trim())
+        .arg("--version")
+        .output()
+        .map_err(|e| format!("Python not found — STT/TTS/memory need it ({}); app features besides sidecars still work.", e))?;
+    if !out.status.success() {
+        return Err(format!(
+            "Python probe failed — STT/TTS/memory need a working python; app features besides sidecars still work. ({})",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let version = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    Ok(version.trim().to_string())
 }
 
 #[tauri::command]

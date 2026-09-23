@@ -6,31 +6,29 @@
  * closed, never pass secrets through silently.
  */
 import { api, isBrowserPreview } from "$lib/api";
-import { getPythonPath, getSidecarsDir } from "$lib/stores/audio";
+import { ensureSidecar, getPythonPath, getSidecarsDir } from "$lib/stores/audio";
 
 /** Start the memory sidecar if needed. False = unavailable, don't proceed. */
 export async function ensureHarness(onProgress?: (elapsedSec: number) => void): Promise<boolean> {
   if (isBrowserPreview()) return false;
-  try {
-    if (await api.memorySidecarRunning()) return true;
-    await api.memorySidecarStart(getPythonPath(), await getSidecarsDir());
-    // Poll until healthy (cold python boot is 1–5s; a single 400ms sleep
-    // used to report failure while the server was still starting).
-    const started = Date.now();
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      onProgress?.(Math.round((Date.now() - started) / 1000));
-      try {
-        await api.memorySidecarHealth();
-        return true;
-      } catch {
-        /* not up yet — keep polling */
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  const noopBool = (_: boolean) => {};
+  const noopStr = (_: string | null) => {};
+  return ensureSidecar({
+    kind: "memory",
+    isRunning: () => api.memorySidecarRunning(),
+    start: async () => {
+      await api.memorySidecarStart(getPythonPath(), await getSidecarsDir());
+    },
+    health: () => api.memorySidecarHealth(),
+    modelReady: () => true,
+    setRunning: noopBool,
+    setLoaded: noopBool,
+    setError: noopStr,
+    setProgress: (_m, sec) => {
+      if (_m) onProgress?.(sec);
+    },
+    setProbed: () => {},
+  });
 }
 
 /** Stop the memory sidecar (e.g. when AI memory is toggled off). Best-effort. */

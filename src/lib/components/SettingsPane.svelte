@@ -9,8 +9,33 @@
   import Icon from "$lib/components/Icon.svelte";
   import LazyWorkspace from "./LazyWorkspace.svelte";
   import { stopStt, stopTts, stopLlm } from "$lib/stores/audio";
+  import { validateLlmModel, validatePythonPath, validateSttModel, validateTtsModel } from "$lib/sidecarValidate";
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
+
+  // Sidecar input validation: shape-checked on blur with inline errors
+  // (existence/shape at start still fails closed server-side — see
+  // sidecar.rs ManagedSidecar + the python _resolve_model guards).
+  let pythonError = $state<string | null>(null);
+  let sttModelError = $state<string | null>(null);
+  let ttsModelError = $state<string | null>(null);
+  let llmModelError = $state<string | null>(null);
+  let pythonProbeToken = 0;
+
+  async function probePythonPath() {
+    pythonError = validatePythonPath($settings.pythonPath);
+    if (pythonError || isBrowserPreview()) return;
+    const token = ++pythonProbeToken;
+    try {
+      const version = await api.sidecarPythonProbe($settings.pythonPath.trim() || "python");
+      if (token === pythonProbeToken) pythonError = null;
+      showToast(`Python OK: ${version}`, "success");
+    } catch (e) {
+      if (token === pythonProbeToken) {
+        pythonError = e instanceof Error ? e.message : String(e);
+      }
+    }
+  }
 
   /** Toggling a voice/memory feature off also stops its sidecar. */
   async function onSttToggle() {
@@ -536,8 +561,11 @@
         </div>
         <div class="setting-row">
           <label for="setting-stt-model">STT Model</label>
-          <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" />
+          <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" onblur={() => (sttModelError = validateSttModel($settings.sttModel))} />
         </div>
+        {#if sttModelError}
+          <p class="update-error">{sttModelError}</p>
+        {/if}
         <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
 
         <h4>Text-to-Speech (Kokoro-82M)</h4>
@@ -547,8 +575,11 @@
         </div>
         <div class="setting-row">
           <label for="setting-tts-model">TTS Weights Repo</label>
-          <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" />
+          <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" onblur={() => (ttsModelError = validateTtsModel($settings.ttsModel))} />
         </div>
+        {#if ttsModelError}
+          <p class="update-error">{ttsModelError}</p>
+        {/if}
         <p class="setting-desc">Paste to swap: a local Kokoro bundle directory (model.onnx + voices.bin + tokens.txt + espeak-ng-data). Empty = vendored default. Takes effect on next sidecar start.</p>
         <div class="setting-row">
           <label for="setting-tts-lang-code">Language</label>
@@ -655,15 +686,21 @@
         </div>
         <div class="setting-row">
           <label for="setting-llm-model">LLM Model</label>
-          <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" />
+          <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" onblur={() => (llmModelError = validateLlmModel($settings.llmModel))} />
         </div>
+        {#if llmModelError}
+          <p class="update-error">{llmModelError}</p>
+        {/if}
         <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
 
         <h4>System</h4>
         <div class="setting-row">
           <label for="setting-python-path">Python Path</label>
-          <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" />
+          <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" onblur={probePythonPath} />
         </div>
+        {#if pythonError}
+          <p class="update-error">{pythonError}</p>
+        {/if}
       </div>
 
       <div class="settings-section">

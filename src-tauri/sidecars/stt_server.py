@@ -53,6 +53,16 @@ _TIMESTAMP_LINE_RE = re.compile(r"^\s*\[.*?--?>.*?\]")
 _TRANSCRIBE_TIMEOUT_S = 180
 
 
+def _inside_models(path: str) -> bool:
+    """True when `path` resolves inside MODELS_DIR (fail-closed root)."""
+    try:
+        return os.path.commonpath(
+            [os.path.realpath(path), os.path.realpath(MODELS_DIR)]
+        ) == os.path.realpath(MODELS_DIR)
+    except (OSError, ValueError):
+        return False
+
+
 def _resolve_model() -> str:
     override = sys.argv[2].strip() if len(sys.argv) > 2 and sys.argv[2].strip() else ""
     if not override:
@@ -61,14 +71,28 @@ def _resolve_model() -> str:
         print(f"[stt] Legacy model id '{override}' is from the torch era — "
               f"using bundled {os.path.basename(DEFAULT_GGUF)} instead.", flush=True)
         return DEFAULT_GGUF
-    if os.path.isfile(override):
-        return os.path.abspath(override)
+    # Fail closed on traversal: `..` must resolve inside models/.
+    if ".." in override.replace("\\", "/").split("/"):
+        anchored = override if os.path.isabs(override) else os.path.join(MODELS_DIR, override)
+        if not _inside_models(anchored):
+            raise RuntimeError(
+                f"refusing model path escaping models/: {override!r}")
+    if os.path.isabs(override):
+        # Explicit absolute pick: must exist and be a .gguf, else hard error
+        # (no silent fallback — the Settings field shows an inline error).
+        real = os.path.realpath(override)
+        if not os.path.isfile(real):
+            raise RuntimeError(f"STT model not found: {override!r}")
+        if not real.lower().endswith(".gguf"):
+            raise RuntimeError(f"STT model must be a .gguf file: {override!r}")
+        return real
     candidate = os.path.join(MODELS_DIR, os.path.basename(override))
     if os.path.isfile(candidate):
         return candidate
-    print(f"[stt] Model '{override}' not found — using bundled "
-          f"{os.path.basename(DEFAULT_GGUF)}.", flush=True)
-    return DEFAULT_GGUF
+    raise RuntimeError(
+        f"STT model '{override}' not found in models/ "
+        f"(expected {os.path.basename(DEFAULT_GGUF)} or a valid .gguf name). "
+        f"Clear the field for the bundled default.")
 
 
 def _find_transcribe_cli() -> str | None:

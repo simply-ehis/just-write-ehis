@@ -24,6 +24,101 @@ export const ttsError = writable<string | null>(null);
 export const llmRunning = writable(false);
 export const llmModelLoaded = writable(false);
 
+// ── Startup progress + probe flags ──────────────────────────────
+// Progress text while poll-until-healthy runs ("Starting Moonshine… 3s").
+// Probed flags let buttons gate on model_loaded only AFTER a first
+// ensure attempt — never disabled on cold boot before trying.
+export const sttStarting = writable<string | null>(null);
+export const ttsStarting = writable<string | null>(null);
+export const llmStarting = writable<string | null>(null);
+export const sttProbed = writable(false);
+export const ttsProbed = writable(false);
+
+export const STT_FETCH_HINT =
+  "Moonshine model not loaded — fetch it first (fetch_sidecars.py, see docs/MODELS.md).";
+export const TTS_FETCH_HINT =
+  "No voice output — fetch the TTS bundle first (fetch_sidecars.py --tts).";
+
+/** Poll `check` until `ok` (500ms interval, 15s cap). Never throws. */
+export async function pollUntilHealthy<T>(
+  check: () => Promise<T>,
+  ok: (h: T) => boolean,
+  label: string,
+  onTick: (msg: string, elapsedSec: number) => void,
+  capMs = 15000,
+  intervalMs = 500,
+): Promise<{ healthy: boolean; elapsedMs: number }> {
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      if (ok(await check())) return { healthy: true, elapsedMs: Date.now() - t0 };
+    } catch {
+      /* not up yet — keep polling */
+    }
+    const elapsed = Date.now() - t0;
+    if (elapsed >= capMs) return { healthy: false, elapsedMs: elapsed };
+    onTick(`Starting ${label}… ${Math.floor(elapsed / 1000)}s`, Math.floor(elapsed / 1000));
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+export interface SidecarSpec<THealth> {
+  kind: string;
+  isRunning: () => Promise<boolean>;
+  start: () => Promise<void>;
+  health: () => Promise<THealth>;
+  /** True when the health payload means "loaded enough to use". */
+  modelReady: (h: THealth) => boolean;
+  setRunning: (v: boolean) => void;
+  setLoaded: (v: boolean) => void;
+  setError: (e: string | null) => void;
+  setProgress: (msg: string | null, elapsedSec: number) => void;
+  setProbed: () => void;
+}
+
+/**
+ * ONE ensure flow for every sidecar (STT/TTS/LLM/memory): running → true;
+ * else start → poll-until-healthy (replaces the old fixed 500ms/1s
+ * sleeps that raced cold loads) → model flag from health. Returns false
+ * with the store error set on any failure. Notably, an LLM cold load
+ * (1–5s) now awaits readiness instead of letting ghost fall back.
+ */
+export async function ensureSidecar<THealth>(spec: SidecarSpec<THealth>): Promise<boolean> {
+  try {
+    if (await spec.isRunning()) {
+      spec.setRunning(true);
+      spec.setProbed();
+      return true;
+    }
+  } catch (e) {
+    spec.setError(String(e));
+    spec.setProbed();
+    return false;
+  }
+  try {
+    await spec.start();
+    spec.setRunning(true);
+    const res = await pollUntilHealthy(spec.health, () => true, spec.kind, (m, s) => spec.setProgress(m, s));
+    spec.setProgress(null, 0);
+    spec.setProbed();
+    if (!res.healthy) {
+      spec.setError(`${spec.kind} sidecar started but never became healthy.`);
+      spec.setRunning(false);
+      return false;
+    }
+    const h = await spec.health();
+    spec.setLoaded(spec.modelReady(h));
+    return true;
+  } catch (e) {
+    spec.setError(String(e));
+    spec.setRunning(false);
+    spec.setLoaded(false);
+    spec.setProgress(null, 0);
+    spec.setProbed();
+    return false;
+  }
+}
+
 // ── Derived ─────────────────────────────────────────────────────
 export const sttReady = derived(sttRunning, ($r) => $r);
 export const ttsReady = derived(ttsRunning, ($r) => $r);
@@ -57,24 +152,20 @@ export async function getSidecarsDir(): Promise<string> {
 
 /** Start the Moonshine sidecar (lazy, first tap). */
 export async function ensureStt(): Promise<boolean> {
-  const running = await api.sttIsRunning();
-  if (running) {
-    sttRunning.set(true);
-    return true;
-  }
-  try {
-    await api.sttStart(getPythonPath(), await getSidecarsDir(), get(settings).sttModel || undefined);
-    sttRunning.set(true);
-    // Wait briefly then check health
-    await new Promise((r) => setTimeout(r, 500));
-    const health = await api.sttHealth();
-    sttModelLoaded.set(health.model_loaded);
-    return true;
-  } catch (e) {
-    sttError.set(String(e));
-    sttRunning.set(false);
-    return false;
-  }
+  return ensureSidecar({
+    kind: "Moonshine",
+    isRunning: () => api.sttIsRunning(),
+    start: async () => {
+      await api.sttStart(getPythonPath(), await getSidecarsDir(), get(settings).sttModel || undefined);
+    },
+    health: () => api.sttHealth(),
+    modelReady: (h) => h.model_loaded,
+    setRunning: (v) => sttRunning.set(v),
+    setLoaded: (v) => sttModelLoaded.set(v),
+    setError: (e) => sttError.set(e),
+    setProgress: (m) => sttStarting.set(m),
+    setProbed: () => sttProbed.set(true),
+  });
 }
 
 /** Stop the Moonshine sidecar (e.g. when STT is toggled off). Best-effort. */
@@ -111,23 +202,20 @@ export async function transcribeAudio(
 
 /** Start the Kokoro sidecar (lazy, first tap). */
 export async function ensureTts(): Promise<boolean> {
-  const running = await api.ttsIsRunning();
-  if (running) {
-    ttsRunning.set(true);
-    return true;
-  }
-  try {
-    await api.ttsStart(getPythonPath(), await getSidecarsDir(), get(settings).ttsModel || undefined);
-    ttsRunning.set(true);
-    await new Promise((r) => setTimeout(r, 500));
-    const health = await api.ttsHealth();
-    ttsModelLoaded.set(health.model_loaded);
-    return true;
-  } catch (e) {
-    ttsError.set(String(e));
-    ttsRunning.set(false);
-    return false;
-  }
+  return ensureSidecar({
+    kind: "Kokoro",
+    isRunning: () => api.ttsIsRunning(),
+    start: async () => {
+      await api.ttsStart(getPythonPath(), await getSidecarsDir(), get(settings).ttsModel || undefined);
+    },
+    health: () => api.ttsHealth(),
+    modelReady: (h) => h.model_loaded,
+    setRunning: (v) => ttsRunning.set(v),
+    setLoaded: (v) => ttsModelLoaded.set(v),
+    setError: (e) => ttsError.set(e),
+    setProgress: (m) => ttsStarting.set(m),
+    setProbed: () => ttsProbed.set(true),
+  });
 }
 
 /** Synthesize text → returns base64 WAV audio. Uses settings for all params. */
@@ -147,7 +235,7 @@ export async function synthesizeText(
     if (!audio) {
       // Server reachable but voiceless: bundle not fetched (or all chunks
       // failed). Say so plainly instead of a cryptic decode error.
-      ttsError.set("No voice output — fetch the TTS bundle first (fetch_sidecars.py --tts).");
+      ttsError.set(TTS_FETCH_HINT);
       return null;
     }
     return { audio, sampleRate };
@@ -159,6 +247,7 @@ export async function synthesizeText(
 
 /** Stop current TTS playback (client-side audio element). */
 export async function stopTtsPlayback(): Promise<void> {
+  stopWavPlayback();
   ttsPlaying.set(false);
   try {
     await api.ttsStopPlayback();
@@ -183,24 +272,21 @@ export async function stopTts(): Promise<void> {
 
 /** Start the llama.cpp server sidecar (lazy, first ghost autocomplete). */
 export async function ensureLlm(): Promise<boolean> {
-  const running = await api.llmIsRunning();
-  if (running) {
-    llmRunning.set(true);
-    return true;
-  }
-  try {
-    const s = get(settings);
-    await api.llmStart(await getSidecarsDir(), s.llmModel || undefined, s.smallModelContextLength || undefined);
-    llmRunning.set(true);
-    await new Promise((r) => setTimeout(r, 1000));
-    const health = await api.llmHealth();
-    llmModelLoaded.set(!!health.model);
-    return true;
-  } catch (e) {
-    llmRunning.set(false);
-    llmModelLoaded.set(false);
-    return false;
-  }
+  return ensureSidecar({
+    kind: "llama",
+    isRunning: () => api.llmIsRunning(),
+    start: async () => {
+      const s = get(settings);
+      await api.llmStart(await getSidecarsDir(), s.llmModel || undefined, s.smallModelContextLength || undefined);
+    },
+    health: () => api.llmHealth(),
+    modelReady: (h) => !!h.model,
+    setRunning: (v) => llmRunning.set(v),
+    setLoaded: (v) => llmModelLoaded.set(v),
+    setError: () => {},
+    setProgress: (m) => llmStarting.set(m),
+    setProbed: () => {},
+  });
 }
 
 /** Stop the llama.cpp server sidecar (e.g. when LLM is toggled off). Best-effort. */
@@ -226,8 +312,31 @@ function getAudioContext(): AudioContext {
   return _audioCtx;
 }
 
+let currentSource: AudioBufferSourceNode | null = null;
+let playSeq = 0;
+
+/** Actually stop client-side playback: stop()+disconnect the live source.
+ * Decode caveat: decodeAudioData has no cancel — if stop lands mid-decode,
+ * the decoded buffer is dropped via the generation check below and at most
+ * a short tail (already-scheduled audio) plays out. */
+export function stopWavPlayback(): void {
+  playSeq++;
+  try {
+    currentSource?.stop();
+  } catch {
+    /* already stopped */
+  }
+  try {
+    currentSource?.disconnect();
+  } catch {
+    /* already disconnected */
+  }
+  currentSource = null;
+}
+
 /** Play base64 WAV audio. Returns a promise that resolves when done. */
 export function playWavBase64(b64: string): Promise<void> {
+  const seq = ++playSeq;
   return new Promise((resolve, reject) => {
     try {
       const raw = atob(b64);
@@ -236,10 +345,18 @@ export function playWavBase64(b64: string): Promise<void> {
 
       const ctx = getAudioContext();
       ctx.decodeAudioData(bytes.buffer, (buffer) => {
+        if (seq !== playSeq) {
+          resolve(); // stopped mid-decode: drop, don't play the tail
+          return;
+        }
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         source.connect(ctx.destination);
-        source.onended = () => resolve();
+        currentSource = source;
+        source.onended = () => {
+          if (currentSource === source) currentSource = null;
+          resolve();
+        };
         source.start();
       }, reject);
     } catch (e) {

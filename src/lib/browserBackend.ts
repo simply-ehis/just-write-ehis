@@ -498,6 +498,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       }
       const fact = { id: `fact-${Date.now().toString(36)}`, doc_id: docId, kind, key, value: String(payload.value) };
       store.bible.push(fact);
+      store.rebuildEntityIndex();
       try {
         localStorage.setItem("jwe-browser-bible-v1", JSON.stringify(store.bible));
       } catch {
@@ -508,6 +509,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "bible_delete_fact":
       store.bible = store.bible.filter((b) => b.id !== String(payload.factId));
+      store.rebuildEntityIndex();
       try {
         localStorage.setItem("jwe-browser-bible-v1", JSON.stringify(store.bible));
       } catch {
@@ -1219,6 +1221,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "get_vault_path":
       return "browser-preview-vault (localStorage)" as T;
+
+    case "sidecar_python_probe":
+      throw new Error("Python probe needs the desktop app — browsers can't spawn interpreters.");
 
     case "stt_start":
     case "stt_stop":

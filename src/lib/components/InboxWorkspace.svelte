@@ -158,14 +158,17 @@
     try {
       voiceBase = quickCapture ? quickCapture + " " : "";
       quickCapture = voiceBase;
-      voiceHandle = startDictation((text, isFinal) => {
-        if (isFinal) {
-          voiceBase = voiceBase + text + " ";
-          quickCapture = voiceBase;
-        } else {
-          quickCapture = voiceBase + text;
-        }
-      });
+      voiceHandle = startDictation(
+        (text, isFinal) => {
+          if (isFinal) {
+            voiceBase = voiceBase + text + " ";
+            quickCapture = voiceBase;
+          } else {
+            quickCapture = voiceBase + text;
+          }
+        },
+        (reason) => showToast(reason, "warning"),
+      );
       voiceActive = true;
     } catch {
       showToast("Voice input isn't supported in this browser.", "warning");

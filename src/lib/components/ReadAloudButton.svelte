@@ -11,6 +11,10 @@ import {
   stopTtsPlayback,
   ttsPlaying,
   ttsError,
+  ttsModelLoaded,
+  ttsProbed,
+  ttsStarting,
+  TTS_FETCH_HINT,
 } from '$lib/stores/audio';
 
   let {
@@ -22,10 +26,12 @@ import {
   } = $props();
 
   let playing = $state(false);
-  let currentAudio: HTMLAudioElement | null = null;
+  let loading = $state(false);
+  // Gated only after a probe attempt: never disabled on cold boot.
+  let gated = $derived($ttsProbed && !$ttsModelLoaded);
 
   async function handleToggle() {
-    if (playing) {
+    if (playing || loading) {
       stopPlayback();
     } else {
       await startPlayback();
@@ -36,37 +42,44 @@ import {
     // Lazy-load sidecar on first tap
     const ready = await ensureTts();
     if (!ready) return;
+    if ($ttsProbed && !$ttsModelLoaded) {
+      $ttsError = TTS_FETCH_HINT;
+      return;
+    }
 
     // Get text: selection first, fallback to full doc
     const selected = getSelection();
     const text = selected.trim() || getText();
     if (!text.trim()) return;
 
-    playing = true;
-    $ttsPlaying = true;
+    loading = true;
     $ttsError = null;
 
     try {
       const result = await synthesizeText(text);
       if (!result) {
-        playing = false;
-        $ttsPlaying = false;
+        loading = false;
         return;
       }
 
-      // Play the base64 WAV
+      // Play the base64 WAV (actually stops via stopPlayback now —
+      // stopWavPlayback halts the live source, no empty-decode hack).
+      loading = false;
+      playing = true;
+      $ttsPlaying = true;
       await playWavBase64(result.audio);
     } catch (e) {
       $ttsError = `TTS failed: ${e}`;
     } finally {
+      loading = false;
       playing = false;
       $ttsPlaying = false;
     }
   }
 
   function stopPlayback() {
-    playWavBase64('').catch(() => {});
-    stopTtsPlayback();
+    void stopTtsPlayback();
+    loading = false;
     playing = false;
     $ttsPlaying = false;
   }
@@ -75,11 +88,17 @@ import {
 <button
   class="tts-btn"
   class:playing
+  class:loading
+  disabled={gated}
   onclick={handleToggle}
-  title={playing ? 'Stop reading aloud' : 'Read aloud (Kokoro TTS)'}
-  aria-label={playing ? 'Stop reading aloud' : 'Read text aloud'}
+  title={gated ? TTS_FETCH_HINT : playing || loading ? 'Stop reading aloud' : 'Read aloud (Kokoro TTS)'}
+  aria-label={gated ? 'Voice model not loaded' : playing || loading ? 'Stop reading aloud' : 'Read text aloud'}
 >
-  {#if playing}
+  {#if loading}
+    <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 12" />
+    </svg>
+  {:else if playing}
     <!-- Stop icon -->
     <svg width="16" height="16" viewBox="0 0 16 16">
       <rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor" />
@@ -94,6 +113,9 @@ import {
   {/if}
 </button>
 
+{#if $ttsStarting && !playing && !loading}
+  <div class="tts-progress">{$ttsStarting}</div>
+{/if}
 {#if $ttsError}
   <div class="tts-error">{$ttsError}</div>
 {/if}
@@ -120,6 +142,27 @@ import {
     background: #2563eb;
     color: white;
     border-color: #2563eb;
+  }
+  .tts-btn.loading {
+    opacity: 0.6;
+    cursor: wait;
+  }
+  .spinner {
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .tts-progress {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  @media (max-width: 480px) {
+    .tts-btn {
+      width: 44px;
+      height: 44px;
+    }
   }
   .tts-error {
     font-size: 11px;

@@ -22,7 +22,11 @@
     "test:ai": "node tests/ai-request-unit.mjs",
     "test:writeback": "node tests/writeback-queue.mjs",
     "test:aierror": "node tests/ai-error-probe.mjs",
-    "test:aipanel": "node tests/ai-panel-error.mjs"
+    "test:aipanel": "node tests/ai-panel-error.mjs",
+    "test:sidecar": "node tests/sidecar-validate.mjs",
+    "test:ensure": "node tests/ensure-poll.mjs",
+    "test:resolve": "python tests/sidecar-resolve.py",
+    "test:entities": "node tests/entities-unit.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

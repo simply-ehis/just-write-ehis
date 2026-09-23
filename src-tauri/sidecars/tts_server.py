@@ -118,18 +118,34 @@ for lc, voices in VOICE_CATALOG.items():
         VOICE_PREFIX_TO_LANG[vid[:2]] = lc
 
 
+def _inside_models(path: str) -> bool:
+    """True when `path` resolves inside the sidecars models/ dir."""
+    models = os.path.realpath(os.path.join(HERE, "models"))
+    try:
+        return os.path.commonpath([os.path.realpath(path), models]) == models
+    except (OSError, ValueError):
+        return False
+
+
 def _model_dir() -> str:
     override = sys.argv[2].strip() if len(sys.argv) > 2 and sys.argv[2].strip() else ""
     if override in ("hexgrad/Kokoro-82M", "hexgrad/kokoro-82m"):
         print(f"[tts] Legacy repo id '{override}' is from the torch era — "
               f"using vendored bundle instead.", flush=True)
         return DEFAULT_MODEL_DIR
-    if override and os.path.isdir(override):
-        return os.path.abspath(override)
-    if override:
-        print(f"[tts] Model dir '{override}' not found — using vendored bundle.",
-              flush=True)
-    return DEFAULT_MODEL_DIR
+    if not override:
+        return DEFAULT_MODEL_DIR
+    # Fail closed on traversal: `..` must resolve inside models/.
+    if ".." in override.replace("\\", "/").split("/"):
+        anchored = override if os.path.isabs(override) else os.path.join(HERE, "models", override)
+        if not _inside_models(anchored):
+            raise RuntimeError(
+                f"refusing model dir escaping models/: {override!r}")
+    if not os.path.isdir(override):
+        raise RuntimeError(
+            f"TTS model dir '{override}' not found — clear the field for "
+            f"the vendored default.")
+    return os.path.abspath(override)
 
 
 def _find(rel_dir: str, patterns: list[str]) -> str | None:

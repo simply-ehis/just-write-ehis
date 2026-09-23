@@ -28,13 +28,37 @@ interface SpeechEventLike {
   results: SpeechResultLike[];
 }
 
+export type VoiceErrorKind = "not-allowed" | "no-speech" | "network" | "aborted" | "unknown";
+
+/** One-line human reason per Web Speech error kind (never silent). */
+export function voiceErrorReason(kind: string): string {
+  switch (kind) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "Microphone blocked — allow mic access in the browser/site settings.";
+    case "no-speech":
+      return "No speech heard — try again, closer to the mic.";
+    case "network":
+      return "Speech service unreachable — check the network connection.";
+    case "aborted":
+      return "Dictation stopped.";
+    default:
+      return `Dictation stopped (${kind || "unknown error"}).`;
+  }
+}
+
 /**
  * Start dictation. `onUpdate(fullText, isFinal)` fires as results stream;
  * callers typically write interim text into the box and commit on final.
+ * `onError(reason)` fires once per recognition error with a one-line
+ * human reason (not-allowed vs no-speech vs network).
  * Returns a handle whose `stop()` ends the session (also auto-ends on
  * `onend`). Throws if unsupported — check `voiceSupported()` first.
  */
-export function startDictation(onUpdate: (text: string, isFinal: boolean) => void): VoiceHandle {
+export function startDictation(
+  onUpdate: (text: string, isFinal: boolean) => void,
+  onError?: (reason: string, kind: VoiceErrorKind) => void,
+): VoiceHandle {
   const w = window as unknown as Record<string, new () => {
     continuous: boolean;
     interimResults: boolean;
@@ -78,9 +102,9 @@ export function startDictation(onUpdate: (text: string, isFinal: boolean) => voi
     if (finals) onUpdate(finals, true);
     else if (interim) onUpdate(interim, false);
   };
-  rec.onerror = () => {
-    // No-speech / not-allowed / network: just end quietly, the box keeps
-    // whatever was already committed.
+  rec.onerror = (e: { error: string }) => {
+    const kind = (e?.error || "unknown") as VoiceErrorKind;
+    onError?.(voiceErrorReason(kind), kind);
     try {
       rec.stop();
     } catch {

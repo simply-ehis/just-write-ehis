@@ -477,6 +477,9 @@ export const api = {
   sidecarStart: (pythonPath: string, harnessDir: string) =>
     safeInvoke<void>("sidecar_start", { pythonPath, harnessDir }),
 
+  sidecarPythonProbe: (pythonPath: string) =>
+    safeInvoke<string>("sidecar_python_probe", { pythonPath }),
+
   sidecarStop: () =>
     safeInvoke<void>("sidecar_stop"),
 

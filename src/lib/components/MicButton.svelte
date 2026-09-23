@@ -11,7 +11,12 @@ import {
   sttRecording,
   sttTranscribing,
   sttError,
+  sttModelLoaded,
+  sttProbed,
+  sttStarting,
+  STT_FETCH_HINT,
 } from '$lib/stores/audio';
+import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
 
   let {
     onTranscribe = (text: string) => {},
@@ -21,6 +26,14 @@ import {
 
   let recording = $state(false);
   let processing = $state(false);
+  // Explicit one-tap fallback: offered (never auto-switched) when the
+  // sidecar fails but Web Speech exists. Browser dictation may hit the
+  // network — the tap is the consent.
+  let offerBrowserVoice = $state(false);
+  let browserVoiceOn = $state(false);
+  let browserHandle = $state<VoiceHandle | null>(null);
+  // Gated only after a probe attempt: never disabled on cold boot.
+  let gated = $derived($sttProbed && !$sttModelLoaded);
   // WebAudio capture chain — produces real 16 kHz mono WAV for the STT server.
   let audioCtx: AudioContext | null = null;
   let micStream: MediaStream | null = null;
@@ -42,8 +55,18 @@ import {
 
   async function startRecording() {
     // Lazy-load sidecar on first tap
+    offerBrowserVoice = false;
     const ready = await ensureStt();
-    if (!ready) return;
+    if (!ready) {
+      // Offer (don't auto-switch) browser dictation when available.
+      if (voiceSupported()) offerBrowserVoice = true;
+      return;
+    }
+    if ($sttProbed && !$sttModelLoaded) {
+      $sttError = STT_FETCH_HINT;
+      if (voiceSupported()) offerBrowserVoice = true;
+      return;
+    }
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
@@ -162,6 +185,34 @@ import {
     return btoa(bin);
   }
 
+  function startBrowserDictation() {
+    offerBrowserVoice = false;
+    try {
+      browserHandle = startDictation(
+        (text, isFinal) => {
+          if (isFinal && text.trim()) onTranscribe(text.trim() + " ");
+        },
+        (reason) => {
+          $sttError = reason;
+        },
+      );
+      browserVoiceOn = true;
+      $sttRecording = true;
+    } catch {
+      $sttError = "Voice input not supported in this browser.";
+    }
+  }
+
+  function stopBrowserDictation() {
+    try {
+      browserHandle?.stop();
+    } finally {
+      browserHandle = null;
+      browserVoiceOn = false;
+      $sttRecording = false;
+    }
+  }
+
   async function processRecording() {
     processing = true;
     $sttTranscribing = true;
@@ -195,16 +246,22 @@ import {
   class="mic-btn"
   class:recording
   class:processing
-  disabled={processing}
-  onclick={handleToggle}
-  title={recording ? 'Stop recording' : 'Record (Moonshine Voice STT)'}
-  aria-label={recording ? 'Stop recording' : 'Start voice recording'}
+  disabled={processing || gated}
+  onclick={() => {
+    if (browserVoiceOn) {
+      stopBrowserDictation();
+      return;
+    }
+    void handleToggle();
+  }}
+  title={gated ? STT_FETCH_HINT : recording ? 'Stop recording' : 'Record (Moonshine Voice STT)'}
+  aria-label={gated ? 'Voice model not loaded' : recording ? 'Stop recording' : 'Start voice recording'}
 >
   {#if processing}
     <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">
       <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 12" />
     </svg>
-  {:else if recording}
+  {:else if recording || browserVoiceOn}
     <!-- Stop icon (square) -->
     <svg width="16" height="16" viewBox="0 0 16 16">
       <rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor" />
@@ -220,6 +277,14 @@ import {
   {/if}
 </button>
 
+{#if $sttStarting && !recording && !processing}
+  <div class="stt-progress">{$sttStarting}</div>
+{/if}
+{#if offerBrowserVoice}
+  <button class="browser-voice-offer" onclick={startBrowserDictation}>
+    Use browser dictation instead
+  </button>
+{/if}
 {#if $sttError}
   <div class="stt-error">{$sttError}</div>
 {/if}
@@ -261,5 +326,26 @@ import {
     font-size: 11px;
     color: #dc2626;
     margin-top: 2px;
+  }
+  .stt-progress {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .browser-voice-offer {
+    font-size: 11px;
+    color: var(--accent-primary);
+    text-decoration: underline;
+    margin-top: 2px;
+    padding: 6px 4px;
+  }
+  @media (max-width: 480px) {
+    .mic-btn {
+      width: 44px;
+      height: 44px;
+    }
+    .browser-voice-offer {
+      min-height: 44px;
+    }
   }
 </style>
