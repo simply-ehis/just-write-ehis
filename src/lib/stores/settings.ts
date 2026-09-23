@@ -37,6 +37,10 @@ export interface AppSettings {
   fontSize: number;
   lineHeight: number;
   fontFamily: string;
+  readerFont: "serif" | "sans" | "mono";
+  readerSize: number;
+  readerMeasure: "narrow" | "comfortable" | "wide";
+  readerTheme: "app" | "light" | "sepia" | "dark";
   typewriterDefault: boolean;
   focusDimmingDefault: boolean;
   autocorrectEnabled: boolean;
@@ -147,6 +151,13 @@ const defaultSettings: AppSettings = {
   fontSize: 15,
   lineHeight: 1.7,
   fontFamily: "JetBrains Mono",
+  // Reader prose controls (per-Reader, persisted). Size 16 reproduces the
+  // pre-controls look exactly; reset returns to base fontSize. Theme "app"
+  // follows the app theme; light/sepia/dark are fixed reading papers.
+  readerFont: "serif",
+  readerSize: 16,
+  readerMeasure: "comfortable",
+  readerTheme: "app",
   typewriterDefault: true,
   focusDimmingDefault: true,
   autocorrectEnabled: false,

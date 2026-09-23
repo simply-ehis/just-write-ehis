@@ -20,7 +20,17 @@ function inline(md: string): string {
     .replace(/`(.+?)`/g, "<code>$1</code>");
 }
 
-/** Render markdown to an HTML fragment (no <html> wrapper). */
+/**
+ * Render markdown to an HTML fragment (no <html> wrapper).
+ *
+ * IMAGE RULE (deliberately narrow): only the exact `(dropped-image)`
+ * target — emitted by bookparse for images stripped at import — renders
+ * as a captioned placeholder. Real `![alt](url)` stays literal text,
+ * exactly as before, so transclusions and the export fallback (the other
+ * two consumers of this module) see zero behavior change.
+ */
+const DROPPED_IMAGE_RE = /^!\[([^\]]*)\]\(dropped-image\)\s*$/;
+
 export function markdownToHtmlFragment(md: string): string {
   const lines = md.split("\n");
   const out: string[] = [];
@@ -41,6 +51,16 @@ export function markdownToHtmlFragment(md: string): string {
 
   for (const raw of lines) {
     const line = raw;
+    const dropped = line.match(DROPPED_IMAGE_RE);
+    if (dropped) {
+      flushPara();
+      flushList();
+      const alt = esc(dropped[1].trim() || "image");
+      out.push(
+        `<figure class="img-missing"><div class="img-missing-box" aria-hidden="true"></div><figcaption>${alt} — image not imported</figcaption></figure>`
+      );
+      continue;
+    }
     const h = line.match(/^(#{1,6})\s+(.+)/);
     const ulm = line.match(/^\s*[-*]\s+(.+)/);
     const olm = line.match(/^\s*\d+\.\s+(.+)/);

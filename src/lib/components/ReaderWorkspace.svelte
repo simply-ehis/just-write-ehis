@@ -5,7 +5,17 @@
   import { settings } from '$lib/stores/settings';
   import { processTransclusions } from '$lib/transclude';
   import { readImportFile } from '$lib/importFile';
+  import { markdownToHtmlFragment } from '$lib/markdown';
+  import {
+    anchorFor,
+    scrollTopFor,
+    sectionText,
+    splitSections,
+    type ReaderAnchor,
+    type ReaderSection,
+  } from '$lib/readerSections';
   import ReadAloudButton from '$lib/components/ReadAloudButton.svelte';
+  import ReaderProse from '$lib/components/ReaderProse.svelte';
   import PdfViewer from '$lib/components/PdfViewer.svelte';
   import { downloadConvertOutput } from '$lib/download';
   import Icon from '$lib/components/Icon.svelte';
@@ -23,6 +33,40 @@
   let readerPosition = $state(0);
   let scrollEl = $state<HTMLElement | null>(null);
   let posSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Structured reading flow: the stored body (markdown + transclude
+  // islands) is split into sections, each rendered through the shared
+  // markdown→HTML path (escape-first, so {@html} below is safe).
+  let readSections = $state<ReaderSection[]>([]);
+  // Progressive window: first N sections render, more append near the
+  // bottom (plus content-visibility in ReaderProse for layout cost).
+  let renderedCount = $state(12);
+  // Section currently read aloud (highlight + autoscroll target).
+  let readSectionIdx = $state<number | null>(null);
+
+  /** Rendered HTML per section, in section order. */
+  let sectionHtml = $derived(
+    readSections.map((s) =>
+      s.parts.map((p) => (p.type === "md" ? markdownToHtmlFragment(p.text) : p.text)).join("\n")
+    )
+  );
+
+  /** Plain text per section (TTS + progress), in section order. */
+  let sectionTexts = $derived(readSections.map((s) => sectionText(s)));
+
+  function bookCover(doc: Doc | null): string | null {
+    if (!doc?.frontmatter_json) return null;
+    try {
+      return (JSON.parse(doc.frontmatter_json) as { cover?: string }).cover ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  function bookProgress(entry: BookshelfEntry): number {
+    const r = entry.doc.reading_position ?? 0;
+    return Math.max(0, Math.min(100, Math.round(r * 100)));
+  }
 
   interface MarginNote {
     id: string;
@@ -158,22 +202,120 @@
     loadBooks();
   }
 
+  // Reading controls (one compact row; persisted per-Reader in settings).
+  function bumpSize(delta: number) {
+    const next = Math.max(12, Math.min(24, $settings.readerSize + delta));
+    $settings = { ...$settings, readerSize: next };
+  }
+
+  function resetSize() {
+    $settings = { ...$settings, readerSize: $settings.fontSize };
+  }
+
+  function cycleMeasure() {
+    const order = ["narrow", "comfortable", "wide"] as const;
+    const next = order[(order.indexOf($settings.readerMeasure) + 1) % order.length];
+    $settings = { ...$settings, readerMeasure: next };
+  }
+
+  function cycleReaderTheme() {
+    const order = ["app", "light", "sepia", "dark"] as const;
+    const next = order[(order.indexOf($settings.readerTheme) + 1) % order.length];
+    $settings = { ...$settings, readerTheme: next };
+  }
+
+  /** Section texts for read-aloud (chunked per call, never one giant call). */
+  function ttsSections(): { id: string; title: string; text: string }[] {
+    return readSections
+      .map((s, i) => ({ id: s.id, title: s.title, text: sectionTexts[i] ?? "" }))
+      .filter((s) => s.text.trim().length > 0);
+  }
+
+  /** Highlight + autoscroll the section being read; expand the window first. */
+  function handleTtsSection(idx: number | null) {
+    if (idx == null || idx < 0 || idx >= readSections.length) {
+      readSectionIdx = null;
+      return;
+    }
+    if (idx + 2 > renderedCount) renderedCount = Math.min(readSections.length, idx + 2);
+    readSectionIdx = idx;
+    requestAnimationFrame(() => {
+      const el = scrollEl?.querySelector(`section[data-section="${readSections[idx].id}"]`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }
+
+  /** Measured section boxes for anchoring (offsetTop/offsetHeight). */
+  function measuredSections(): { id: string; top: number; height: number }[] {
+    const root = scrollEl;
+    if (!root) return [];
+    const out: { id: string; top: number; height: number }[] = [];
+    for (const el of root.querySelectorAll("section[data-section]")) {
+      const h = el as HTMLElement;
+      if (h.offsetHeight > 0) out.push({ id: h.dataset.section ?? "", top: h.offsetTop, height: h.offsetHeight });
+    }
+    return out;
+  }
+
+  function readAnchor(): ReaderAnchor | null {
+    try {
+      const fm = JSON.parse(selectedBook?.doc.frontmatter_json ?? "{}") as {
+        readerAnchor?: ReaderAnchor;
+      };
+      const a = fm.readerAnchor;
+      if (a && typeof a.ratio === "number") return { section: a.section ?? null, ratio: a.ratio };
+    } catch {
+      /* no anchor yet */
+    }
+    return null;
+  }
+
   async function openBook(entry: BookshelfEntry) {
     selectedBook = entry;
     $currentDoc = entry.doc;
     if (!$openTabs.find((t) => t.id === entry.doc.id)) $openTabs = [entry.doc, ...$openTabs];
     readerContent = await processTransclusions(entry.doc.content || '');
+    readSections = splitSections(readerContent);
     readerPosition = entry.doc.reading_position || 0;
     marginNotes = readMarginNotes(entry.doc.frontmatter_json);
     noteDraft = "";
     noteQuote = "";
-    // Restore the saved position once laid out; then keep tracking.
-    requestAnimationFrame(() => {
+    readSectionIdx = null;
+    const anchor = readAnchor();
+    // Render at least through the anchored section, then restore once
+    // fonts settle (document.fonts.ready, not a single rAF that fires
+    // before webfonts shift layout). Falls back to the plain ratio.
+    const anchorIdx = anchor?.section
+      ? Math.max(0, readSections.findIndex((s) => s.id === anchor.section))
+      : -1;
+    renderedCount = Math.min(readSections.length, Math.max(12, anchorIdx + 2));
+    const restore = () => {
       const el = scrollEl;
-      if (el && readerPosition > 0) {
-        el.scrollTop = readerPosition * (el.scrollHeight - el.clientHeight);
+      if (!el) return;
+      const max = el.scrollHeight - el.clientHeight;
+      if (max <= 0) return;
+      if (anchor?.section) {
+        const at = scrollTopFor(anchor, measuredSections(), max);
+        if (at !== null) {
+          el.scrollTop = at;
+          return;
+        }
       }
-    });
+      if (readerPosition > 0) el.scrollTop = readerPosition * max;
+    };
+    if (typeof document !== "undefined" && document.fonts?.ready) {
+      let done = false;
+      const go = () => {
+        if (!done) {
+          done = true;
+          restore();
+        }
+      };
+      document.fonts.ready.then(go).catch(go);
+      setTimeout(go, 1500);
+    } else {
+      requestAnimationFrame(restore);
+    }
 
     if (entry.shelf_status === 'to-read') {
       await api.readerSetShelfStatus(entry.doc.id, 'reading');
@@ -192,8 +334,14 @@
   async function handleScroll(e: Event) {
     if (!selectedBook) return;
     const el = e.target as HTMLElement;
-    const pct = el.scrollTop / (el.scrollHeight - el.clientHeight || 1);
+    const max = el.scrollHeight - el.clientHeight;
+    const pct = max > 0 ? el.scrollTop / max : 0;
     readerPosition = pct;
+    // Progressive window: append sections near the bottom (cheap,
+    // scroll-driven — no observer lifecycle to leak).
+    if (max > 0 && el.scrollTop + el.clientHeight > max - 2000) {
+      if (renderedCount < readSections.length) renderedCount = Math.min(readSections.length, renderedCount + 8);
+    }
     // Debounced position sync (plain handle: event context only).
     if (posSaveTimer) clearTimeout(posSaveTimer);
     posSaveTimer = setTimeout(() => {
@@ -202,8 +350,23 @@
   }
 
   async function savePosition() {
-    if (selectedBook) {
-      await api.readerUpdatePosition(selectedBook.doc.id, readerPosition);
+    if (!selectedBook) return;
+    const el = scrollEl;
+    // Heading-anchored position (survives reflow); the plain ratio stays
+    // as fallback AND as the persisted reading_position (back-compat).
+    let anchor: ReaderAnchor = { section: null, ratio: readerPosition };
+    if (el && el.scrollHeight > el.clientHeight) {
+      anchor = anchorFor(measuredSections(), el.scrollTop + el.clientHeight * 0.4);
+      if (!anchor.section) anchor = { section: null, ratio: readerPosition };
+    }
+    await api.readerUpdatePosition(selectedBook.doc.id, readerPosition);
+    try {
+      const fm = JSON.parse(selectedBook.doc.frontmatter_json ?? "{}");
+      fm.readerAnchor = anchor;
+      const updated = await api.docSave(selectedBook.doc.id, undefined, undefined, undefined, JSON.stringify(fm));
+      selectedBook.doc = { ...selectedBook.doc, frontmatter_json: updated.frontmatter_json };
+    } catch {
+      /* anchor is best-effort; the ratio already persisted */
     }
   }
 
@@ -242,6 +405,7 @@
       // round trip; everything else shelves as md text.
       const kind = res.ext === "fountain" ? "fountain" : "md";
       const doc = await api.readerImportBook(res.title, res.text, kind);
+      await shelveCover(doc, res.cover);
       const entry: BookshelfEntry = { doc, shelf_status: 'to-read', rating: null };
       books.unshift(entry);
       showToast(`Imported "${res.title}"`, 'success');
@@ -268,9 +432,27 @@
     }
     const book = await parseBookFile(fileName, data, worker);
     const doc = await api.readerImportBook(book.title, book.text, ext);
+    await shelveCover(doc, book.cover ?? null);
     const entry: BookshelfEntry = { doc, shelf_status: 'to-read', rating: null };
     books.unshift(entry);
     showToast(`Imported "${book.title}"`, 'success');
+  }
+
+  /**
+   * EPUB cover art → vault attachment referenced from frontmatter (same
+   * pattern as Novel projects). Cover extraction itself is Area 9's job;
+   * this only renders the slot (kind badge when empty).
+   */
+  async function shelveCover(doc: Doc, cover: { b64: string; mime: string } | null | undefined) {
+    if (!cover?.b64) return;
+    try {
+      const ext = cover.mime.includes("png") ? "png" : "jpg";
+      const ref = await api.attachmentSave(`cover.${ext}`, cover.b64);
+      const updated = await api.docSave(doc.id, undefined, undefined, undefined, JSON.stringify({ cover: ref }));
+      doc.frontmatter_json = updated.frontmatter_json;
+    } catch {
+      /* cover art is dressing — a bad image never fails the import */
+    }
   }
 
   /** PDF page preview: stash bytes for PdfViewer (import stays text-only). */
@@ -358,11 +540,27 @@
           {#each books as entry}
             <button class="book-card" onclick={() => openBook(entry)}>
               <div class="book-cover">
-                <span class="book-kind">{entry.doc.kind.toUpperCase()}</span>
+                {#if bookCover(entry.doc)}
+                  <img class="book-cover-img" src={bookCover(entry.doc)} alt="" />
+                {:else}
+                  <span class="book-kind">{entry.doc.kind.toUpperCase()}</span>
+                {/if}
               </div>
               <div class="book-info">
                 <div class="book-title">{entry.doc.title}</div>
                 <div class="book-status">{entry.shelf_status}</div>
+                {#if (entry.doc.reading_position ?? 0) > 0}
+                  <div
+                    class="book-progress"
+                    role="progressbar"
+                    aria-label="Reading progress"
+                    aria-valuenow={bookProgress(entry)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <span class="book-progress-fill" style="width: {bookProgress(entry)}%"></span>
+                  </div>
+                {/if}
                 {#if entry.rating != null}
                   <div class="book-rating">{renderStars(entry.rating)}</div>
                 {/if}
@@ -401,18 +599,40 @@
         </button>
         {#if $settings.ttsEnabled}
           <ReadAloudButton
-            getText={() => {
-              // Strip HTML tags so TTS reads clean text, not <div> tags.
-              // Use DOMParser to avoid executing scripts from untrusted book content.
-              const doc = new DOMParser().parseFromString(readerContent, "text/html");
-              return doc.body.textContent || "";
-            }}
+            getText={() => sectionTexts.join("\n\n")}
             getSelection={() => {
               const selection = window.getSelection();
               return selection && selection.rangeCount > 0 ? selection.toString() : '';
             }}
+            getSections={ttsSections}
+            onSection={handleTtsSection}
           />
         {/if}
+      </div>
+      <div class="reader-controls" role="toolbar" aria-label="Reading controls">
+        <label class="ctl">
+          <span class="ctl-label">Font</span>
+          <select
+            bind:value={$settings.readerFont}
+            aria-label="Reading font"
+          >
+            <option value="serif">Serif</option>
+            <option value="sans">Sans</option>
+            <option value="mono">Mono</option>
+          </select>
+        </label>
+        <div class="ctl size-ctl" role="group" aria-label="Text size">
+          <button onclick={() => bumpSize(-1)} title="Smaller text" aria-label="Smaller text">A−</button>
+          <span class="size-val">{$settings.readerSize}</span>
+          <button onclick={() => bumpSize(1)} title="Larger text" aria-label="Larger text">A+</button>
+          <button onclick={resetSize} title="Reset to base font size" aria-label="Reset text size">Reset</button>
+        </div>
+        <button class="ctl-btn" onclick={cycleMeasure} title="Reading measure">
+          {$settings.readerMeasure === "narrow" ? "Narrow" : $settings.readerMeasure === "wide" ? "Wide" : "Comfortable"}
+        </button>
+        <button class="ctl-btn" onclick={cycleReaderTheme} title="Reading theme">
+          {$settings.readerTheme === "app" ? "Theme: App" : $settings.readerTheme === "light" ? "Theme: Light" : $settings.readerTheme === "sepia" ? "Theme: Sepia" : "Theme: Dark"}
+        </button>
       </div>
       <div class="reader-body">
         <DockSplit
@@ -424,9 +644,20 @@
         >
           {#snippet top()}
         <div class="reader-content" bind:this={scrollEl} onscroll={handleScroll}>
-          <div class="reader-prose">
-            {@html readerContent}
-          </div>
+          {#each readSections.slice(0, renderedCount) as section, i (section.id)}
+            <ReaderProse
+              html={sectionHtml[i] ?? ""}
+              font={$settings.readerFont}
+              sizePx={$settings.readerSize}
+              measure={$settings.readerMeasure}
+              theme={$settings.readerTheme}
+              sectionId={section.id}
+              active={readSectionIdx === i}
+            />
+          {/each}
+          {#if renderedCount < readSections.length}
+            <div class="reader-more" aria-hidden="true">Continuing…</div>
+          {/if}
         </div>
           {/snippet}
           {#snippet bottom()}
@@ -915,74 +1146,108 @@
     padding: var(--space-6);
   }
 
-  .reader-prose {
-    max-width: 700px;
-    margin: 0 auto;
-    font-family: var(--font-body);
-    font-size: var(--font-size-lg);
-    line-height: var(--line-height-relaxed);
-    color: var(--text-primary);
-    white-space: pre-wrap;
-  }
-
-  /* Transclusion styles: transclude.ts injects raw `.transclude*` HTML
-     via {@html}, so the inner selectors are :global (invisible to the
-     compiler's unused-selector check but live at runtime). */
-  .reader-prose :global(.transclude) {
-    border-left: 2px solid var(--accent-primary);
-    padding-left: var(--space-3);
-    margin: var(--space-2) 0;
-    background: var(--surface-elevated);
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    font-size: 0.95em;
-  }
-
-  .reader-prose :global(.transclude-content) {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    line-height: var(--line-height-relaxed);
-  }
-
-  .reader-prose :global(.transclude-footer) {
+  /* One compact control row: font, size, measure, theme. Wraps on mobile. */
+  .reader-controls {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-top: var(--space-2);
-    padding-top: var(--space-2);
-    border-top: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--text-muted);
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-base);
+    flex-shrink: 0;
   }
 
-  .reader-prose :global(.transclude-source) {
+  .reader-controls .ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .reader-controls select {
+    font-size: 12px;
+    padding: 3px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+  }
+
+  .reader-controls .size-ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .reader-controls .size-ctl button,
+  .reader-controls .ctl-btn {
+    font-size: 12px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .reader-controls .size-ctl button:hover,
+  .reader-controls .ctl-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+  }
+
+  .reader-controls .size-val {
+    min-width: 20px;
+    text-align: center;
     font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
   }
 
-  .reader-prose :global(.transclude-open) {
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-base);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 11px;
+  .reader-more {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: var(--space-4);
   }
 
-  .reader-prose :global(.transclude-error) {
-    border-left-color: var(--accent-semantic-red);
-    color: var(--accent-semantic-red);
+  .book-cover-img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    display: block;
   }
 
-  .reader-prose :global(.transclude-retry) {
-    margin-left: auto;
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-base);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 11px;
+  .book-progress {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-overlay);
+    overflow: hidden;
+    margin-top: 6px;
   }
+
+  .book-progress-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 2px;
+  }
+
+  @media (max-width: 480px) {
+    .reader-content {
+      padding: var(--space-3);
+    }
+
+    .reader-toolbar {
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+  }
+
+
 
   .pdf-preview-overlay {
     position: fixed;

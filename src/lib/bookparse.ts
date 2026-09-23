@@ -33,17 +33,35 @@ function decodeEntities(s: string): string {
     .replace(/&#39;|&apos;/g, "'");
 }
 
-/** Block HTML/XHTML to readable text, keeping headings on their own lines. */
+/**
+ * Block HTML/XHTML to structured markdown-ish text (the Reader renders
+ * stored bodies through markdownToHtmlFragment, so structure emitted
+ * here survives as real headings/lists instead of flat paragraphs):
+ * h1-h3 keep `#` depth, list items keep `- `, table cells keep ` | `,
+ * and dropped images leave a captioned `![alt](dropped-image)` marker
+ * (rendered as an explicit placeholder — never a silent gap).
+ */
 export function htmlToText(html: string): string {
   const withBreaks = html
+    .replace(/<img[^>]*>/gi, (tag) => {
+      const alt = attr(tag, "alt")?.trim() || "image";
+      return `\n\n![${alt.replace(/[\[\]]/g, "")}](dropped-image)\n\n`;
+    })
     .replace(/<\/(h[1-6]|p|div|li|tr|blockquote|section|article)>/gi, "\n\n")
-    .replace(/<(br|hr|li|tr)[^>]*>/gi, "\n")
+    .replace(/<(br|hr)[^>]*>/gi, "\n")
+    .replace(/<h([1-3])[^>]*>/gi, (_, n: string) => `\n\n${"#".repeat(Number(n))} `)
+    .replace(/<h[4-6][^>]*>/gi, "\n\n### ")
+    .replace(/<li[^>]*>/gi, "\n- ")
+    .replace(/<tr[^>]*>/gi, "\n")
+    .replace(/<\/(td|th)>/gi, " | ")
+    .replace(/<(td|th)[^>]*>/gi, "")
     .replace(/<[^>]+>/g, "");
   return decodeEntities(withBreaks)
     .split("\n")
     .map((l) => l.replace(/[ \t\u00a0]+/g, " ").trimEnd())
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+\|(\s*\n)/g, "$1")
     .trim();
 }
 

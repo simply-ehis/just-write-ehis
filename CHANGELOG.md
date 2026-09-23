@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased (Area 7: Reader structure + controls)
+
+### Changed
+- **Reading controls**: one compact row (serif/sans/mono, A± 12–24 with reset-to-base, narrow/comfortable/wide, app/light/sepia/dark) persisted per-Reader (`readerFont/readerSize/readerMeasure/readerTheme`, size 16 default reproduces today's look)
+- **Rendering honesty**: stored bodies render through the shared escape-first markdown→HTML path (headings/lists/quotes are real structure now, not literal `#`); bookparse emits `#`/`- `/`| ` structure and `![alt](dropped-image)` markers; only that exact target renders a captioned placeholder (transclude/export behavior unchanged); transclude islands pass through untouched
+- **Position that survives reflow**: heading-id + intra-section ratio anchors in frontmatter (ratio persisted as before for back-compat), restored after `document.fonts.ready`; library cards gain % progress bars + cover slot (EPUB art saved via attachment on import, kind badge when empty)
+- **Read-aloud tracking**: Reader passes pre-split sections; the button plays section-by-section with highlight + autoscroll (selection still wins; editors keep the single-shot path); long sections chunk at 6000 chars — never one giant call; stop resolves pending playback (no hangs, no tail)
+- **ONE ReaderProse** component (typography/theme/measure + native content-visibility windowing + progressive 12+8 section append). MarkdownViewer stays CodeMirror: it is an editable raw-file surface with save — converging it would delete editing. EditorPane reading mode untouched for the same reason
+- Mobile: toolbar + controls wrap at 480px, content padding scales
+
+### Tests
+- `tests/reader-sections.mjs` (24): splitting/islands, TTS strip, chunk bounds, anchor math, markdown structure, image-target scoping
+- `tests/reader-surface.mjs` (15): seeded book → sections/cards/progress/cover-slot, controls live-switch, read-aloud entry
+- `tests/audio-stop.mjs` (6): stop-mid-decode resolves with no tail, live stop halts source, normal path intact
+
 ## Unreleased (Area 6: voice sidecar lifecycle)
 
 ### Changed

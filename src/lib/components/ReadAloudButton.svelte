@@ -16,17 +16,25 @@ import {
   ttsStarting,
   TTS_FETCH_HINT,
 } from '$lib/stores/audio';
+import { chunkText } from '$lib/readerSections';
 
   let {
     getText = () => '',
     getSelection = () => '',
+    getSections = undefined,
+    onSection = undefined,
   }: {
     getText?: () => string;
     getSelection?: () => string;
+    /** Section flow (Reader): pre-split {id,title,text} — played one at a
+     * time with per-section highlight instead of one giant call. */
+    getSections?: () => { id: string; title: string; text: string }[];
+    onSection?: (idx: number | null) => void;
   } = $props();
 
   let playing = $state(false);
   let loading = $state(false);
+  let cancelled = false;
   // Gated only after a probe attempt: never disabled on cold boot.
   let gated = $derived($ttsProbed && !$ttsModelLoaded);
 
@@ -38,6 +46,22 @@ import {
     }
   }
 
+  /** Synthesize + play one chunk; false when cancelled or failed. */
+  async function playChunk(text: string): Promise<boolean> {
+    if (cancelled) return false;
+    const result = await synthesizeText(text);
+    if (cancelled || !result) return false;
+    playing = true;
+    $ttsPlaying = true;
+    try {
+      await playWavBase64(result.audio);
+    } finally {
+      playing = false;
+      $ttsPlaying = false;
+    }
+    return !cancelled;
+  }
+
   async function startPlayback() {
     // Lazy-load sidecar on first tap
     const ready = await ensureTts();
@@ -47,37 +71,47 @@ import {
       return;
     }
 
-    // Get text: selection first, fallback to full doc
+    // A live selection always wins (read exactly what is selected).
     const selected = getSelection();
-    const text = selected.trim() || getText();
-    if (!text.trim()) return;
+    const selText = selected.trim();
+    // Section flow (Reader): one call per section with highlight —
+    // never the whole book in one giant call.
+    const sections = !selText && getSections ? getSections().filter((s) => s.text.trim()) : null;
 
+    cancelled = false;
     loading = true;
     $ttsError = null;
 
     try {
-      const result = await synthesizeText(text);
-      if (!result) {
+      if (sections && sections.length > 0) {
+        for (let i = 0; i < sections.length; i++) {
+          if (cancelled) break;
+          onSection?.(i);
+          for (const chunk of chunkText(sections[i].text)) {
+            if (!(await playChunk(chunk))) break;
+          }
+        }
+        onSection?.(null);
+      } else {
+        // Legacy single-shot path (editors without sections).
+        const text = selText || getText();
+        if (!text.trim()) return;
         loading = false;
-        return;
+        await playChunk(text);
       }
-
-      // Play the base64 WAV (actually stops via stopPlayback now —
-      // stopWavPlayback halts the live source, no empty-decode hack).
-      loading = false;
-      playing = true;
-      $ttsPlaying = true;
-      await playWavBase64(result.audio);
     } catch (e) {
       $ttsError = `TTS failed: ${e}`;
     } finally {
       loading = false;
       playing = false;
       $ttsPlaying = false;
+      onSection?.(null);
     }
   }
 
   function stopPlayback() {
+    cancelled = true;
+    onSection?.(null);
     void stopTtsPlayback();
     loading = false;
     playing = false;
@@ -94,14 +128,14 @@ import {
   title={gated ? TTS_FETCH_HINT : playing || loading ? 'Stop reading aloud' : 'Read aloud (Kokoro TTS)'}
   aria-label={gated ? 'Voice model not loaded' : playing || loading ? 'Stop reading aloud' : 'Read text aloud'}
 >
-  {#if loading}
-    <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">
-      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 12" />
-    </svg>
-  {:else if playing}
-    <!-- Stop icon -->
+  {#if playing}
+    <!-- Stop icon (audio live; spinner shows while fetching instead) -->
     <svg width="16" height="16" viewBox="0 0 16 16">
       <rect x="3" y="3" width="10" height="10" rx="1" fill="currentColor" />
+    </svg>
+  {:else if loading}
+    <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20 12" />
     </svg>
   {:else}
     <!-- Speaker icon -->

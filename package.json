@@ -26,6 +26,9 @@
     "test:sidecar": "node tests/sidecar-validate.mjs",
     "test:ensure": "node tests/ensure-poll.mjs",
     "test:resolve": "python tests/sidecar-resolve.py",
+    "test:reader": "node tests/reader-surface.mjs",
+    "test:readersec": "node tests/reader-sections.mjs",
+    "test:audiostop": "node tests/audio-stop.mjs",
     "test:onboard": "node tests/onboard-flow.mjs",
     "test:entities": "node tests/entities-unit.mjs"
   },

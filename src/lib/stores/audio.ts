@@ -314,11 +314,13 @@ function getAudioContext(): AudioContext {
 
 let currentSource: AudioBufferSourceNode | null = null;
 let playSeq = 0;
+const pendingResolves = new Set<() => void>();
 
 /** Actually stop client-side playback: stop()+disconnect the live source.
  * Decode caveat: decodeAudioData has no cancel — if stop lands mid-decode,
  * the decoded buffer is dropped via the generation check below and at most
- * a short tail (already-scheduled audio) plays out. */
+ * a short tail (already-scheduled audio) plays out. Pending play promises
+ * resolve on stop so `await playWavBase64` never hangs the caller. */
 export function stopWavPlayback(): void {
   playSeq++;
   try {
@@ -332,12 +334,19 @@ export function stopWavPlayback(): void {
     /* already disconnected */
   }
   currentSource = null;
+  for (const resolve of [...pendingResolves]) resolve();
+  pendingResolves.clear();
 }
 
-/** Play base64 WAV audio. Returns a promise that resolves when done. */
+/** Play base64 WAV audio. Resolves when done — or on stop (never hangs). */
 export function playWavBase64(b64: string): Promise<void> {
   const seq = ++playSeq;
   return new Promise((resolve, reject) => {
+    pendingResolves.add(resolve);
+    const done = (fn: () => void) => {
+      pendingResolves.delete(resolve);
+      fn();
+    };
     try {
       const raw = atob(b64);
       const bytes = new Uint8Array(raw.length);
@@ -346,7 +355,7 @@ export function playWavBase64(b64: string): Promise<void> {
       const ctx = getAudioContext();
       ctx.decodeAudioData(bytes.buffer, (buffer) => {
         if (seq !== playSeq) {
-          resolve(); // stopped mid-decode: drop, don't play the tail
+          done(resolve); // stopped mid-decode: drop, don't play the tail
           return;
         }
         const source = ctx.createBufferSource();
@@ -355,12 +364,12 @@ export function playWavBase64(b64: string): Promise<void> {
         currentSource = source;
         source.onended = () => {
           if (currentSource === source) currentSource = null;
-          resolve();
+          done(resolve);
         };
         source.start();
-      }, reject);
+      }, (e) => done(() => reject(e)));
     } catch (e) {
-      reject(e);
+      done(() => reject(e));
     }
   });
 }

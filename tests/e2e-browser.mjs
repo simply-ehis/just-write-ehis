@@ -354,6 +354,16 @@ async function auditBatchWiring() {
   check("privacy badge in panel header", ai.includes("privacy-badge") && ai.includes("isWorkspacePrivate"));
   check("thinking countdown + mobile sheet", ai.includes("genElapsed") && ai.includes("88vh") && ai.includes("max-width: 480px"));
   check("small-model ctx + use-as-main settings", (await readFile(join(root, "src/lib/stores/settings.ts"), "utf8")).includes("smallModelContextLength") && (await readFile(join(root, "src/lib/stores/settings.ts"), "utf8")).includes("useSmallAsMain"));
+  const reader = await readFile(join(root, "src/lib/components/ReaderWorkspace.svelte"), "utf8");
+  check("reader controls + sections + cover/progress", reader.includes("reader-controls") && reader.includes("ReaderProse") && reader.includes("book-progress") && reader.includes("book-cover-img") && reader.includes("shelveCover"));
+  check("reader position anchors", reader.includes("readerAnchor") && reader.includes("document.fonts"));
+  check("reader TTS section flow", reader.includes("getSections") && reader.includes("handleTtsSection"));
+  const prose = await readFile(join(root, "src/lib/components/ReaderProse.svelte"), "utf8");
+  check("prose themes + measure", prose.includes("theme-sepia") && prose.includes("content-visibility"));
+  const rsec = await readFile(join(root, "src/lib/readerSections.ts"), "utf8");
+  check("section splitter + TTS strip + chunker", rsec.includes("splitSections") && rsec.includes("stripForTts") && rsec.includes("chunkText"));
+  const raloud = await readFile(join(root, "src/lib/components/ReadAloudButton.svelte"), "utf8");
+  check("read-aloud section mode", raloud.includes("getSections") && raloud.includes("onSection") && raloud.includes("chunkText"));
   const sidecar = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
   check("one managed sidecar core", sidecar.includes("pub struct ManagedSidecar") && sidecar.includes("impl Drop for ManagedSidecar") && !sidecar.includes("reqwest::Client::new()"));
   check("sidecar timeouts + reap/orphan", sidecar.includes("fn http_client") && sidecar.includes("reclaim_stale_port") && sidecar.includes("child.wait()"));
