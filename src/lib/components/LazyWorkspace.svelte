@@ -8,7 +8,7 @@
   import { untrack } from "svelte";
   import { loadWithTimeout } from "$lib/lazyLoad";
 
-  let { loader, label = "view" }: { loader: () => Promise<unknown>; label?: string } = $props();
+  let { loader, label = "view", componentProps = {} }: { loader: () => Promise<unknown>; label?: string; componentProps?: Record<string, unknown> } = $props();
 
   let comp = $state<unknown>(null);
   let failed = $state(false);
@@ -46,7 +46,7 @@
 
 {#if comp}
   {@const C = comp as import("svelte").Component}
-  <C />
+  <C {...componentProps} />
 {:else if failed}
   <div class="lazy-state lazy-failed" role="alert">
     <span>Couldn't load this view{errorMessage ? `: ${errorMessage}` : "."}</span>

@@ -21,9 +21,15 @@ pub fn run() {
         )));
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec!["--widget-autostart"]),
+    ));
+    builder
         .setup(|app| {
             let app_dir = app.path().app_data_dir()
                 .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;

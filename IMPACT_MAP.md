@@ -56,7 +56,7 @@
 | Dictionary + place stamp | `autocorrect.ts` (language gate), `settings.ts` + `SettingsPane.svelte` (selector), `stamp.ts` + `LogsWorkspace.svelte` (opt-in Nominatim/Open-Meteo stamp) | Low |
 | Model slots + voice models | `AiPanel.svelte` (chat/composer/structurize → main slot), `providerTest.ts` + Settings test buttons, `settings.ts` + audio store (sttModel/ttsModel), `sidecar.rs` + `commands.rs` + `api.ts` (model argv), both `.py` sidecars (argv overrides), `docs/MODELS.md` picks | Medium |
 | AI memory harness (vendored) | `sidecars/harness/*` (MIT, attributed) + `memory_server.py`, `sidecar.rs` MemoryManager, `commands.rs` + `lib.rs` (8 commands), `api.ts`, `harness.ts`, `AiPanel.svelte` (recall/scrub/learn), `SettingsPane.svelte` (Privacy UI + wipe), `docs/HARNESS.md` | Medium |
-| Companion widget | `tauri.conf.json`, `capabilities/*.json` (default + main-window + widget-window), `main.ts` (dynamic App/Widget route), `WidgetApp.svelte`, `widgetBridge.ts`, `App.svelte`, `EditorPane.svelte`, `QuickCaptureInput.svelte`, `SettingsPane.svelte`, `settings.ts`, `lib.rs`, `docs/WIDGET.md` | High |
+| Companion widget | `tauri.conf.json` (transparent 56px figure, runtime resize/dock), `capabilities/*.json` (window + autostart ACL), `Cargo.toml`/`Cargo.lock` + npm autostart plugin, `main.ts` (static App import, lazy WidgetApp), `WidgetApp.svelte`, `LazyWorkspace.svelte`, all canonical workspace components, `LibraryWorkspace.svelte` (Files deep-link), `widgetBridge.ts`, `App.svelte`, `SettingsPane.svelte`, `settings.ts` + `settingsValidate.ts`, `lib.rs`, `docs/WIDGET.md` | High |
 
 ## Dependency Graph
 
@@ -70,6 +70,11 @@ App.svelte
   ├── StatusBar.svelte → stores/app.ts
   └── EmptyState.svelte → stores/app.ts, api.ts
 ```
+`main.ts?widget=1` → `WidgetApp.svelte` (dynamic import) → `LazyWorkspace.svelte` (selected canonical workspace),
+`EmptyState.svelte`, normal workspace/settings stores, save state, and main/widget events.
+`main.ts` mounts `App.svelte` statically — a dynamic import there emits
+root-absolute chunk URLs that the jsdom probes cannot resolve.
+
 
 ---
 

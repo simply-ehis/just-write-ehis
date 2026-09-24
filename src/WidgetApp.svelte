@@ -1,148 +1,204 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { exit } from "@tauri-apps/plugin-process";
-  import { api, isBrowserPreview, type Doc } from "$lib/api";
-  import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
+  import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
+  import { api, isBrowserPreview } from "$lib/api";
+  import { currentDoc, currentWorkspace, openTabs, workspaces, type WorkspaceId } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
+  import { saveState } from "$lib/stores/saveState";
   import { showConflict } from "$lib/stores/conflict";
   import { showToast } from "$lib/stores/notifications";
-  import type EditorPane from "$lib/components/EditorPane.svelte";
-  import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
+  import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
+  import EmptyState from "$lib/components/EmptyState.svelte";
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import Icon from "$lib/components/Icon.svelte";
 
-  type WidgetWorkspace = "write" | "logs" | "inbox";
+  const COLLAPSED_SIZE = 56;
+  const EXPANDED_WIDTH = 520;
+  const EXPANDED_HEIGHT = 720;
 
-  const WORKSPACES: { id: WidgetWorkspace; label: string }[] = [
-    { id: "write", label: "Write" },
-    { id: "logs", label: "Logs" },
-    { id: "inbox", label: "Inbox" },
-  ];
+  type DockEdge = "left" | "right" | "top" | "bottom";
+  type DockOffset = number;
 
-  type DocOption = Pick<Doc, "id" | "title" | "updated_at">;
-
-  let docs = $state<DocOption[]>([]);
-  let selectedDocId = $state("");
-  let EditorComponent = $state<typeof EditorPane | null>(null);
   let widgetVisible = $state(isBrowserPreview());
-  let quickCapture = $state("");
-  let loading = $state(true);
-  let captureSaving = $state(false);
-  let error = $state("");
-  let editorError = $state("");
-  let mainHidden = $state(false);
-  let loadedWorkspace = $state<WidgetWorkspace | "">("");
+  let loadedWorkspace = $state<WorkspaceId | "">("");
+  let prepareError = $state("");
+  let prepareLoading = $state(false);
   let loadRequest = 0;
+  let collapseTimer: ReturnType<typeof setTimeout> | null = null;
   let logo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+
+  function isWorkspaceId(value: string): value is WorkspaceId {
+    return workspaces.some((workspace) => workspace.id === value);
+  }
+
+  let selectedWorkspace = $derived(isWorkspaceId($settings.widgetWorkspace) ? $settings.widgetWorkspace : "home");
+  let selectedLabel = $derived(workspaces.find((workspace) => workspace.id === selectedWorkspace)?.label ?? "Widget");
+  let workspaceLoader = $derived.by(() => {
+    switch (selectedWorkspace) {
+      case "home":
+        return () => import("$lib/components/HomePane.svelte");
+      case "logs":
+        return () => import("$lib/components/LogsWorkspace.svelte");
+      case "write":
+        return () => import("$lib/components/EditorPane.svelte");
+      case "inbox":
+        return () => import("$lib/components/InboxWorkspace.svelte");
+      case "map":
+        return () => import("$lib/components/NodeMapWorkspace.svelte");
+      case "canvas":
+        return () => import("$lib/components/CanvasWorkspace.svelte");
+      case "novel":
+        return () => import("$lib/components/NovelWorkspace.svelte");
+      case "script":
+        return () => import("$lib/components/ScriptWorkspace.svelte");
+      case "projects":
+        return () => import("$lib/components/ProjectsWorkspace.svelte");
+      case "reader":
+        return () => import("$lib/components/ReaderWorkspace.svelte");
+      case "files":
+      case "properties":
+        return () => import("$lib/components/LibraryWorkspace.svelte");
+      default:
+        return () => import("$lib/components/EmptyState.svelte");
+    }
+  });
+  let workspaceComponentProps = $derived(
+    selectedWorkspace === "write"
+      ? { companionMode: true }
+      : selectedWorkspace === "files"
+        ? { initialTab: "files" as const }
+        : selectedWorkspace === "properties"
+          ? { initialTab: "views" as const }
+          : {},
+  );
 
   $effect(() => {
     document.documentElement.dataset.theme = $settings.theme;
   });
 
   $effect(() => {
-    if ($settings.companionWidgetVisible || isBrowserPreview() || !widgetVisible) return;
-    widgetVisible = false;
-    void getCurrentWindow().hide().catch((e) => {
-      showToast(`Couldn't hide companion widget: ${e instanceof Error ? e.message : e}`, "error");
-    });
+    const workspace = selectedWorkspace;
+    if (!widgetVisible || workspace === loadedWorkspace) return;
+    loadedWorkspace = workspace;
+    void prepareWorkspace(workspace);
   });
 
   $effect(() => {
-    const workspace = $settings.widgetWorkspace;
-    if (!widgetVisible || workspace === loadedWorkspace) return;
-    loadedWorkspace = workspace;
-    void loadWorkspace(workspace);
+    if (!isBrowserPreview() && widgetVisible) {
+      void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
+    }
   });
 
-  async function ensureEditor() {
-    if (EditorComponent) return;
-    try {
-      EditorComponent = (await import("$lib/components/EditorPane.svelte")).default;
-      editorError = "";
-    } catch (e) {
-      editorError = `Editor failed to load: ${e instanceof Error ? e.message : e}`;
-    }
-  }
-
-  function localDate(date: Date): string {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  async function selectDoc(doc: DocOption, workspace: WidgetWorkspace, expectedRequest = loadRequest) {
-    const full = await api.docGet(doc.id);
-    if (expectedRequest !== loadRequest || full.locked) return;
-    selectedDocId = full.id;
-    currentDoc.set(full);
-    currentWorkspace.set(workspace);
-    openTabs.set([full]);
-    await api.usageRecord(full.id, "open").catch(() => {});
-  }
-
-  async function loadWorkspace(workspace: WidgetWorkspace) {
+  async function prepareWorkspace(workspace: WorkspaceId) {
     const request = ++loadRequest;
-    loading = true;
-    error = "";
+    currentWorkspace.set(workspace);
+    prepareError = "";
+    if (workspace !== "write") {
+      currentDoc.set(null);
+      openTabs.set([]);
+      return;
+    }
+
+    prepareLoading = true;
     try {
       const results = await api.docSearchFull("", workspace);
       if (request !== loadRequest) return;
-      docs = results
-        .map(({ doc }) => ({ id: doc.id, title: doc.title, updated_at: doc.updated_at }))
-        .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
-      if (docs.length > 0) await selectDoc(docs[0], workspace, request);
-      else {
-        selectedDocId = "";
+      const doc = results[0]?.doc;
+      if (doc && !doc.locked) {
+        currentDoc.set(doc);
+        openTabs.set([doc]);
+        await api.usageRecord(doc.id, "open").catch(() => {});
+      } else {
         currentDoc.set(null);
-        currentWorkspace.set(workspace);
         openTabs.set([]);
       }
     } catch (e) {
-      if (request === loadRequest) error = e instanceof Error ? e.message : String(e);
+      if (request === loadRequest) prepareError = e instanceof Error ? e.message : String(e);
     } finally {
-      if (request === loadRequest) loading = false;
+      if (request === loadRequest) prepareLoading = false;
     }
   }
 
-  function chooseDoc(id: string) {
-    const doc = docs.find((item) => item.id === id);
-    if (doc) void selectDoc(doc, $settings.widgetWorkspace);
-  }
-
-  async function capture() {
-    const text = quickCapture.trim();
-    if (!text || captureSaving) return;
-    captureSaving = true;
+  async function placeWidget(collapsed: boolean, edge: DockEdge, offset: DockOffset) {
+    if (isBrowserPreview()) return;
     try {
-      const workspace = $settings.widgetWorkspace;
-      if (workspace === "logs") {
-        const log = await api.logGetOrCreate(localDate(new Date()));
-        const timestamp = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-        const block = `\n\n## ${timestamp}\n\n${text}\n`;
-        await api.docSave(log.id, undefined, `${log.content ?? ""}${block}`);
-        quickCapture = "";
-        await loadWorkspace("logs");
-      } else {
-        const kind = workspace === "inbox" ? "snippet" : "doc";
-        await api.docCreate(workspace, kind, text.slice(0, 80), undefined, text);
-        quickCapture = "";
-        await loadWorkspace(workspace);
-      }
+      const widget = getCurrentWindow();
+      const monitor = await currentMonitor();
+      const scale = monitor?.scaleFactor ?? 1;
+      const areaPosition = monitor?.workArea.position.toLogical(scale);
+      const areaSize = monitor?.workArea.size.toLogical(scale);
+      const size = collapsed
+        ? new LogicalSize(COLLAPSED_SIZE, COLLAPSED_SIZE)
+        : new LogicalSize(
+          Math.min(EXPANDED_WIDTH, areaSize?.width ?? EXPANDED_WIDTH),
+          Math.min(EXPANDED_HEIGHT, areaSize?.height ?? EXPANDED_HEIGHT),
+        );
+      await widget.setSize(size);
+      if (!monitor || !areaPosition || !areaSize) return;
+      const maxY = Math.max(areaPosition.y, areaPosition.y + areaSize.height - size.height);
+      const maxX = Math.max(areaPosition.x, areaPosition.x + areaSize.width - size.width);
+      const primary = Math.min(Math.max(offset, 0), edge === "left" || edge === "right" ? maxY - areaPosition.y : maxX - areaPosition.x);
+      const x = edge === "left"
+        ? areaPosition.x
+        : edge === "right"
+          ? areaPosition.x + areaSize.width - size.width
+          : edge === "top"
+            ? areaPosition.x + primary
+            : areaPosition.x + primary;
+      const y = edge === "top"
+        ? areaPosition.y
+        : edge === "bottom"
+          ? areaPosition.y + areaSize.height - size.height
+          : areaPosition.y + primary;
+      await widget.setPosition(new LogicalPosition(x, y));
     } catch (e) {
-      showToast(`Quick capture failed: ${e instanceof Error ? e.message : e}`, "error");
-    } finally {
-      captureSaving = false;
+      showToast(`Widget docking failed: ${e instanceof Error ? e.message : e}`, "error");
     }
+  }
+
+  async function updateDockFromMove(x: number, y: number) {
+    if (isBrowserPreview()) return;
+    try {
+      const widget = getCurrentWindow();
+      const monitor = await currentMonitor();
+      if (!monitor) return;
+      const scale = monitor.scaleFactor;
+      const position = new LogicalPosition(x / scale, y / scale);
+      const size = (await widget.outerSize()).toLogical(scale);
+      const areaPosition = monitor.workArea.position.toLogical(scale);
+      const areaSize = monitor.workArea.size.toLogical(scale);
+      const distances = {
+        left: Math.abs(position.x - areaPosition.x),
+        right: Math.abs(areaPosition.x + areaSize.width - (position.x + size.width)),
+        top: Math.abs(position.y - areaPosition.y),
+        bottom: Math.abs(areaPosition.y + areaSize.height - (position.y + size.height)),
+      };
+      const edge = (Object.keys(distances) as DockEdge[]).reduce((closest, candidate) =>
+        distances[candidate] < distances[closest] ? candidate : closest,
+      );
+      const offset = edge === "left" || edge === "right" ? position.y - areaPosition.y : position.x - areaPosition.x;
+      const clampedOffset = Math.max(0, Math.round(offset));
+      settings.update((current) => current.widgetDockEdge === edge && current.widgetDockOffset === clampedOffset
+        ? current
+        : { ...current, widgetDockEdge: edge, widgetDockOffset: clampedOffset });
+    } catch (e) {
+      showToast(`Widget position could not be saved: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  async function setCollapsed(collapsed: boolean) {
+    settings.update((current) => ({ ...current, widgetCollapsed: collapsed }));
+    await placeWidget(collapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
   }
 
   async function openInApp() {
-    if (!$currentDoc) return;
     try {
-      await emitTo("main", "widget-open-doc", $currentDoc.id);
+      if (selectedWorkspace === "write" && $currentDoc) {
+        await emitTo("main", "widget-open-doc", $currentDoc.id);
+      } else {
+        await emitTo("main", "widget-open-workspace", selectedWorkspace);
+      }
       await closeWidget();
     } catch (e) {
       showToast(`Couldn't open in app: ${e instanceof Error ? e.message : e}`, "error");
@@ -160,26 +216,26 @@
     widgetVisible = false;
   }
 
-  async function reopenMain() {
-    if (isBrowserPreview()) return;
-    try {
-      const main = await WebviewWindow.getByLabel("main");
-      if (!main) throw new Error("main window is unavailable");
-      await main.show();
-      await main.unminimize();
-      await main.setFocus();
-      mainHidden = false;
-    } catch (e) {
-      showToast(`Couldn't reopen main window: ${e instanceof Error ? e.message : e}`, "error");
-    }
+  function handleFigureKeydown(event: KeyboardEvent) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    void setCollapsed(false);
   }
 
-  async function quitApp() {
-    if (!isBrowserPreview()) await exit(0);
+  function handleWindowBlur() {
+    if ($settings.widgetCollapsed) return;
+    if (collapseTimer) clearTimeout(collapseTimer);
+    collapseTimer = setTimeout(() => {
+      if (!isBrowserPreview()) void setCollapsed(true);
+    }, 180);
   }
 
   onMount(() => {
-    if (isBrowserPreview()) return;
+    if (isBrowserPreview()) {
+      window.addEventListener("blur", handleWindowBlur);
+      return () => window.removeEventListener("blur", handleWindowBlur);
+    }
+
     const cleanups: UnlistenFn[] = [];
     let disposed = false;
     const track = async (pending: Promise<UnlistenFn>) => {
@@ -187,6 +243,7 @@
       if (disposed) cleanup();
       else cleanups.push(cleanup);
     };
+
     void (async () => {
       try {
         const widget = getCurrentWindow();
@@ -194,18 +251,25 @@
           event.preventDefault();
           void closeWidget();
         }));
+        await track(widget.onMoved(({ payload }) => {
+          void updateDockFromMove(payload.x, payload.y);
+        }));
+        await track(widget.onFocusChanged(({ payload }) => {
+          if (!payload) handleWindowBlur();
+        }));
         await track(listen("widget-show", () => {
           widgetVisible = true;
-          void ensureEditor();
+          settings.update((current) => ({ ...current, companionWidgetVisible: true }));
+          void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
         }));
-        await track(listen("widget-hide", () => { widgetVisible = false; }));
-        await track(listen("main-window-hidden", () => { mainHidden = true; }));
-        await track(listen("main-window-shown", () => { mainHidden = false; }));
+        await track(listen("widget-hide", () => {
+          widgetVisible = false;
+        }));
         await track(listen<boolean>("widget-tray-visibility", (event) => {
           if (typeof event.payload !== "boolean") return;
           widgetVisible = event.payload;
           settings.update((current) => ({ ...current, companionWidgetVisible: event.payload }));
-          if (event.payload) void ensureEditor();
+          if (event.payload) void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
         }));
         await track(listen<string>("file-changed", (event) => {
           if (typeof event.payload !== "string") return;
@@ -214,120 +278,110 @@
           }
         }));
         widgetVisible = await widget.isVisible();
-        if (widgetVisible) void ensureEditor();
-        const main = await WebviewWindow.getByLabel("main");
-        if (main) mainHidden = !(await main.isVisible());
+        if (widgetVisible) {
+          settings.update((current) => ({ ...current, companionWidgetVisible: true }));
+          await placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
+        }
       } catch (e) {
-        mainHidden = true;
         showToast(`Companion window bridge failed: ${e instanceof Error ? e.message : e}`, "error");
       }
     })();
+
     return () => {
       disposed = true;
+      if (collapseTimer) clearTimeout(collapseTimer);
       cleanups.forEach((cleanup) => cleanup());
     };
   });
 </script>
 
 <svelte:head>
-  <title>Just Write ehis — Companion</title>
+  <title>Just Write ehis — {selectedLabel}</title>
 </svelte:head>
 
-<div class="widget-shell">
-  <header class="widget-titlebar" role="toolbar" aria-label="Companion window controls" tabindex="0" onmousedown={(event) => { if (event.button === 0) void getCurrentWindow().startDragging(); }}>
-    <img src={logo} alt="Just Write ehis" />
-    <div class="titlebar-actions">
-      <button onmousedown={(event) => event.stopPropagation()} onclick={openInApp} disabled={!$currentDoc} title="Open in app" aria-label="Open document in main app">
-        <Icon name="arrow-right" size={16} />
-      </button>
-      <button onmousedown={(event) => event.stopPropagation()} onclick={closeWidget} title="Hide to tray" aria-label="Hide companion widget to tray">
-        <Icon name="x" size={16} />
-      </button>
-    </div>
-  </header>
-
-  {#if mainHidden}
-    <div class="orphan-state">
-      <img src={logo} alt="Just Write ehis" />
-      <h1>Main window is hidden</h1>
-      <p>The companion remains available without duplicating app services.</p>
-      <div class="orphan-actions">
-        <button class="primary" onclick={reopenMain}>Reopen main</button>
-        <button onclick={quitApp}>Quit app</button>
+{#if $settings.widgetCollapsed}
+  <div
+    class="widget-figure"
+    role="button"
+    tabindex="0"
+    aria-label={`Expand ${selectedLabel} widget`}
+    title={`Expand ${selectedLabel}`}
+    onmousedown={(event) => { if (event.button === 0) void getCurrentWindow().startDragging(); }}
+    onclick={() => void setCollapsed(false)}
+    onkeydown={handleFigureKeydown}
+  >
+    <img src={logo} alt="" />
+    {#if $saveState !== "idle"}
+      <span class="save-signal {$saveState}" aria-label={$saveState === "saving" ? "Saving" : "Saved"}></span>
+    {/if}
+  </div>
+{:else}
+  <div class="widget-shell">
+    <header
+      class="widget-titlebar"
+      role="toolbar"
+      aria-label="Widget controls"
+      tabindex="0"
+      onmousedown={(event) => { if (event.button === 0) void getCurrentWindow().startDragging(); }}
+    >
+      <div class="widget-heading">
+        <img src={logo} alt="Just Write ehis" />
+        <span>{selectedLabel}</span>
+        {#if $saveState !== "idle"}
+          <span class="save-status" aria-live="polite">{$saveState === "saving" ? "Saving" : "Saved"}</span>
+        {/if}
       </div>
-    </div>
-  {:else}
-    <div class="widget-controls">
-      <div class="workspace-picker" role="group" aria-label="Widget workspace">
-        {#each WORKSPACES as workspace}
-          <button
-            class:active={$settings.widgetWorkspace === workspace.id}
-            onclick={() => settings.update((current) => ({ ...current, widgetWorkspace: workspace.id }))}
-          >{workspace.label}</button>
-        {/each}
+      <div class="titlebar-actions">
+        <button onmousedown={(event) => event.stopPropagation()} onclick={openInApp} title="Open in main app" aria-label="Open workspace in main app">
+          <Icon name="arrow-right" size={16} />
+        </button>
+        <button onmousedown={(event) => event.stopPropagation()} onclick={() => void setCollapsed(true)} title="Collapse widget" aria-label="Collapse widget">
+          <Icon name="arrow-right" size={16} />
+        </button>
       </div>
-      <QuickCaptureInput bind:value={quickCapture} voiceEnabled={false} disabled={captureSaving} onSubmit={capture} />
-      {#if docs.length > 0}
-        <select aria-label="Widget document" bind:value={selectedDocId} onchange={() => chooseDoc(selectedDocId)}>
-          {#each docs as doc}
-            <option value={doc.id}>{doc.title || "Untitled"}</option>
-          {/each}
-        </select>
-      {/if}
-    </div>
+    </header>
 
-    <ConflictBanner />
-
-    <main class="widget-editor">
-      {#if loading}
-        <div class="state">Loading…</div>
-      {:else if error}
-        <div class="state error">
-          <span>{error}</span>
-          <button onclick={() => { loadedWorkspace = ""; void loadWorkspace($settings.widgetWorkspace); }}>Retry</button>
-        </div>
-      {:else if editorError}
-        <div class="state error">{editorError}</div>
-      {:else if $currentDoc && EditorComponent}
-        <EditorComponent companionMode />
-      {:else if $currentDoc}
-        <div class="state">Loading editor…</div>
-      {:else}
-        <div class="state">No document yet. Use quick capture to start one.</div>
-      {/if}
-    </main>
-  {/if}
-</div>
+    {#if prepareError}
+      <div class="widget-error" role="alert">
+        <span>{prepareError}</span>
+        <button onclick={() => { loadedWorkspace = ""; void prepareWorkspace(selectedWorkspace); }}>Retry</button>
+      </div>
+    {:else if selectedWorkspace === "write" && !$currentDoc && !prepareLoading}
+      <EmptyState />
+    {:else}
+      <ConflictBanner />
+      <main class="widget-workspace">
+        {#if prepareLoading && selectedWorkspace === "write"}
+          <div class="widget-state" role="status">Loading…</div>
+        {:else}
+          {#key selectedWorkspace}
+            <LazyWorkspace loader={workspaceLoader} label={selectedLabel} componentProps={workspaceComponentProps} />
+          {/key}
+        {/if}
+      </main>
+    {/if}
+  </div>
+{/if}
 
 <style>
-  :global(html), :global(body), :global(#app) { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  :global(html), :global(body), :global(#app) { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+  .widget-figure { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-raised); box-shadow: 0 8px 24px rgb(0 0 0 / 24%); color: var(--text-primary); cursor: grab; user-select: none; }
+  .widget-figure:active { cursor: grabbing; }
+  .widget-figure img { width: 42px; height: 42px; object-fit: contain; }
+  .save-signal { position: absolute; width: 8px; height: 8px; border: 2px solid var(--surface-raised); border-radius: 50%; background: var(--accent-primary); }
+  .save-signal.saving { background: var(--accent-semantic-orange); }
   .widget-shell { display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--surface-base); color: var(--text-primary); }
   .widget-titlebar { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface-raised); user-select: none; }
-  .widget-titlebar img { width: 92px; height: 24px; object-fit: contain; }
+  .widget-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .widget-heading img { width: 76px; height: 22px; object-fit: contain; }
+  .widget-heading > span:not(.save-status) { overflow: hidden; color: var(--text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+  .save-status { color: var(--text-muted); font-size: 11px; }
   .titlebar-actions { display: flex; gap: 4px; }
-  .titlebar-actions button, .orphan-actions button { min-width: 34px; min-height: 34px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--text-primary); cursor: pointer; }
-  .titlebar-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .widget-controls { display: grid; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
-  .workspace-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-  .workspace-picker button { min-height: 34px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--text-secondary); cursor: pointer; }
-  .workspace-picker button.active { border-color: var(--accent-primary); color: var(--accent-primary); background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-raised)); }
-  .widget-controls select { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-raised); color: var(--text-primary); }
-  .widget-editor { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-  .widget-editor :global(.editor-toolbar), .widget-editor :global(.format-toolbar), .widget-editor :global(.rhythm-panel), .widget-editor :global(.craft-panel) { display: none !important; }
-  .widget-editor :global(.editor-pane) { height: 100%; border: 0; }
-  .state { display: grid; place-items: center; height: 100%; padding: 24px; color: var(--text-muted); text-align: center; }
-  .state.error { color: var(--accent-semantic-red); }
-  .state button { min-height: 36px; padding: 0 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--text-primary); cursor: pointer; }
-  .orphan-state { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; }
-  .orphan-state img { width: 140px; height: 38px; object-fit: contain; }
-  .orphan-state h1 { margin: 0; font-size: 18px; }
-  .orphan-state p { margin: 0; color: var(--text-muted); }
-  .orphan-actions { display: flex; gap: 8px; }
-  .orphan-actions .primary { border-color: var(--accent-primary); background: var(--accent-primary); color: var(--text-on-accent); }
-  @media (max-width: 320px), (max-height: 440px) {
-    .widget-titlebar { min-height: 38px; padding-block: 4px; }
-    .widget-titlebar img { width: 72px; height: 20px; }
-    .widget-controls { padding: 7px; gap: 6px; }
-    .titlebar-actions button, .orphan-actions button, .workspace-picker button { min-height: 40px; }
-  }
+  .titlebar-actions button, .widget-error button { min-width: 34px; min-height: 34px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--text-primary); cursor: pointer; }
+  .widget-workspace { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+  .widget-workspace :global(.editor-toolbar), .widget-workspace :global(.format-toolbar), .widget-workspace :global(.rhythm-panel), .widget-workspace :global(.craft-panel) { display: none !important; }
+  .widget-workspace :global(.editor-pane) { height: 100%; border: 0; }
+  .widget-state, .widget-error { display: grid; place-items: center; min-height: 120px; height: 100%; padding: 24px; color: var(--text-muted); text-align: center; }
+  .widget-error { grid-auto-flow: row; gap: 10px; color: var(--accent-semantic-red); }
+  .widget-error button { min-height: 36px; padding: 0 12px; }
 </style>

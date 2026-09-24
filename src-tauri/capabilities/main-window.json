@@ -3,5 +3,5 @@
   "identifier": "main-window",
   "description": "Main-window application commands, updater, and process controls.",
   "windows": ["main"],
-  "permissions": ["main", "updater:default", "process:default"]
+  "permissions": ["main", "updater:default", "process:default", "autostart:default"]
 }

@@ -11,8 +11,13 @@
   import MarkdownViewer from "$lib/components/MarkdownViewer.svelte";
   import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
 
+  let { initialTab = "views" }: { initialTab?: "views" | "files" } = $props();
   let tab = $state<"views" | "files">("views");
   let viewedFile = $state<string | null>(null);
+
+  $effect(() => {
+    tab = initialTab;
+  });
 
   // Deep link target for the retired standalone Files route: palette,
   // More menu, and old pins land here instead of a dead workspace.

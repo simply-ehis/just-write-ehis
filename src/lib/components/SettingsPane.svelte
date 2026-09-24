@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+  import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
   import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
@@ -257,6 +258,20 @@
         }
       }
       showToast(`Companion widget failed: ${e instanceof Error ? e.message : e}`, "error");
+    }
+  }
+
+  async function setWidgetLaunchAtStartup(enabled: boolean) {
+    const previous = $settings.widgetLaunchAtStartup;
+    settings.update((current) => ({ ...current, widgetLaunchAtStartup: enabled }));
+    if (isBrowserPreview()) return;
+    try {
+      if (enabled) await enableAutostart();
+      else await disableAutostart();
+      if ((await isAutostartEnabled()) !== enabled) throw new Error("the operating system did not apply the startup setting");
+    } catch (e) {
+      settings.update((current) => ({ ...current, widgetLaunchAtStartup: previous }));
+      showToast(`Startup setting failed: ${e instanceof Error ? e.message : e}`, "error");
     }
   }
 
@@ -546,10 +561,27 @@
         <div class="setting-row">
           <label for="setting-widget-workspace">Widget workspace</label>
           <select id="setting-widget-workspace" bind:value={$settings.widgetWorkspace}>
-            <option value="write">Write</option>
-            <option value="logs">Logs</option>
-            <option value="inbox">Inbox</option>
+            {#each workspaces as workspace}
+              <option value={workspace.id}>{workspace.label}</option>
+            {/each}
           </select>
+        </div>
+        <div class="setting-row">
+          <label for="setting-widget-dock-edge">Widget dock edge</label>
+          <select id="setting-widget-dock-edge" bind:value={$settings.widgetDockEdge}>
+            <option value="right">Right</option>
+            <option value="left">Left</option>
+            <option value="top">Top</option>
+            <option value="bottom">Bottom</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="setting-widget-dock-offset">Widget dock offset</label>
+          <input id="setting-widget-dock-offset" type="number" min="0" max="100000" bind:value={$settings.widgetDockOffset} onblur={() => clampSettingKey("widgetDockOffset")} />
+        </div>
+        <div class="setting-row">
+          <label for="setting-widget-startup">Launch at OS startup</label>
+          <input id="setting-widget-startup" type="checkbox" checked={$settings.widgetLaunchAtStartup} onchange={(event) => setWidgetLaunchAtStartup((event.currentTarget as HTMLInputElement).checked)} />
         </div>
         <div class="setting-row">
           <label for="setting-icon-set">Icon Set</label>

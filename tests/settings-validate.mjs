@@ -24,7 +24,7 @@ check("unknown rejected", r.rejected.includes("notARealKey"));
 check("removed key rejected", r.rejected.includes("fileWatcherEnabled"));
 r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs" });
 check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs");
-r = v.validateSettings({ companionWidgetVisible: "yes", widgetWorkspace: "novel" });
+r = v.validateSettings({ companionWidgetVisible: "yes", widgetWorkspace: "unknown" });
 check("bad widget settings rejected", r.rejected.includes("companionWidgetVisible") && r.rejected.includes("widgetWorkspace"));
 
 // Secrets are rejected loudly, never merged.

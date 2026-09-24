@@ -51,7 +51,11 @@ const SCHEMA: Record<string, Rule> = {
   compactMode: BOOL,
   autoHideChrome: BOOL,
   companionWidgetVisible: BOOL,
-  widgetWorkspace: ENUM("write", "logs", "inbox"),
+  widgetWorkspace: ENUM("home", "logs", "write", "inbox", "map", "canvas", "novel", "script", "projects", "reader", "files", "properties"),
+  widgetCollapsed: BOOL,
+  widgetDockEdge: ENUM("left", "right", "top", "bottom"),
+  widgetDockOffset: INT(0, 100000),
+  widgetLaunchAtStartup: BOOL,
 
   fontSize: NUM(10, 32),
   lineHeight: NUM(1, 3),

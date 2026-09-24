@@ -3,11 +3,14 @@ import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { api } from "$lib/api";
-import { currentDoc, currentWorkspace, openTabs, showSettings } from "$lib/stores/app";
+import { currentDoc, currentWorkspace, openTabs, showSettings, workspaces, type WorkspaceId } from "$lib/stores/app";
 import { settings } from "$lib/stores/settings";
 import { showToast } from "$lib/stores/notifications";
 
-const WIDGET_WORKSPACES = new Set(["write", "logs", "inbox"]);
+function isWidgetWorkspace(value: string): value is WorkspaceId {
+  return workspaces.some((workspace) => workspace.id === value);
+}
+
 let openRequest = 0;
 
 async function focusMain(mainWindow: Window) {
@@ -23,7 +26,7 @@ async function openWidgetDoc(id: string, mainWindow: Window) {
   try {
     const doc = await api.docGet(id);
     if (request !== openRequest) return;
-    if (doc.locked || !WIDGET_WORKSPACES.has(doc.workspace)) {
+    if (doc.locked || !isWidgetWorkspace(doc.workspace)) {
       throw new Error("document is not available to the companion");
     }
     showSettings.set(false);
@@ -40,6 +43,18 @@ async function openWidgetDoc(id: string, mainWindow: Window) {
     failure ??= e;
   }
   if (failure) showToast(`Couldn't open document: ${failure instanceof Error ? failure.message : failure}`, "error");
+}
+
+async function openWidgetWorkspace(id: string, mainWindow: Window) {
+  if (!isWidgetWorkspace(id)) throw new Error("workspace is not available to the companion");
+  showSettings.set(false);
+  currentDoc.set(null);
+  openTabs.set([]);
+  currentWorkspace.set(id === "files" ? "properties" : id);
+  await focusMain(mainWindow);
+  if (id === "files") {
+    setTimeout(() => window.dispatchEvent(new CustomEvent("open-library-files")), 250);
+  }
 }
 
 export async function initializeMainWindowBridge(): Promise<() => void> {
@@ -63,6 +78,14 @@ export async function initializeMainWindowBridge(): Promise<() => void> {
     cleanups.push(await listen<string>("widget-open-doc", (event) => {
       if (typeof event.payload === "string" && event.payload.length <= 128) {
         void openWidgetDoc(event.payload, mainWindow);
+      }
+    }));
+
+    cleanups.push(await listen<string>("widget-open-workspace", (event) => {
+      if (typeof event.payload === "string" && event.payload.length <= 64) {
+        void openWidgetWorkspace(event.payload, mainWindow).catch((e) => {
+          showToast(`Couldn't open workspace: ${e instanceof Error ? e.message : e}`, "error");
+        });
       }
     }));
 

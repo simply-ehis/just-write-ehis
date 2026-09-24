@@ -1,48 +1,39 @@
 PURPOSE: companion-window architecture, invariants, and verification status
-OWNS: widget window lifecycle, query route, settings/tray wiring, proof evidence
-READ-WHEN: changing widget routing, window capabilities, tray behavior, or cross-window settings
-KEY-FILES: src/WidgetApp.svelte, src/lib/widgetBridge.ts, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json
+OWNS: widget window lifecycle, dock geometry, workspace selection, settings/tray wiring, proof evidence
+READ-WHEN: changing widget routing, window capabilities, docking behavior, tray behavior, or cross-window settings
+KEY-FILES: src/WidgetApp.svelte, src/lib/widgetBridge.ts, src/lib/components/LazyWorkspace.svelte, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json
 INVARIANTS: one Tauri process; main/widget only; setup_file_watcher runs once from main; no widget DB/watcher/sidecar/RAG initializer
-GOTCHAS: hidden does not mean destroyed; storage events synchronize non-secret settings; native timing/RSS remain unmeasured while builds are skipped
-UPDATED: 2026-09-23
+GOTCHAS: hidden does not mean destroyed; storage events synchronize non-secret settings; files deep-links to Library; native timing/RSS remain unmeasured
+UPDATED: 2026-09-24
 
 # Companion widget
 
-## Window creation choice
+## Window and interaction model
 
-The widget is the second declarative entry in `tauri.conf.json`, not a runtime `WebviewWindowBuilder`. One config entry guarantees one native `widget` label at startup, avoids duplicate creation races, and keeps Settings, tray, and recovery looking up the same label. The entry starts hidden and loads `index.html?widget=1` in the existing process.
+The widget is the second declarative entry in `tauri.conf.json`, not a runtime `WebviewWindowBuilder`. One config entry guarantees one native `widget` label at startup, avoids duplicate creation races, and keeps Settings, tray, and recovery looking up the same label. It starts as a transparent 56px always-on-top figure and is resized to a 520×720 panel when expanded.
 
-The route dynamically imports either `App.svelte` or `WidgetApp.svelte`; the widget never mounts the full app shell. It reuses `EditorPane` in companion mode and `QuickCaptureInput` with voice disabled. Companion mode suppresses editor chrome and Ghost so the widget cannot start a voice or LLM sidecar.
+The expanded panel has no application sidebar, tab strip, or breadcrumb chrome. It renders exactly one selected workspace using the same lazy-loading component and workspace data contracts as the main app. The canonical workspace list includes Home, Logs, Write, Inbox, Map, Canvas, Novel, Script, Projects, Reader, Files, and Library. Write uses the existing `EditorPane` in companion mode so the lightweight dock does not start editor AI/voice features; Files deep-links to Library’s Files view. The selected workspace remains persisted in Settings.
 
-## Lifecycle
+The collapsed figure is draggable and expands on click or keyboard activation. The expanded titlebar can be dragged, collapses on click-away, and exposes an explicit collapse control. Dock edge, dock offset, collapsed state, visibility, and OS-startup preference are persisted through the existing settings store.
 
-Settings → General persists `companionWidgetVisible` and `widgetWorkspace`. The native toggle shows/focuses or hides the configured label. The widget titlebar's close action persists hidden state and calls `hide()`. The tray has one Show / Hide Widget item and mirrors the setting through `widget-tray-visibility`.
+## Lifecycle and startup
 
-Main close is intercepted and converted to hide. The widget receives `main-window-hidden` and offers Reopen main or Quit. `widget-open-doc` is emitted only to `main`; main fetches the existing unlocked Write/Logs/Inbox doc, updates normal stores, then shows/unminimizes/focuses its window. The widget hides after handoff so two editors do not race full-document saves; the tray can show it again.
+Settings → General controls widget visibility, the selected canonical workspace, dock edge, dock offset, and “Launch at OS startup.” The startup control uses Tauri’s autostart plugin. The native tray keeps the Show / Hide Widget item and the main-window access item. The widget can remain available while the main window is hidden; the tray and widget controls can bring the main window back when needed.
+
+Main close is intercepted and converted to hide. `widget-open-doc` and `widget-open-workspace` are emitted only to `main`; main validates the canonical workspace or existing unlocked document, updates normal stores, then shows/unminimizes/focuses its window. The widget hides after handoff so two editors do not race full-document saves; the tray can show it again.
 
 ## Capability boundary
 
-`capabilities/default.json` includes both `main` and `widget` for core IPC and explicit window operations. `main-window.json` receives the full application command set plus updater/process controls; `widget-window.json` receives only the existing document/log/save command set plus `process:allow-exit` for the explicit Quit action. The widget never hydrates OS-keychain secrets, and its document list uses the existing locked-filtering `doc_search_full` command before storing any document state. No widget-specific Tauri command exists.
-
-## Constraint proof
-
-`npm run test:widget-proof` produced these results on 2026-09-23:
-
-- Two SQLite writers against one WAL database: second write returned `database is locked`.
-- Second bind on fixed sidecar port 8093: `EADDRINUSE`.
-- `setup_file_watcher` creates one new watcher per call, has no idempotence guard, and leaks it for process lifetime.
-- Two filesystem watchers both observed the same change, demonstrating the duplicate-notification mechanism.
-- Capability labels are `main,widget`; an unlisted `rogue` label has no capability.
-- Actual two-`tauri dev` observation, unlisted-label invoke rejection, and native watcher event counts were not run because the build was explicitly skipped.
+`capabilities/default.json` includes both `main` and `widget` for core IPC and explicit window operations. `main-window.json` receives the full application command set plus updater/process controls and the autostart permission; `widget-window.json` receives only the existing document/log/save command set. The widget never hydrates OS-keychain secrets, and its document list uses the existing locked-filtering `doc_search_full` command before storing any document state. No widget-specific Tauri command exists.
 
 ## Verification status
 
-Passed without building:
+Passed without a native build:
 
 - `npm run check`: 0 errors, 0 warnings.
 - `npm run test:settings`: all checks passed.
 - `npm run test:widget`: all static lifecycle/capability/no-command checks passed.
-- `npm run test:widget-proof`: output recorded above.
-- `src-tauri/target` remained absent.
+- `npm run test:widget-proof`: source and OS proxy checks passed.
+- `src-tauri/target` remains absent.
 
-Pending native matrix: `tauri build --debug`, cold widget open under 500 ms, RSS delta under 50 MB, show/hide/focus/open-in-app/edit-save-conflict for Write/Logs/Inbox, all four themes, 360×520 and 280×400, main-hidden recovery, widget webview-crash recovery, and live theme propagation between windows.
+Skipped by request: demo recording/GIF, lock-specific widget testing, and native `tauri build --debug` / live two-window timing matrix. Native transparent-window behavior, OS autostart registration, dock persistence, and RSS/cold-open measurements remain pending a future build-approved verification pass.

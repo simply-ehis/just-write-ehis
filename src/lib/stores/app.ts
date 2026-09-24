@@ -90,3 +90,5 @@ export const workspaces = [
   { id: "files", label: "Files", icon: "files" },
   { id: "properties", label: "Library", icon: "table" },
 ] as const;
+
+export type WorkspaceId = (typeof workspaces)[number]["id"];

@@ -36,7 +36,11 @@ export interface AppSettings {
   compactMode: boolean;
   autoHideChrome: boolean;
   companionWidgetVisible: boolean;
-  widgetWorkspace: "write" | "logs" | "inbox";
+  widgetWorkspace: string;
+  widgetCollapsed: boolean;
+  widgetDockEdge: "left" | "right" | "top" | "bottom";
+  widgetDockOffset: number;
+  widgetLaunchAtStartup: boolean;
 
   fontSize: number;
   lineHeight: number;
@@ -229,6 +233,10 @@ const defaultSettings: AppSettings = {
   autoHideChrome: true,
   companionWidgetVisible: false,
   widgetWorkspace: "write",
+  widgetCollapsed: true,
+  widgetDockEdge: "right",
+  widgetDockOffset: 96,
+  widgetLaunchAtStartup: false,
 
   autoCheckUpdates: true,
 
