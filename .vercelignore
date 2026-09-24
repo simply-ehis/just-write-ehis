@@ -1,0 +1,16 @@
+# Vercel builds the web app from source (Vite). Keep the upload lean:
+# - node_modules: Vercel installs itself
+# - dist: Vercel runs `vite build` remotely
+# - src-tauri: desktop shell, sidecars + model weights live here (hundreds of MB)
+# - everything else below is docs, tests, prototypes, and local artifacts
+node_modules
+dist
+src-tauri
+tests
+design
+docs
+artifacts
+worksheets
+TODOS.md
+END_OF_SHIFT.md
+AGENT_FEEDBACK.md
