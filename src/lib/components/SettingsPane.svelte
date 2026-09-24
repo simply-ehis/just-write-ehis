@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
@@ -222,17 +223,41 @@
     input.click();
   }
 
-  /** Reset to defaults, then (re)start the file watcher to match. */
-  async function resetAllSettings() {
+  function resetAllSettings() {
     resetSettings();
-    if (!isBrowserPreview()) {
-      try {
-        await api.setupFileWatcher();
-      } catch (e) {
-        console.warn("File watcher restart after reset failed:", e);
-      }
-    }
     showToast("Settings reset to defaults", "success");
+  }
+
+  async function setCompanionWidgetVisible(visible: boolean) {
+    const previous = $settings.companionWidgetVisible;
+    settings.update((current) => ({ ...current, companionWidgetVisible: visible }));
+    if (isBrowserPreview()) return;
+    try {
+      const widget = await WebviewWindow.getByLabel("widget");
+      if (!widget) throw new Error("widget window is unavailable");
+      if (visible) {
+        await widget.show();
+        await widget.emit("widget-show", {});
+        await widget.setFocus();
+      } else {
+        await widget.emit("widget-hide", {});
+        await widget.hide();
+      }
+    } catch (e) {
+      settings.update((current) => ({ ...current, companionWidgetVisible: previous }));
+      const widget = await WebviewWindow.getByLabel("widget").catch(() => null);
+      if (widget) {
+        if (previous) {
+          await widget.show().catch(() => {});
+          await widget.emit("widget-show", {}).catch(() => {});
+          await widget.setFocus().catch(() => {});
+        } else {
+          await widget.emit("widget-hide", {}).catch(() => {});
+          await widget.hide().catch(() => {});
+        }
+      }
+      showToast(`Companion widget failed: ${e instanceof Error ? e.message : e}`, "error");
+    }
   }
 
   const categories: { id: SettingsCategory; label: string; icon: string }[] = [
@@ -507,6 +532,23 @@
             <option value="light">Light</option>
             <option value="brutalist">Brutalist</option>
             <option value="glass">Glass</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <label for="setting-companion-widget">Companion widget (show/hide)</label>
+          <input
+            id="setting-companion-widget"
+            type="checkbox"
+            checked={$settings.companionWidgetVisible}
+            onchange={(event) => setCompanionWidgetVisible((event.currentTarget as HTMLInputElement).checked)}
+          />
+        </div>
+        <div class="setting-row">
+          <label for="setting-widget-workspace">Widget workspace</label>
+          <select id="setting-widget-workspace" bind:value={$settings.widgetWorkspace}>
+            <option value="write">Write</option>
+            <option value="logs">Logs</option>
+            <option value="inbox">Inbox</option>
           </select>
         </div>
         <div class="setting-row">

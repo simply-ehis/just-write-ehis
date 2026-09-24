@@ -39,6 +39,7 @@
   import { showConflict } from "$lib/stores/conflict";
   import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
+  import { initializeMainWindowBridge } from "$lib/widgetBridge";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
   // currentWorkspace) pollute featuresUsed before the async boot block
@@ -77,6 +78,7 @@
   // only touched in event handlers, never inside an $effect.
   let typingFocus = $state(false);
   let typingIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  let disposeWidgetBridge: (() => void) | null = null;
 
   function handleEditorTyping() {
     if (!$settings.autoHideChrome || $zenMode || $showSettings) return;
@@ -311,6 +313,11 @@
       // preview persists to localStorage instead.
       if (!isBrowserPreview()) {
         try {
+          disposeWidgetBridge = await initializeMainWindowBridge();
+        } catch (e) {
+          console.warn("Failed to initialize companion window bridge:", e);
+        }
+        try {
           await api.setupFileWatcher();
           await listen<string>("file-changed", (event) => {
             const changedPath = event.payload;
@@ -412,6 +419,7 @@
       window.removeEventListener('mousemove', handleMouseNearTop);
       window.removeEventListener('replay-onboarding', replayOnboarding);
       if (typingIdleTimer) clearTimeout(typingIdleTimer);
+      disposeWidgetBridge?.();
     };
   });
 

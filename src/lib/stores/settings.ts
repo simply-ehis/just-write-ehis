@@ -34,8 +34,9 @@ export interface AppSettings {
   streakGoal: number;
   /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */
   compactMode: boolean;
-  /** Hide tab bar + breadcrumb while actively typing, restore on idle. */
   autoHideChrome: boolean;
+  companionWidgetVisible: boolean;
+  widgetWorkspace: "write" | "logs" | "inbox";
 
   fontSize: number;
   lineHeight: number;
@@ -226,6 +227,8 @@ const defaultSettings: AppSettings = {
 
   compactMode: false,
   autoHideChrome: true,
+  companionWidgetVisible: false,
+  widgetWorkspace: "write",
 
   autoCheckUpdates: true,
 
@@ -271,12 +274,17 @@ export const secretsReady = new Promise<void>((resolve) => {
 });
 
 let secretsMigrated = false;
+let preserveLegacySecrets = false;
 let lastSynced: Record<SecretKey, string> = { apiKey: "", appLockPin: "" };
 let secretSyncTimer: ReturnType<typeof setTimeout> | null = null;
 /** Deferred to avoid a settings ↔ api.ts circular-import TDZ at module init. */
 let apiPromise: Promise<typeof import("$lib/api")> | null = null;
 function apiLazy() {
   return (apiPromise ??= import("$lib/api"));
+}
+
+function isWidgetRoute(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("widget") === "1";
 }
 
 function loadSettings(): AppSettings {
@@ -288,13 +296,21 @@ function loadSettings(): AppSettings {
       // are dropped; out-of-range numbers are clamped. A corrupt store
       // can never poison boot. Retired Ollama-era main-slot defaults
       // migrate forward (exact matches only); deliberate custom values stay.
-      if (parsed && typeof parsed === "object") {
-        const { valid } = validateSettings(parsed as Record<string, unknown>);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const raw = parsed as Record<string, unknown>;
+        const { valid } = validateSettings(raw);
         const { patch, migrated } = migrateRetiredProviders(valid, defaultSettings);
         if (migrated.length > 0) {
           console.warn(`Settings migrated off retired providers: ${migrated.join(", ")}`);
         }
-        return { ...defaultSettings, ...patch };
+        const legacyApiKey = typeof raw.apiKey === "string" ? raw.apiKey : "";
+        const legacyPin = typeof raw.appLockPin === "string" ? raw.appLockPin : "";
+        if (!isWidgetRoute() && (legacyApiKey || legacyPin)) preserveLegacySecrets = true;
+        return {
+          ...defaultSettings,
+          ...patch,
+          ...(isWidgetRoute() ? {} : { apiKey: legacyApiKey, appLockPin: legacyPin }),
+        };
       }
     }
   } catch (e) {
@@ -306,7 +322,7 @@ function loadSettings(): AppSettings {
 function saveSettings(s: AppSettings) {
   try {
     const payload = { ...s };
-    if (secretsMigrated) {
+    if (!preserveLegacySecrets || secretsMigrated) {
       payload.apiKey = "";
       payload.appLockPin = "";
     }
@@ -371,6 +387,7 @@ async function initSecrets(): Promise<void> {
     }
     if (allOk) {
       secretsMigrated = true;
+      preserveLegacySecrets = false;
       try {
         localStorage.setItem("writing-app-settings", JSON.stringify({
           ...get(settings),
@@ -389,12 +406,34 @@ async function initSecrets(): Promise<void> {
 }
 
 export const settings = writable<AppSettings>(loadSettings());
+let lastSettings = get(settings);
 
 settings.subscribe((value) => {
+  lastSettings = value;
   saveSettings(value);
 });
 
-void initSecrets();
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== "writing-app-settings" || !event.newValue) return;
+    try {
+      const parsed: unknown = JSON.parse(event.newValue);
+      if (!parsed || typeof parsed !== "object") return;
+      const { valid } = validateSettings(parsed as Record<string, unknown>);
+      const changed: Record<string, unknown> = {};
+      const previous = lastSettings as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(valid)) {
+        if (JSON.stringify(value) !== JSON.stringify(previous[key])) changed[key] = value;
+      }
+      if (Object.keys(changed).length > 0) settings.update((current) => ({ ...current, ...changed }));
+    } catch (e) {
+      console.warn("Failed to sync settings from another window:", e);
+    }
+  });
+}
+
+if (isWidgetRoute()) resolveSecretsReady();
+else void initSecrets();
 
 /** Global Settings nav: lets palette/sidebar deep-link into a category. */
 export const settingsCategory = writable<SettingsCategory>("general");
@@ -424,8 +463,7 @@ export function toggleWorkspacePrivacy(workspaceId: string) {
 /**
  * Reset every setting to defaults (deep copy — nested keybindings/
  * templates must not alias DEFAULT_SETTINGS). Secrets stay in the OS
- * keychain; file-watcher/conflict/blankMode are reactive reads, so no
- * resubscribe is needed — the file watcher is (re)started by the caller.
+ * keychain.
  */
 export function resetSettings(): void {
   settings.set(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings);

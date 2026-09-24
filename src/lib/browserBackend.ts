@@ -436,6 +436,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "log_get_or_create": {
       const date = String(payload.date);
       const existing = store.docs.find((d) => d.workspace === "logs" && d.title === date);
+      if (existing?.locked) throw new Error("daily log is locked");
       if (existing) return docShape(existing) as T;
       return docShape(store.create("logs", "log", date, undefined, `# ${date}\n\n`)) as T;
     }

@@ -53,6 +53,8 @@
 
 ## Remaining
 
+- [ ] Companion widget native verification — source/type/static gates pass; `tauri build --debug`, cold-open timing, RSS delta, crash recovery, theme propagation, and workspace/theme/size matrix remain pending because builds are explicitly skipped
+
 - [x] ~~Rust backend compilation~~ — **BUILDING SUCCESSFULLY** (cargo build passes, 86 warnings all dead-code/unused)
 - [x] sqlite-vec vector embeddings for semantic RAG — **DONE** (sqlite-vec 0.1.9, zerocopy IntoBytes, TF-IDF text_to_embedding, rag_vec virtual table, semantic + keyword fallback search)
 - [x] Chat → Editor write-back (§A3) — **DONE** (writeBack store, EditorPane listener, 4 actions, keyboard shortcuts)

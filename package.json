@@ -33,7 +33,9 @@
     "test:onboard": "node tests/onboard-flow.mjs",
     "test:entities": "node tests/entities-unit.mjs",
     "test:wstoggles": "node tests/ws-toggles.mjs",
-    "test:settings": "node tests/settings-validate.mjs"
+    "test:settings": "node tests/settings-validate.mjs",
+    "test:widget": "node tests/widget-invariants.mjs",
+    "test:widget-proof": "node tests/window-constraint-proof.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.0",

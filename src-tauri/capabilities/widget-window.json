@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "widget-window",
+  "description": "Companion document command set and explicit process exit.",
+  "windows": ["widget"],
+  "permissions": ["widget", "process:allow-exit"]
+}

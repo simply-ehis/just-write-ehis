@@ -30,6 +30,7 @@
   import { markUsed } from "$lib/features";
   import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
+  let { companionMode = false }: { companionMode?: boolean } = $props();
 
   let editorContainer = $state<HTMLDivElement>();
   // $state.raw: the CodeMirror view is an opaque handle (never deep-read by
@@ -90,7 +91,7 @@
   let previewDocTitle = $state("");
 
   function triggerStructurize() {
-    if (!editorView) return;
+    if (companionMode || !editorView) return;
     const { from, to } = editorView.state.selection.main;
     const selected = editorView.state.sliceDoc(from, to);
     structurizePreset.set(selected || null);
@@ -113,13 +114,16 @@
   ];
 
   let slashFiltered = $derived(
-    slashFilter
-      ? slashCommands.filter(c => c.label.toLowerCase().includes(slashFilter.toLowerCase()))
-      : slashCommands
+    slashCommands.filter((command) => !companionMode || command.label !== "Structurize").filter((command) =>
+      slashFilter
+        ? command.label.toLowerCase().includes(slashFilter.toLowerCase())
+        : true
+    )
   );
 
   function handleSlashInsert(insert: string, label?: string) {
     if (!editorView) return;
+    if (label === "Structurize" && companionMode) return;
     const view = editorView;
     const pos = slashLineStart;
     // Replace the "/" trigger + filter text with the inserted content
@@ -170,6 +174,10 @@
   }
 
   function handleEditorMousemove(e: MouseEvent) {
+    if (companionMode) {
+      previewVisible = false;
+      return;
+    }
     if (!editorView) return;
     const pos = editorView.posAtCoords({ x: e.clientX, y: e.clientY });
     if (pos == null) { previewVisible = false; return; }
@@ -441,6 +449,7 @@
             // Ctrl+Shift+S: open AI panel in structurize mode with current selection.
             key: "Ctrl-Shift-s",
             run: (view) => {
+              if (companionMode) return false;
               const { from, to } = view.state.selection.main;
               const selected = view.state.sliceDoc(from, to);
               structurizePreset.set(selected || null);
@@ -506,7 +515,8 @@
   let lastMetricAt = 0;
 
   function handleContentChange(content: string) {
-    if (!$currentDoc) return;
+    if (!$currentDoc || (companionMode && $currentDoc.locked)) return;
+    const editingDocId = $currentDoc.id;
     liveContent = content;
 
     recordSave();
@@ -518,8 +528,8 @@
     saveTimeout = setTimeout(async () => {
       try {
         const wordCount = content.split(/\s+/).filter(Boolean).length;
-        await api.docSave($currentDoc!.id, undefined, content);
-        $currentDoc = { ...$currentDoc!, word_count: wordCount };
+        await api.docSave(editingDocId, undefined, content);
+        if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: wordCount };
         // Craft profiling + write heartbeat, at most once a minute per doc.
         // (Drives streaks, heatmaps, patterns, and the craft skill nudge.)
         // The write heartbeat is always recorded; craft metric snapshots are
@@ -527,9 +537,9 @@
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
-          const docId = $currentDoc!.id;
+          const docId = editingDocId;
           api.usageRecord(docId, "write").catch(() => {});
-          if ($settings.craftProfilingEnabled) {
+          if (!companionMode && $settings.craftProfilingEnabled) {
             const stats = craftStats(content);
             api.memoryRecordMetric(docId, "filter_words", stats.filterWords).catch(() => {});
             api.memoryRecordMetric(docId, "dialogue_ratio", stats.dialogue).catch(() => {});
@@ -544,13 +554,13 @@
     if (flushTimeout) clearTimeout(flushTimeout);
     flushTimeout = setTimeout(async () => {
       try {
-        await api.atomicSave($currentDoc!.id, content);
+        await api.atomicSave(editingDocId, content);
       } catch (e) {
         console.error("Failed to flush to disk:", e);
       }
     }, 5000);
 
-    if ($settings.ghostEnabled && content.length > 20) {
+    if (!companionMode && $settings.ghostEnabled && content.length > 20) {
       if (ghostDebounce) clearTimeout(ghostDebounce);
       ghostDebounce = setTimeout(() => requestGhostSuggestion(content), 1500);
     }
@@ -674,7 +684,7 @@
         createEditor(doc);
       });
       refreshBibleWords(doc);
-      loadCraftMetrics(doc.id);
+      if (!companionMode) loadCraftMetrics(doc.id);
     } else {
       refreshBibleWords(null);
     }
@@ -749,6 +759,7 @@
   onkeydown={handleSlashKeydown}
   role="application"
 >
+  {#if !companionMode}
   <div class="editor-toolbar">
     <span class="doc-title">{$currentDoc?.title ?? ''}</span>
     <div class="toolbar-actions">
@@ -865,6 +876,7 @@
       </div>
     </div>
   </div>
+  {/if}
   {#if showRhythm}
     <RhythmPanel content={liveContent} {dialogueTrend} {sentenceTrend} onJumpToLine={(line) => {
       if (!editorView) return;
@@ -881,7 +893,9 @@
       </div>
     </div>
   {/if}
-  <FormatToolbar view={editorView} />
+  {#if !companionMode}
+    <FormatToolbar view={editorView} />
+  {/if}
   <div
     class="editor-container"
     bind:this={editorContainer}

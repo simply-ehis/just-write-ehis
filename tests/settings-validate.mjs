@@ -22,6 +22,10 @@ let r = v.validateSettings({ theme: "dark", notARealKey: 1, fileWatcherEnabled: 
 check("valid passes", r.valid.theme === "dark");
 check("unknown rejected", r.rejected.includes("notARealKey"));
 check("removed key rejected", r.rejected.includes("fileWatcherEnabled"));
+r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs" });
+check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs");
+r = v.validateSettings({ companionWidgetVisible: "yes", widgetWorkspace: "novel" });
+check("bad widget settings rejected", r.rejected.includes("companionWidgetVisible") && r.rejected.includes("widgetWorkspace"));
 
 // Secrets are rejected loudly, never merged.
 r = v.validateSettings({ apiKey: "sk-live", appLockPin: "1234", fontSize: 18 });

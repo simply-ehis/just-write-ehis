@@ -1,0 +1,13 @@
+[widget]
+description = "Existing document, log, capture, save, and conflict commands used by the companion."
+permissions = [
+  "allow-doc-get",
+  "allow-doc-create",
+  "allow-doc-save",
+  "allow-doc-search-full",
+  "allow-log-get-or-create",
+  "allow-usage-record",
+  "allow-atomic-save",
+  "allow-bible-get-facts",
+  "allow-snapshot-list",
+]

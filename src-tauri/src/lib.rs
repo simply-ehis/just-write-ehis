@@ -63,9 +63,10 @@ pub fn run() {
                 let show = MenuItemBuilder::with_id("show", "Show Just Write ehis").build(app)?;
                 let capture =
                     MenuItemBuilder::with_id("capture", "Quick capture to Inbox").build(app)?;
+                let widget = MenuItemBuilder::with_id("widget", "Show / Hide Widget").build(app)?;
                 let quit = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
                 let menu = MenuBuilder::new(app)
-                    .items(&[&show, &capture, &quit])
+                    .items(&[&show, &capture, &widget, &quit])
                     .build()?;
                 let mut tray = TrayIconBuilder::new()
                     .menu(&menu)
@@ -75,6 +76,7 @@ pub fn run() {
                             if let Some(w) = app.get_webview_window("main") {
                                 let _ = w.show();
                                 let _ = w.set_focus();
+                                let _ = w.emit("main-window-shown", ());
                             }
                         }
                         "capture" => {
@@ -82,6 +84,28 @@ pub fn run() {
                                 let _ = w.show();
                                 let _ = w.set_focus();
                                 let _ = w.emit("tray-capture", ());
+                            }
+                        }
+                        "widget" => {
+                            if let Some(w) = app.get_webview_window("widget") {
+                                match w.is_visible() {
+                                    Ok(true) => match w.hide() {
+                                        Ok(()) => {
+                                            let _ = w.emit("widget-tray-visibility", false);
+                                        }
+                                        Err(e) => eprintln!("[tray] failed to hide widget: {}", e),
+                                    },
+                                    Ok(false) => match w.show() {
+                                        Ok(()) => {
+                                            let _ = w.emit("widget-tray-visibility", true);
+                                            if let Err(e) = w.set_focus() {
+                                                eprintln!("[tray] widget shown without focus: {}", e);
+                                            }
+                                        }
+                                        Err(e) => eprintln!("[tray] failed to show widget: {}", e),
+                                    },
+                                    Err(e) => eprintln!("[tray] failed to read widget visibility: {}", e),
+                                }
                             }
                         }
                         "quit" => app.exit(0),

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Just Write ehis",
         "width": 1280,
         "height": 800,
@@ -19,6 +20,21 @@
         "minHeight": 600,
         "decorations": true,
         "resizable": true
+      },
+      {
+        "label": "widget",
+        "title": "Just Write ehis Companion",
+        "url": "index.html?widget=1",
+        "width": 360,
+        "height": 520,
+        "minWidth": 280,
+        "minHeight": 400,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {

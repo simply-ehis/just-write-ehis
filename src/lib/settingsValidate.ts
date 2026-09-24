@@ -50,6 +50,8 @@ const SCHEMA: Record<string, Rule> = {
   streakGoal: INT(0, 100000),
   compactMode: BOOL,
   autoHideChrome: BOOL,
+  companionWidgetVisible: BOOL,
+  widgetWorkspace: ENUM("write", "logs", "inbox"),
 
   fontSize: NUM(10, 32),
   lineHeight: NUM(1, 3),

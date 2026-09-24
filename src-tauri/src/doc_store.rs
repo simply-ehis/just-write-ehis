@@ -818,6 +818,16 @@ impl Database {
 
     pub fn log_get_or_create(&self, date: &str) -> Result<Doc, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        match conn.query_row(
+            "SELECT locked FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND title = ?1",
+            params![date],
+            |row| row.get::<_, i64>(0),
+        ) {
+            Ok(1) => return Err("daily log is locked".to_string()),
+            Ok(_) => {}
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(e.to_string()),
+        }
 
         let result = conn.query_row(
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked

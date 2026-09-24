@@ -80,7 +80,9 @@
 | TabBar | skin | ui | `src/lib/components/TabBar.svelte` | App.svelte | ✅ wired |
 | BreadcrumbBar | skin | ui | `src/lib/components/BreadcrumbBar.svelte` | App.svelte | ✅ wired |
 | StatusBar | skin | ui | `src/lib/components/StatusBar.svelte` | App.svelte | ✅ wired |
-| EditorPane | skin | ui | `src/lib/components/EditorPane.svelte` | App.svelte | ✅ wired |
+| EditorPane | skin | ui | `src/lib/components/EditorPane.svelte` | App.svelte + WidgetApp companion mode | ✅ wired |
+| WidgetApp | skin | ui | `src/WidgetApp.svelte` | `main.ts?widget=1`, settings, capabilities, tray | ✅ wired |
+| Widget bridge | tendon | frontend | `src/lib/widgetBridge.ts` | App.svelte ↔ widget events | ✅ wired |
 | LogsWorkspace | skin | ui | `src/lib/components/LogsWorkspace.svelte` | App.svelte | ✅ wired |
 | JustWriteWorkspace | skin | ui | `src/lib/components/JustWriteWorkspace.svelte` | App.svelte | ✅ wired |
 | NodeMapWorkspace | skin | ui | `src/lib/components/NodeMapWorkspace.svelte` | App.svelte | ✅ wired |

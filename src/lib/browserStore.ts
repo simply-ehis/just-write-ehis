@@ -402,11 +402,14 @@ class BrowserStore {
   /** Locked docs are invisible to search (content + titles). */
   search(query: string, workspace?: string): { doc: BrowserDoc; rank: number; snippet: string | null }[] {
     const q = query.trim().toLowerCase();
-    if (!q) return [];
     const out: { doc: BrowserDoc; rank: number; snippet: string | null }[] = [];
     for (const doc of this.docs) {
       if (doc.locked) continue;
       if (workspace && doc.workspace !== workspace) continue;
+      if (!q) {
+        out.push({ doc: { ...doc }, rank: 0, snippet: null });
+        continue;
+      }
       const titleIdx = doc.title.toLowerCase().indexOf(q);
       const bodyIdx = doc.content.toLowerCase().indexOf(q);
       if (titleIdx === -1 && bodyIdx === -1) continue;
@@ -414,6 +417,7 @@ class BrowserStore {
       const snippet = bodyIdx !== -1 ? snippetAround(doc.content, bodyIdx, q.length) : null;
       out.push({ doc: { ...doc }, rank, snippet });
     }
+    if (!q) return out.sort((a, b) => Date.parse(b.doc.updated_at) - Date.parse(a.doc.updated_at));
     return out.sort((a, b) => b.rank - a.rank);
   }
 

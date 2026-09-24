@@ -18,6 +18,7 @@
     placeholder = "Quick capture... (Enter to save)",
     disabled = false,
     webFallback = false,
+    voiceEnabled = true,
     inputRef = $bindable<HTMLInputElement | null>(null),
     onSubmit,
   }: {
@@ -25,6 +26,7 @@
     placeholder?: string;
     disabled?: boolean;
     webFallback?: boolean;
+    voiceEnabled?: boolean;
     inputRef?: HTMLInputElement | null;
     onSubmit: () => void;
   } = $props();
@@ -83,9 +85,9 @@
 </script>
 
 <div class="quick-capture">
-  {#if $settings.sttEnabled}
+  {#if voiceEnabled && $settings.sttEnabled}
     <MicButton onTranscribe={appendTranscribed} />
-  {:else if webFallback && webVoiceAvailable}
+  {:else if voiceEnabled && webFallback && webVoiceAvailable}
     <button
       class="voice-btn"
       class:active={voiceActive}
