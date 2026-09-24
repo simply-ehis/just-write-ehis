@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-get-suggestions"
+description = "Enables the bible_get_suggestions command without any pre-configured scope."
+commands.allow = ["bible_get_suggestions"]
+
+[[permission]]
+identifier = "deny-bible-get-suggestions"
+description = "Denies the bible_get_suggestions command without any pre-configured scope."
+commands.deny = ["bible_get_suggestions"]

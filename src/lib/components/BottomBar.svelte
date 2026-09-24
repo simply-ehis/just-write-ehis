@@ -4,7 +4,7 @@
    * Items: Capture+, Home, Search, Workspaces, More.
    * Shows only on mobile (isMobile breakpoint).
    */
-  import { currentWorkspace, showSettings, aiPanelOpen, workspaces } from "$lib/stores/app";
+  import { currentWorkspace, showSettings, aiPanelOpen, inspectorOpen, workspaces, workspaceIcons } from "$lib/stores/app";
   import { recordWorkspaceVisit } from "$lib/stores/uiState";
   import { saveState } from "$lib/stores/saveState";
   import { settings } from "$lib/stores/settings";
@@ -66,6 +66,7 @@
       label: "Tools",
       items: [
         { id: "ai", label: "AI Panel", icon: "sparkle" },
+        { id: "outline", label: "Outline", icon: "panel" },
         { id: "settings", label: "Settings", icon: "settings" },
       ],
     },
@@ -81,6 +82,12 @@
       $aiPanelOpen = !$aiPanelOpen;
       return;
     }
+    // Inspector is a side column on desktop; on phones App.svelte renders it
+    // as a bottom sheet, so toggling the same store keeps both in sync.
+    if (action === "outline") {
+      $inspectorOpen = !$inspectorOpen;
+      return;
+    }
     // "files" is virtual (no route) — it deep-links to Library's Files tab.
     if (action === "files") {
       $currentWorkspace = "properties";
@@ -94,7 +101,9 @@
 
   // Main row: onboarding top-bar pins (first 3) + Search + More.
   // Default ["write","home"] reproduces the classic row exactly.
-  // "files" can never pin (virtual destination) — filtered here.
+  // "files" can never pin (virtual destination) — filtered here, as are
+  // workspaces the user hid in Settings (a hidden pin would contradict
+  // the toggle; empty falls back to the classic row).
   function navigateTo(id: string) {
     if (id === "files") {
       handleMoreAction("files");
@@ -106,16 +115,21 @@
   }
 
   let pinnedIds = $derived(
-    ($settings.topBarIds.length > 0 ? $settings.topBarIds : ["write", "home"])
-      .filter((id) => id !== "files" && workspaces.some((w) => w.id === id))
-      .slice(0, 3)
+    (() => {
+      const hidden = $settings.hiddenIds ?? [];
+      const visible = (id: string) =>
+        id !== "files" && !hidden.includes(id) && workspaces.some((w) => w.id === id);
+      const pins = ($settings.topBarIds.length > 0 ? $settings.topBarIds : ["write", "home"])
+        .filter(visible)
+        .slice(0, 3);
+      if (pins.length > 0) return pins;
+      // Everything pinned-or-default is hidden: first visible pair wins;
+      // all-hidden degrades to Search + More rather than dead buttons.
+      return workspaces.filter((w) => visible(w.id)).slice(0, 2).map((w) => w.id);
+    })()
   );
 
-  const PIN_ICONS: Record<string, string> = {
-    home: "home", logs: "calendar", write: "pencil", inbox: "inbox",
-    map: "graph", canvas: "board", novel: "book", script: "film",
-    projects: "folder", reader: "book-open", files: "files", properties: "table",
-  };
+  const PIN_ICONS = workspaceIcons;
 
   let mainItems = $derived<BottomBarItem[]>([
     ...pinnedIds.flatMap((id): BottomBarItem[] => {
@@ -180,6 +194,8 @@
     background: var(--surface-base);
     border-top: 1px solid var(--border-subtle);
     z-index: 500;
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
@@ -226,7 +242,7 @@
 
   .more-menu {
     position: fixed;
-    bottom: 56px;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
     left: 0;
     right: 0;
     background: var(--surface-raised);

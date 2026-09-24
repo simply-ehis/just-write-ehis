@@ -19,3 +19,8 @@ export function statusColor(status: string): string {
       return "var(--text-muted)";
   }
 }
+
+export const STATUSES = ["idea", "draft", "revised", "final", "done", "cut"] as const;
+
+/** Projects board columns: idea leads, `cut` never gets a column. */
+export const BOARD_STATUSES: readonly string[] = STATUSES.filter((s) => s !== "cut");

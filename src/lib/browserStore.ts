@@ -90,12 +90,44 @@ export interface BrowserBibleFact {
   value: string;
 }
 
+export interface BrowserBibleMention {
+  id: string;
+  bible_doc_id: string;
+  fact_key: string;
+  kind: string;
+  doc_id: string;
+  doc_title: string;
+  snippet: string;
+  attribute_key: string | null;
+  attribute_value: string | null;
+  span_start: number | null;
+  created_at: string;
+}
+
+export interface BrowserBibleSuggestion {
+  id: string;
+  bible_doc_id: string;
+  source_doc_id: string;
+  doc_title: string;
+  kind: string;
+  key: string;
+  value: string;
+  snippet: string;
+  attribute_key: string | null;
+  attribute_value: string | null;
+  span_start: number | null;
+  status: "pending" | "rejected";
+  created_at: string;
+}
+
 const DOCS_KEY = "jwe-browser-docs-v1";
 const SNAPS_KEY = "jwe-browser-snaps-v1";
 const TABS_KEY = "jwe-browser-tabs-v1";
 const CONV_KEY = "jwe-browser-conv-v1";
 const MSG_KEY = "jwe-browser-msg-v1";
 const BIBLE_KEY = "jwe-browser-bible-v1";
+const BIBLE_MENTIONS_KEY = "jwe-browser-bible-mentions-v1";
+const BIBLE_SUGGESTIONS_KEY = "jwe-browser-bible-suggestions-v1";
 const DAYS_KEY = "jwe-browser-days-v1";
 const BACKUP_KEY = "jwe-browser-backups-v1";
 const METRICS_KEY = "jwe-browser-metrics-v1";
@@ -153,6 +185,8 @@ class BrowserStore {
   conversations: BrowserConversation[] = [];
   messages: BrowserMessage[] = [];
   bible: BrowserBibleFact[] = [];
+  bibleMentions: BrowserBibleMention[] = [];
+  bibleSuggestions: BrowserBibleSuggestion[] = [];
   days: string[] = [];
   backups: [string, string, number][] = [];
   metrics: BrowserMetric[] = [];
@@ -170,6 +204,11 @@ class BrowserStore {
     this.conversations = load<BrowserConversation[]>(CONV_KEY, []);
     this.messages = load<BrowserMessage[]>(MSG_KEY, []);
     this.bible = load<BrowserBibleFact[]>(BIBLE_KEY, []);
+    this.bibleMentions = load<BrowserBibleMention[]>(BIBLE_MENTIONS_KEY, []);
+    this.bibleSuggestions = load<BrowserBibleSuggestion[]>(BIBLE_SUGGESTIONS_KEY, []).map((suggestion) => ({ ...suggestion, status: suggestion.status ?? "pending" }));
+    this.bibleMentions = this.bibleMentions.filter((mention) => this.bibleSourceAllowed(mention.bible_doc_id) && this.bibleSourceAllowed(mention.doc_id));
+    this.bibleSuggestions = this.bibleSuggestions.filter((suggestion) => this.bibleSourceAllowed(suggestion.bible_doc_id) && this.bibleSourceAllowed(suggestion.source_doc_id));
+    this.persistBibleMemory();
     this.days = load<string[]>(DAYS_KEY, []);
     this.backups = load<[string, string, number][]>(BACKUP_KEY, []);
     this.metrics = load<BrowserMetric[]>(METRICS_KEY, []);
@@ -317,7 +356,18 @@ class BrowserStore {
 
   saveDoc(id: string, patch: Partial<BrowserDoc>): BrowserDoc {
     const doc = this.get(id);
+    if (patch.parent_id !== undefined && patch.parent_id !== null) {
+      if (patch.parent_id === id || !this.docs.some((candidate) => candidate.id === patch.parent_id) || this.isDescendantOf(patch.parent_id, id)) {
+        throw new Error("Invalid document parent");
+      }
+    }
+    const parentChanged = patch.parent_id !== undefined && patch.parent_id !== doc.parent_id;
     Object.assign(doc, patch, { updated_at: nowIso() });
+    if (parentChanged) {
+      this.bibleMentions = this.bibleMentions.filter((mention) => mention.doc_id !== id);
+      this.bibleSuggestions = this.bibleSuggestions.filter((suggestion) => suggestion.source_doc_id !== id);
+      this.persistBibleMemory();
+    }
     if (patch.content !== undefined) {
       doc.word_count = countWords(patch.content);
       // Spec 8.2: content edits weigh 2x.
@@ -377,6 +427,8 @@ class BrowserStore {
     for (const id of gone) this.entityIndex.delete(id);
     this.snaps = this.snaps.filter((s) => !gone.has(s.doc_id));
     this.bible = this.bible.filter((b) => !gone.has(b.doc_id));
+    this.bibleMentions = this.bibleMentions.filter((m) => !gone.has(m.doc_id) && !gone.has(m.bible_doc_id));
+    this.bibleSuggestions = this.bibleSuggestions.filter((s) => !gone.has(s.source_doc_id) && !gone.has(s.bible_doc_id));
     this.conversations = this.conversations.filter((c) => !(c.doc_id && gone.has(c.doc_id)));
     this.messages = this.messages.filter((m) =>
       this.conversations.some((c) => c.id === m.conversation_id)
@@ -385,6 +437,7 @@ class BrowserStore {
       n.doc_id && gone.has(n.doc_id) ? { ...n, doc_id: null } : n
     );
     save(BIBLE_KEY, this.bible);
+    this.persistBibleMemory();
     save(SNAPS_KEY, this.snaps);
     save(CONV_KEY, this.conversations);
     save(MSG_KEY, this.messages);
@@ -546,6 +599,165 @@ class BrowserStore {
 
   setLocked(id: string, locked: boolean): void {
     this.saveDoc(id, { locked });
+    if (!locked) return;
+    const affected = new Set<string>();
+    for (const doc of this.docs) {
+      if (doc.id === id || this.isDescendantOf(doc.id, id)) affected.add(doc.id);
+    }
+    this.bibleMentions = this.bibleMentions.filter((mention) => !affected.has(mention.doc_id));
+    this.bibleSuggestions = this.bibleSuggestions.filter((suggestion) => !affected.has(suggestion.source_doc_id));
+    this.persistBibleMemory();
+  }
+
+  isDescendantOf(docId: string, ancestorId: string): boolean {
+    let current = this.docs.find((doc) => doc.id === docId);
+    const seen = new Set<string>();
+    while (current?.parent_id && !seen.has(current.id)) {
+      if (current.parent_id === ancestorId) return true;
+      seen.add(current.id);
+      current = this.docs.find((doc) => doc.id === current?.parent_id);
+    }
+    return false;
+  }
+
+  bibleSourceAllowed(id: string): boolean {
+    let current = this.docs.find((doc) => doc.id === id);
+    if (!current) return false;
+    const seen = new Set<string>();
+    while (current && !seen.has(current.id)) {
+      if (current.locked) return false;
+      seen.add(current.id);
+      if (!current.parent_id) return true;
+      current = this.docs.find((doc) => doc.id === current?.parent_id);
+    }
+    return false;
+  }
+
+  bibleScopeId(id: string): string {
+    let current = this.get(id);
+    const seen = new Set<string>();
+    while (!seen.has(current.id)) {
+      seen.add(current.id);
+      if (!current.parent_id) return current.id;
+      const parent = this.docs.find((doc) => doc.id === current.parent_id);
+      if (!parent) throw new Error("Document parent is missing");
+      if (parent.kind === "project") return parent.id;
+      current = parent;
+    }
+    throw new Error("Document hierarchy contains a cycle");
+  }
+
+  private persistBibleMemory(): void {
+    save(BIBLE_MENTIONS_KEY, this.bibleMentions);
+    save(BIBLE_SUGGESTIONS_KEY, this.bibleSuggestions);
+  }
+
+  bibleGetMentions(scopeId: string): BrowserBibleMention[] {
+    return this.bibleMentions
+      .filter((mention) => mention.bible_doc_id === scopeId && this.bibleSourceAllowed(scopeId) && this.bibleSourceAllowed(mention.doc_id) && this.bibleScopeId(mention.doc_id) === scopeId)
+      .map((mention) => ({ ...mention }));
+  }
+
+  bibleUpsertMention(
+    scopeId: string,
+    docId: string,
+    factKey: string,
+    kind: string,
+    snippet: string,
+    attributeKey: string | null,
+    attributeValue: string | null,
+  ): BrowserBibleMention {
+    if (this.bibleScopeId(docId) !== scopeId) throw new Error("Mention source does not belong to this Story Bible");
+    if (!this.bibleSourceAllowed(scopeId) || !this.bibleSourceAllowed(docId)) throw new Error("Locked documents cannot receive Story Memory evidence");
+    const doc = this.get(docId);
+    const existing = this.bibleMentions.find((mention) =>
+      mention.bible_doc_id === scopeId && mention.fact_key === factKey && mention.kind === kind &&
+      mention.doc_id === docId && mention.snippet === snippet && mention.attribute_key === attributeKey &&
+      mention.attribute_value === attributeValue
+    );
+    if (existing) return { ...existing };
+    const mention: BrowserBibleMention = {
+      id: `mention-${uid("memory")}`,
+      bible_doc_id: scopeId,
+      fact_key: factKey,
+      kind,
+      doc_id: docId,
+      doc_title: doc.title,
+      snippet,
+      attribute_key: attributeKey,
+       attribute_value: attributeValue,
+       span_start: doc.content.indexOf(snippet) >= 0 ? doc.content.indexOf(snippet) : null,
+       created_at: nowIso(),
+    };
+    this.bibleMentions.push(mention);
+    this.persistBibleMemory();
+    return { ...mention };
+  }
+
+  bibleDeleteMentions(scopeId: string, docId?: string, factKey?: string): void {
+    if (!this.bibleSourceAllowed(scopeId) || (docId && (!this.bibleSourceAllowed(docId) || this.bibleScopeId(docId) !== scopeId))) {
+      throw new Error("Locked documents cannot modify Story Memory evidence");
+    }
+    this.bibleMentions = this.bibleMentions.filter((mention) =>
+      mention.bible_doc_id !== scopeId ||
+      (docId !== undefined && mention.doc_id !== docId) ||
+      (factKey !== undefined && mention.fact_key !== factKey)
+    );
+    this.persistBibleMemory();
+  }
+
+  deleteBibleFact(factId: string): void {
+    const fact = this.bible.find((item) => item.id === factId);
+    if (fact && !this.bibleSourceAllowed(fact.doc_id)) throw new Error("Locked documents cannot modify Story Memory evidence");
+    this.bible = this.bible.filter((item) => item.id !== factId);
+    if (fact) {
+      this.bibleMentions = this.bibleMentions.filter((mention) => mention.bible_doc_id !== fact.doc_id || mention.fact_key !== fact.key);
+      this.bibleSuggestions = this.bibleSuggestions.filter((suggestion) => suggestion.bible_doc_id !== fact.doc_id || suggestion.key !== fact.key);
+      save(BIBLE_KEY, this.bible);
+      this.persistBibleMemory();
+    }
+    this.rebuildEntityIndex();
+  }
+
+  bibleGetSuggestions(scopeId: string): BrowserBibleSuggestion[] {
+    return this.bibleSuggestions
+      .filter((suggestion) => suggestion.status === "pending" && suggestion.bible_doc_id === scopeId && this.bibleSourceAllowed(scopeId) && this.bibleSourceAllowed(suggestion.source_doc_id) && this.bibleScopeId(suggestion.source_doc_id) === scopeId)
+      .map((suggestion) => ({ ...suggestion }));
+  }
+
+  bibleRejectSuggestion(scopeId: string, suggestionId: string): void {
+    const suggestion = this.bibleSuggestions.find((item) => item.bible_doc_id === scopeId && item.id === suggestionId && item.status === "pending");
+    if (!suggestion) throw new Error("Suggestion not found");
+    if (!this.bibleSourceAllowed(scopeId) || !this.bibleSourceAllowed(suggestion.source_doc_id) || this.bibleScopeId(suggestion.source_doc_id) !== scopeId) {
+      throw new Error("Suggestion source is no longer available");
+    }
+    this.bibleSuggestions = this.bibleSuggestions.map((suggestion) =>
+      suggestion.bible_doc_id === scopeId && suggestion.id === suggestionId ? { ...suggestion, status: "rejected" } : suggestion,
+    );
+    this.persistBibleMemory();
+  }
+
+  bibleConfirmSuggestion(scopeId: string, suggestionId: string): BrowserBibleFact {
+    const suggestion = this.bibleSuggestions.find((item) => item.bible_doc_id === scopeId && item.id === suggestionId && item.status === "pending");
+    if (!suggestion) throw new Error("Suggestion not found");
+    if (!this.bibleSourceAllowed(scopeId) || !this.bibleSourceAllowed(suggestion.source_doc_id) || this.bibleScopeId(suggestion.source_doc_id) !== scopeId) {
+      throw new Error("Suggestion source is no longer available");
+    }
+    if (!this.get(suggestion.source_doc_id).content.includes(suggestion.snippet)) {
+      throw new Error("Suggestion source changed before confirmation");
+    }
+    const factKind = suggestion.kind === "character" ? "world_characters" : "world_settings";
+    const existing = this.bible.find((fact) => fact.doc_id === scopeId && fact.key === suggestion.key);
+    const fact = existing
+      ? { ...existing, kind: existing.kind || factKind, value: suggestion.value }
+      : { id: `fact-${uid("bible")}`, doc_id: scopeId, kind: factKind, key: suggestion.key, value: suggestion.value };
+    if (existing) this.bible = this.bible.map((item) => item.id === existing.id ? fact : item);
+    else this.bible.push(fact);
+    this.bibleUpsertMention(scopeId, suggestion.source_doc_id, suggestion.key, suggestion.kind, suggestion.snippet, suggestion.attribute_key, suggestion.attribute_value);
+    this.bibleRejectSuggestion(scopeId, suggestionId);
+    save(BIBLE_KEY, this.bible);
+    this.rebuildEntityIndex();
+    return { ...fact };
   }
 
   listPinned(): BrowserDoc[] {

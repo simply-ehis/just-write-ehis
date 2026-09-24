@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-entity-occurrences"
+description = "Enables the entity_occurrences command without any pre-configured scope."
+commands.allow = ["entity_occurrences"]
+
+[[permission]]
+identifier = "deny-entity-occurrences"
+description = "Denies the entity_occurrences command without any pre-configured scope."
+commands.deny = ["entity_occurrences"]

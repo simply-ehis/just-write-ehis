@@ -39,6 +39,7 @@
   import { showConflict } from "$lib/stores/conflict";
   import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
+  import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
@@ -79,6 +80,7 @@
   let typingFocus = $state(false);
   let typingIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let disposeWidgetBridge: (() => void) | null = null;
+  let disposeNativeFileListener: (() => void) | null = null;
 
   function handleEditorTyping() {
     if (!$settings.autoHideChrome || $zenMode || $showSettings) return;
@@ -148,7 +150,11 @@
     });
   });
   function checkMobile() {
-    isMobile = window.innerWidth <= 768;
+    // Soft-keyboard squeeze: visualViewport shrinks on focus in mobile
+    // browsers while innerWidth does not, so the breakpoint follows the
+    // smaller of the two.
+    const viewport = window.visualViewport;
+    isMobile = Math.min(window.innerWidth, viewport?.width ?? window.innerWidth) <= 768;
     if (!isMobile) sidebarVisible = false;
   }
 
@@ -300,6 +306,7 @@
   onMount(() => {
     checkMobile();
     window.addEventListener('resize', checkMobile);
+    window.visualViewport?.addEventListener('resize', checkMobile);
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('editor-typing', handleEditorTyping);
     window.addEventListener('mousemove', handleMouseNearTop);
@@ -316,6 +323,11 @@
           disposeWidgetBridge = await initializeMainWindowBridge();
         } catch (e) {
           console.warn("Failed to initialize companion window bridge:", e);
+        }
+        try {
+          disposeNativeFileListener = await listenForNativeFileOpen();
+        } catch (e) {
+          console.warn("Failed to listen for native file opens:", e);
         }
         try {
           await api.setupFileWatcher();
@@ -402,24 +414,31 @@
       // PWA entry points (share target, shortcuts, notification taps) win
       // over the restore: a launch intent is an explicit user action.
       // SW → app message bridge for shares while already open.
-      setupLaunchBridge();
-      try {
-        await consumeLaunchParams();
-      } catch {
-        /* boot URL unreadable: normal startup continues */
-      }
+       setupLaunchBridge();
+       try {
+         await consumeLaunchParams();
+       } catch {
+         /* boot URL unreadable: normal startup continues */
+       }
+        await consumeNativeLaunchFile();
 
-      ready = true;
+        ready = true;
+
+
+
     })();
 
     return () => {
       window.removeEventListener('resize', checkMobile);
+      window.visualViewport?.removeEventListener('resize', checkMobile);
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('editor-typing', handleEditorTyping);
       window.removeEventListener('mousemove', handleMouseNearTop);
       window.removeEventListener('replay-onboarding', replayOnboarding);
-      if (typingIdleTimer) clearTimeout(typingIdleTimer);
-      disposeWidgetBridge?.();
+       if (typingIdleTimer) clearTimeout(typingIdleTimer);
+       disposeNativeFileListener?.();
+       disposeWidgetBridge?.();
+
     };
   });
 
@@ -502,8 +521,16 @@
       </div>
     </div>
 
-    {#if $inspectorOpen && !isMobile}
-      <InspectorPanel />
+    {#if $inspectorOpen}
+      {#if isMobile}
+        <div class="mobile-ai-overlay" onclick={(e) => { if (e.target === e.currentTarget) $inspectorOpen = false; }} role="presentation" onkeydown={(e) => { if (e.key === 'Escape') $inspectorOpen = false; }}>
+          <div class="mobile-ai-container" role="dialog" tabindex="-1">
+            <InspectorPanel />
+          </div>
+        </div>
+      {:else}
+        <InspectorPanel />
+      {/if}
     {/if}
 
     {#if $aiPanelOpen}
@@ -571,6 +598,7 @@
     background: var(--surface-base);
     border-top: 1px solid var(--border-subtle);
     overflow: hidden;
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
   .preview-banner {

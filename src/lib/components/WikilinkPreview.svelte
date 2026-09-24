@@ -20,6 +20,13 @@
       loading = true;
       preview = "";
       api.docGet(docId).then((doc) => {
+        // Locked docs stay unpeeked: the preview is a content leak if it
+        // renders a document the reader has not unlocked.
+        if (doc.locked) {
+          preview = "";
+          loading = false;
+          return;
+        }
         // Show first ~300 chars of content
         const text = (doc.content || "").replace(/^#+\s+.+\n?/, "").trim();
         preview = text.slice(0, 300) + (text.length > 300 ? "..." : "");

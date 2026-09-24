@@ -11,7 +11,7 @@
  * Run: npm run build && npm run test:e2e
  */
 import { createServer, get as httpGet, request as httpRequest } from "node:http";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -72,12 +72,18 @@ async function serveAndFetch() {
     }
     const jsName = html.match(/assets\/(index-.*\.js)/)?.[1];
     if (jsName) {
-      const js = (await getText(port, `/assets/${jsName}`)).body;
+      // Workspaces are code-split, so a marker may live in any chunk:
+      // scan the whole built surface, not just the entry bundle.
+      const assetDir = join(root, "dist/assets");
+      const built = (await readdir(assetDir)).filter((f) => f.endsWith(".js"));
+      const chunks = (
+        await Promise.all(built.map(async (f) => (await getText(port, `/assets/${f}`)).body))
+      ).join("\n");
       // UI string literals survive minification; component identifiers do not.
       for (const marker of ["Just Write ehis", "Node Map", "Structurize", "Version History", "Quick capture", "Command palette"]) {
-        check(`bundle contains "${marker}"`, js.includes(marker));
+        check(`bundle contains "${marker}"`, chunks.includes(marker));
       }
-      check("bundle contains browser preview backend", js.includes("browser-preview-vault"));
+      check("bundle contains browser preview backend", chunks.includes("browser-preview-vault"));
     }
   } catch (e) {
     check("preview fetch", false, String(e));
@@ -149,9 +155,17 @@ async function updaterWiring() {
   check("tauri.conf has updater pubkey field", typeof updater?.pubkey === "string" && updater.pubkey.length > 0);
   check("tauri.conf updater dialog off (in-app UI owns it)", updater?.dialog === false);
   check("tauri.conf emits updater artifacts", conf.bundle?.createUpdaterArtifacts === true);
-  const caps = JSON.parse(await readFile(join(root, "src-tauri/capabilities/default.json"), "utf8"));
+  // Capabilities are split per window; the main window must keep updater +
+  // process rights regardless of how the files are organized.
+  const capDir = join(root, "src-tauri/capabilities");
+  const capFiles = (await readdir(capDir)).filter((f) => f.endsWith(".json"));
+  const caps = [];
+  for (const f of capFiles) caps.push(JSON.parse(await readFile(join(capDir, f), "utf8")));
+  const mainGrants = new Set(
+    caps.filter((c) => (c.windows ?? []).includes("main")).flatMap((c) => c.permissions ?? [])
+  );
   for (const perm of ["core:default", "updater:default", "process:default"]) {
-    check(`capability grants ${perm}`, (caps.permissions ?? []).includes(perm));
+    check(`main window grants ${perm}`, mainGrants.has(perm));
   }
   const cargo = await readFile(join(root, "src-tauri/Cargo.toml"), "utf8");
   check("Cargo wires tauri-plugin-updater", cargo.includes('tauri-plugin-updater = "2"'));
@@ -408,7 +422,7 @@ async function settingsAreaWiring() {
   check("dead sync keys deleted", !stores.includes("fileWatcherEnabled") && !stores.includes("conflictBehavior") && stores.includes("validateSettings") && stores.includes("resetSettings"));
   check("retired ollama defaults migrate", stores.includes("migrateRetiredProviders") && (await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8")).includes("RETIRED_MAIN_MODELS"));
   const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
-  check("settings import validates loudly + resets", pane.includes("validateSettings(imported") && pane.includes("Import blocked secrets") && pane.includes("resetAllSettings") && pane.includes("setupFileWatcher") && !pane.includes("setting-conflict-behavior"));
+  check("settings import validates loudly + resets", pane.includes("validateSettings(imported") && pane.includes("Import blocked secrets") && pane.includes("resetAllSettings") && !pane.includes("setting-conflict-behavior"));
   check("rhythm heatmap wired to checkbox", pane.includes("setting-rhythm-heatmap") && pane.includes("rhythmHeatmapInStatusBar"));
   for (const f of ["EditorPane.svelte", "JustWriteWorkspace.svelte"]) {
     const src = await readFile(join(root, "src/lib/components", f), "utf8");
@@ -513,6 +527,21 @@ async function bookParsing() {
   }
 }
 
+async function storyMemoryWiring() {
+  const api = await readFile(join(root, "src/lib/api.ts"), "utf8");
+  const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
+  const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
+  const novel = await readFile(join(root, "src/lib/components/NovelWorkspace.svelte"), "utf8");
+  const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
+  const write = await readFile(join(root, "src/lib/components/JustWriteWorkspace.svelte"), "utf8");
+  const extractor = commands.slice(commands.indexOf("async fn extract_bible_memory"), commands.indexOf("#[tauri::command]\npub fn memory_decay_activity"));
+  check("Story Memory API has extraction and review commands", ["bibleGetMentions", "bibleGetSuggestions", "bibleExtractMentions", "bibleRebuildMemory"].every((name) => api.includes(name)));
+  check("Story Memory browser backend has parity cases", ["bible_get_mentions", "bible_get_suggestions", "bible_extract_mentions", "bible_rebuild_memory"].every((name) => backend.includes(`case "${name}"`)));
+  check("Story Memory extraction uses managed local chat only", extractor.includes("llm.chat_completion") && !extractor.includes("post_chat_completions") && !extractor.includes("mainModel"));
+  check("Story Memory queues after successful saves", editor.includes("scheduleStoryMemory(updated, content)") && write.includes("scheduleStoryMemory(updated, content)"));
+  check("Story Memory UI exposes review and contradiction surfaces", novel.includes("Rebuild Memory") && novel.includes("Suggested entries") && novel.includes("Contradiction"));
+}
+
 async function recentWiring() {
   // Skills/Craft/Stats live in Settings, not the sidebar.
   const stores = await readFile(join(root, "src/lib/stores/app.ts"), "utf8");
@@ -573,6 +602,7 @@ await noNativeDialogs();
 await auditBatchWiring();
 await secretsWiring();
 await settingsAreaWiring();
+await storyMemoryWiring();
 await recentWiring();
 await splitHardeningWiring();
 await themeAndReaderWiring();

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis — a local-first writing super app for fiction, notes, scripts, reading, and the ideas around them.">
+  <title>Just Write ehis — Paper Cinema</title>
+  <style>
+    :root { --paper:#e9e3d2; --paper-2:#f7f2e5; --ink:#1c1c18; --muted:#67675e; --blue:#2c5f77; --blue-dark:#214c61; --orange:#d68b42; --green:#88a679; --red:#a54735; --mono:'Space Mono','Courier New',monospace; --display:'Arial Black',Impact,sans-serif; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    a { color:inherit; text-decoration:none; }
+    .wrap { width:min(1200px,calc(100% - 60px)); margin:auto; }
+    .nav { position:absolute; z-index:2; top:0; left:0; right:0; display:flex; justify-content:space-between; align-items:center; padding:24px 30px; }
+    .brand { display:flex; align-items:center; width:185px; }
+    .brand img { display:block; width:100%; height:auto; }
+    .nav nav { display:flex; gap:24px; font:10px var(--mono); text-transform:uppercase; }
+    .nav nav a:hover { color:var(--blue); }
+    .nav .nav-cta { padding:11px 13px; border:1px solid var(--ink); }
+    .nav .nav-cta:hover { background:var(--blue); color:var(--paper-2); }
+    .hero { min-height:760px; position:relative; display:flex; align-items:end; overflow:hidden; padding:30px; }
+    .hero-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; mix-blend-mode:multiply; opacity:.88; }
+    .hero::after { content:""; position:absolute; inset:0; background:linear-gradient(90deg,rgba(233,227,210,.98) 0%,rgba(233,227,210,.82) 38%,rgba(233,227,210,.08) 75%); }
+    .hero-grid { position:relative; z-index:1; width:min(1200px,100%); margin:auto; display:grid; grid-template-columns:1fr .86fr; gap:60px; align-items:end; padding-top:90px; }
+    .kicker,.label { color:var(--blue); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1,h2,h3 { margin:0; font-family:var(--display); font-weight:900; letter-spacing:-.1em; text-transform:uppercase; }
+    h1 { max-width:750px; margin:22px 0; font-size:clamp(4.2rem,9.4vw,9.6rem); line-height:.77; }
+    .lede { max-width:560px; color:var(--muted); font-size:18px; line-height:1.5; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:30px; }
+    .button { min-height:44px; display:inline-flex; align-items:center; justify-content:center; padding:0 15px; border:1px solid var(--ink); font:10px var(--mono); text-transform:uppercase; }
+    .button.primary { background:var(--blue); border-color:var(--blue); color:var(--paper-2); }
+    .button.primary:hover { background:var(--ink); border-color:var(--ink); }
+    .button:hover { background:var(--ink); color:var(--paper-2); }
+    .fine-print { margin:17px 0 0; color:var(--muted); font:10px/1.5 var(--mono); }
+    .product-shot { position:relative; padding:10px; background:var(--ink); box-shadow:18px 20px 0 rgba(44,95,119,.42); transform:rotate(2deg); }
+    .product-shot img { display:block; width:100%; height:auto; }
+    .product-shot::after { content:"Actual preview / Novel Studio"; position:absolute; left:12px; right:12px; bottom:-27px; color:var(--blue); font:9px var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .section { width:min(1200px,calc(100% - 60px)); margin:auto; padding:112px 0; }
+    .section-head { display:grid; grid-template-columns:.75fr 1.25fr; gap:70px; align-items:end; margin-bottom:60px; }
+    h2 { font-size:clamp(2.8rem,7vw,7rem); line-height:.79; }
+    .section-head p { max-width:540px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .collage { display:grid; grid-template-columns:1.3fr .7fr; grid-template-rows:230px 230px; gap:10px; }
+    .paper-card { position:relative; padding:22px; border:1px solid var(--ink); overflow:hidden; }
+    .paper-card:nth-child(1) { background:var(--blue); color:var(--paper-2); }
+    .paper-card:nth-child(2) { background:var(--orange); }
+    .paper-card:nth-child(3) { background:var(--green); }
+    .paper-card:nth-child(4) { background:var(--paper-2); }
+    .paper-card b { display:block; font:900 26px/.9 var(--display); letter-spacing:-.07em; text-transform:uppercase; }
+    .paper-card span { position:absolute; bottom:22px; left:22px; max-width:260px; font:10px/1.5 var(--mono); text-transform:uppercase; }
+    .paper-card:nth-child(1)::after { content:"✦"; position:absolute; right:25px; bottom:-35px; font:190px/1 Georgia,serif; opacity:.55; }
+    .paper-card:nth-child(2)::after { content:"02"; position:absolute; right:18px; top:20px; font:900 80px/.8 var(--display); color:rgba(28,28,24,.16); }
+    .paper-card:nth-child(3)::after { content:"→"; position:absolute; right:22px; bottom:-8px; font:150px/1 var(--display); color:rgba(28,28,24,.3); }
+    .paper-card:nth-child(4)::after { content:"THIS"; position:absolute; right:18px; bottom:18px; color:var(--blue); font:900 56px/.8 var(--display); transform:rotate(-8deg); }
+    .quote { padding:80px 0; border-top:1px solid var(--ink); border-bottom:1px solid var(--ink); color:var(--blue); font:400 clamp(2.5rem,6vw,6rem)/.95 Georgia,serif; letter-spacing:-.05em; }
+    .feature-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .feature-panel { min-height:430px; padding:25px; border:1px solid var(--ink); position:relative; overflow:hidden; }
+    .feature-panel.reader { background:var(--blue); color:var(--paper-2); }
+    .feature-panel.converter { background:var(--orange); }
+    .feature-panel h3 { max-width:580px; margin:24px 0 16px; font-size:clamp(2.3rem,5vw,5rem); line-height:.86; }
+    .feature-panel p { max-width:530px; margin:0; color:rgba(28,28,24,.72); font-size:17px; line-height:1.55; }
+    .feature-panel.reader p { color:rgba(247,242,229,.78); }
+    .feature-panel ul { max-width:510px; margin:28px 0 0; padding:0; list-style:none; color:rgba(28,28,24,.78); font:11px/1.9 var(--mono); text-transform:uppercase; }
+    .feature-panel.reader ul { color:rgba(247,242,229,.8); }
+    .feature-panel li::before { content:"↳ "; color:var(--red); }
+    .stamp { position:absolute; right:22px; bottom:20px; font:900 90px/.8 var(--display); opacity:.14; }
+    .voice-section { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .voice-copy { padding:35px; background:var(--paper-2); border:1px solid var(--ink); }
+    .voice-copy h3 { margin:22px 0 18px; font-size:42px; line-height:.86; }
+    .voice-copy p { max-width:470px; margin:0; color:var(--muted); font-size:17px; line-height:1.6; }
+    .voice-list { display:grid; border-top:1px solid var(--ink); margin-top:35px; }
+    .voice-row { display:grid; grid-template-columns:120px 1fr; gap:20px; padding:13px 0; border-bottom:1px solid rgba(28,28,24,.22); font:10px var(--mono); text-transform:uppercase; }
+    .voice-row strong { color:var(--blue); }
+    .specials { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--ink); }
+    .special { min-height:210px; padding:18px; border-right:1px solid var(--ink); }
+    .special:last-child { border-right:0; }
+    .special:nth-child(2) { background:var(--green); }
+    .special:nth-child(3) { background:var(--blue); color:var(--paper-2); }
+    .special:nth-child(4) { background:var(--orange); }
+    .special b { display:block; margin-bottom:70px; font:900 21px/.9 var(--display); letter-spacing:-.07em; text-transform:uppercase; }
+    .special span { opacity:.72; font:10px/1.5 var(--mono); text-transform:uppercase; }
+    .evidence-section { border-top:1px solid var(--ink); }
+    .evidence-intro { max-width:650px; margin:0 0 42px; color:var(--muted); font-size:17px; line-height:1.55; }
+    .evidence-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .evidence-slot { min-height:220px; margin:0; padding:18px; border:2px dashed var(--ink); background:var(--paper-2); display:flex; flex-direction:column; }
+    .evidence-slot:nth-child(2) { background:#dce7de; }
+    .evidence-slot:nth-child(3) { background:#d8e4e8; }
+    .evidence-label { color:var(--blue); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+    .evidence-title { margin-top:44px; font:900 22px/.9 var(--display); letter-spacing:-.06em; text-transform:uppercase; }
+    .evidence-slot figcaption { margin-top:auto; color:var(--muted); font:10px/1.5 var(--mono); text-transform:uppercase; }
+    .pricing { display:grid; grid-template-columns:.85fr 1.15fr; gap:10px; }
+    .pitch { padding:28px; background:var(--blue); color:var(--paper-2); }
+    .pitch .label { color:var(--paper-2); }
+    .pitch h3 { margin:75px 0 18px; font-size:clamp(2.8rem,5vw,5.5rem); }
+    .pitch p { max-width:420px; margin:0; color:rgba(247,242,229,.78); line-height:1.6; }
+    .price-list { border:1px solid var(--ink); background:var(--paper-2); }
+    .price-row { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:16px 20px; border-bottom:1px solid var(--ink); font-size:14px; line-height:1.45; }
+    .price-row:last-child { border-bottom:0; }
+    .price-row strong { color:var(--blue); font:10px var(--mono); text-transform:uppercase; }
+    .tech { display:flex; flex-wrap:wrap; gap:8px 22px; color:var(--muted); font:11px var(--mono); text-transform:uppercase; }
+    .tech span::before { content:"/ "; color:var(--orange); }
+    .footer-image { min-height:430px; position:relative; display:flex; align-items:end; overflow:hidden; background:var(--orange); }
+    .footer-image img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; mix-blend-mode:screen; opacity:.48; }
+    .footer-copy { position:relative; width:min(1200px,calc(100% - 60px)); margin:auto; display:flex; justify-content:space-between; align-items:end; gap:30px; }
+    .footer-copy h2 { max-width:800px; }
+    footer { width:min(1200px,calc(100% - 60px)); margin:auto; display:flex; justify-content:space-between; padding:25px 0 38px; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:900px) { .nav nav { display:none; } .hero-grid,.feature-grid,.voice-section,.pricing { grid-template-columns:1fr; } .hero { min-height:auto; padding:100px 20px 85px; } .product-shot { max-width:700px; margin:20px auto 45px; } .section-head { grid-template-columns:1fr; gap:22px; } .collage { grid-template-columns:1fr; grid-template-rows:repeat(4,190px); } .specials { grid-template-columns:1fr 1fr; } .special:nth-child(2) { border-right:0; } .special:nth-child(n+3) { border-top:1px solid var(--ink); } .evidence-grid { grid-template-columns:1fr; } .footer-copy { display:block; } .footer-copy .button { margin-top:25px; } }
+    @media (max-width:560px) { .wrap,.section,footer,.footer-copy { width:calc(100% - 32px); } .brand { width:150px; } .nav { padding:18px 16px; } h1 { font-size:clamp(3.4rem,17vw,6rem); } .section { padding:78px 0; } .lede { font-size:17px; } .actions { flex-direction:column; } .button { justify-content:center; } .specials { grid-template-columns:1fr; } .special { border-right:0; border-top:1px solid var(--ink); } .special:first-child { border-top:0; } .voice-row { grid-template-columns:1fr; gap:4px; } }
+  </style>
+</head>
+<body>
+  <section class="hero"><img class="hero-img" src="./assets/paper-moon.svg" alt=""><div class="nav"><a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis — pen wrote this with E-tick"></a><nav><a href="#rooms">The rooms</a><a href="#reader">Reader</a><a href="#voice">Voice</a><a href="#pro">Pro</a><a href="#download" class="nav-cta">Download</a></nav></div><div class="hero-grid"><div><div class="kicker">06 / Paper cinema / a real writing system</div><h1>A writing room for the whole work.</h1><p class="lede">Write, read, convert, capture, and remember in one local-first desktop app that keeps your files yours.</p><div class="actions"><a class="button primary" href="#download">Start writing — Free</a><a class="button" href="#reader">See the rooms</a></div><p class="fine-print">14-day full trial · no credit card · Windows desktop</p></div><div class="product-shot"><img src="../../artifacts/auto-story-memory-preview.png" alt="Actual Just Write ehis Novel Studio and Story Bible browser preview"></div></div></section>
+
+  <main>
+    <section class="section" id="rooms"><div class="section-head"><h2>Different rooms.<br>One life of work.</h2><p>Just Write ehis changes shape around the job. Draft fiction in one room, read in another, capture the loose thought before it disappears, and keep the structure close.</p></div><div class="collage"><div class="paper-card"><b>Write</b><span>Focused drafting, autosave, typewriter mode, session recap, and a real local file behind every page.</span></div><div class="paper-card"><b>Map</b><span>Projects, links, references, and loose threads become a shape you can actually see.</span></div><div class="paper-card"><b>Inbox</b><span>Capture text, links, and dictation first. Triage later without turning every thought into a project.</span></div><div class="paper-card"><b>Remember</b><span>Story Memory connects names, facts, and scenes without taking the work out of your hands.</span></div></div><div class="quote">Make the system expressive. Keep the file honest.</div></section>
+
+    <section class="section" id="reader"><div class="section-head"><h2>Read it.<br>Change it.<br>Send it out.</h2><p>Reader and converter are part of the same loop: bring material in, understand it, shape it, and move it into the next place it needs to be.</p></div><div class="feature-grid"><article class="feature-panel reader"><div class="label">01 / Reader</div><h3>Books are not attachments.</h3><p>Import EPUB, PDF, DOCX, Markdown, and plain text. Preview PDF pages, then keep extracted text, shelf status, ratings, and reading position attached to the book.</p><ul><li>EPUB / PDF / DOCX / MD / TXT</li><li>PDF preview with zoom and page navigation</li><li>Shelf, ratings, and position sync</li></ul><span class="stamp">READ</span></article><article class="feature-panel converter"><div class="label">02 / Converter</div><h3>Make the next format honest.</h3><p>Export to Markdown, TXT, or HTML with the built-in engine. Use Pandoc for DOCX, EPUB, and PDF. Novel Compile joins the board in its real order.</p><ul><li>Built-in md / txt / html</li><li>Pandoc for docx / epub / pdf</li><li>Embeds, wikilinks, frontmatter, attachments</li><li>Batch export open tabs as a zip</li></ul><span class="stamp">SEND</span></article></div></section>
+
+    <section class="section" id="voice"><div class="section-head"><h2>Voice belongs<br>to the work.</h2><p>Speaking and listening are part of the writing surface, not a separate app. Capture a thought, hear a draft, and keep moving without leaving the document.</p></div><div class="voice-section"><div class="voice-copy"><div class="label">03 / Speech + voice</div><h3>Dictate. Read. Return.</h3><p>Moonshine handles local speech-to-text. TTS uses the configured Kokoro voice for read-aloud. In the browser or mobile PWA, browser speech recognition keeps capture available.</p><div class="voice-list"><div class="voice-row"><strong>STT</strong><span>Moonshine local transcription / 16 kHz capture</span></div><div class="voice-row"><strong>TTS</strong><span>Kokoro read-aloud / selectable voices and languages</span></div><div class="voice-row"><strong>Capture</strong><span>Enter saves to Inbox; dictation is explicit</span></div><div class="voice-row"><strong>Privacy</strong><span>Sidecars are lazy-started only when used</span></div></div></div><figure class="evidence-slot" data-evidence="voice-runtime"><div class="evidence-label">Evidence slot / after native run</div><div class="evidence-title">Dictation → text → read-aloud</div><figcaption>Replace with a real recording, transcript, or sidecar timing capture after the Windows build.</figcaption></figure></div></section>
+
+    <section class="section"><div class="section-head"><h2>The parts that<br>make it feel finished.</h2><p>The best features are the ones that remove a small piece of friction without asking for your whole life in return.</p></div><div class="specials"><article class="special"><b>Story Memory</b><span>Local extraction, suggestions, confirmed facts, contradictions, and scene links.</span></article><article class="special"><b>Inbox triage</b><span>Capture first, multi-select later, bulk move or delete without losing the thread.</span></article><article class="special"><b>Companion dock</b><span>Collapse the widget to an edge figure. Expand one workspace without a second process.</span></article><article class="special"><b>Open with Windows</b><span>.txt and .md associations, warm file handoff, and no forced default-app status.</span></article></div></section>
+
+    <section class="section evidence-section" id="evidence"><div class="section-head"><h2>Proof, not promises.</h2><p class="evidence-intro">These are deliberate evidence slots, not fabricated screenshots or invented performance numbers. After the native build, replace each slot with a real capture, timestamp, or verified result.</p></div><div class="evidence-grid"><figure class="evidence-slot" data-evidence="windows-file-handoff"><div class="evidence-label">Evidence slot / Windows</div><div class="evidence-title">Open with → right file</div><figcaption>Capture Explorer’s Open with menu and a warm handoff to the running app.</figcaption></figure><figure class="evidence-slot" data-evidence="reader-import"><div class="evidence-label">Evidence slot / Reader</div><div class="evidence-title">Import → preview → position</div><figcaption>Capture a real EPUB/PDF import, page preview, rating, and resumed position.</figcaption></figure><figure class="evidence-slot" data-evidence="converter-voice"><div class="evidence-label">Evidence slot / Output + voice</div><div class="evidence-title">Compile and speak the draft</div><figcaption>Capture a compiled manuscript, exported format, and read-aloud/dictation run.</figcaption></figure></div></section>
+
+    <section class="section" id="pro"><div class="section-head"><h2>Start free.<br>Go deeper if<br>you want to.</h2><p>No recurring subscription and no account wall. Pro is a one-time purchase for the people who want the full writing system.</p></div><div class="pricing"><div class="pitch"><div class="label">Pro / $29 one-time</div><h3>Pay once.<br>Keep the work.</h3><p>Pro unlocks Novel Studio, Script, Canvas, Reader, Projects, AI Assist, Ghosts, Rhythm, full export, themes, and one year of updates. No subscription.</p></div><div class="price-list"><div class="price-row"><strong>Free</strong><span>Full editor, Inbox, Notes, and Markdown export.</span></div><div class="price-row"><strong>Free trial</strong><span>14 days of full Pro access. No credit card.</span></div><div class="price-row"><strong>Pro / $29</strong><span>Everything in Free, plus the complete writing system and one-time license.</span></div><div class="price-row"><strong>Privacy</strong><span>Local-first files and optional AI; offline use does not require an account.</span></div></div></div></section>
+
+    <section class="section"><div class="tech"><span>Tauri</span><span>Rust</span><span>Svelte</span><span>CodeMirror 6</span><span>SQLite</span></div></section>
+
+    <section class="footer-image" id="download"><img src="./assets/paper-moon.svg" alt=""><div class="footer-copy"><div><div class="kicker">Download / Windows / paper cinema</div><h2>Make a world for the next sentence.</h2></div><a class="button primary" href="#download-note">Download Just Write ehis</a></div></section>
+  </main>
+
+  <footer><span>Just Write ehis / prototype 06</span><span>Creative / evidence-led / local-first</span><span id="download-note">Windows release link pending</span></footer>
+</body>
+</html>

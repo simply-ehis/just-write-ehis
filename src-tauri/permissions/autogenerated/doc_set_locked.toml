@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-doc-set-locked"
+description = "Enables the doc_set_locked command without any pre-configured scope."
+commands.allow = ["doc_set_locked"]
+
+[[permission]]
+identifier = "deny-doc-set-locked"
+description = "Denies the doc_set_locked command without any pre-configured scope."
+commands.deny = ["doc_set_locked"]

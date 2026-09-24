@@ -3,6 +3,7 @@
   import { workspaces } from "$lib/stores/app";
   import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
+  import { isWindowsRuntime } from "$lib/widgetAutostart";
   import Icon from "$lib/components/Icon.svelte";
 
   let { onComplete }: { onComplete: () => void } = $props();
@@ -35,6 +36,8 @@
   let llmOn = $state($settings.llmEnabled);
   let vaultPath = $state($settings.vaultPath);
   let seedSample = $state(true);
+  const windowsStep = isWindowsRuntime();
+  const stepIndexes = windowsStep ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4];
   let smallEndpoint = $state($settings.smallModelEndpoint);
   let smallModel = $state($settings.smallModelName);
   let mainEndpoint = $state($settings.mainModelEndpoint);
@@ -70,7 +73,7 @@
   }
 
   function next() {
-    if (step < 4) step++;
+    if (step < stepIndexes.length - 1) step++;
   }
 
   function prev() {
@@ -101,6 +104,14 @@ Delete this doc whenever you're ready. Happy writing.
       }
     } catch (e) {
       console.warn("Starter seed failed (vault may be unwritable):", e instanceof Error ? e.message : e);
+    }
+  }
+
+  async function openDefaultApps() {
+    try {
+      await api.openDefaultApps();
+    } catch (e) {
+      showToast(`Couldn't open Windows Default Apps: ${e instanceof Error ? e.message : e}`, "error");
     }
   }
 
@@ -252,6 +263,23 @@ Delete this doc whenever you're ready. Happy writing.
         </div>
       </div>
 
+    {:else if step === 4 && windowsStep}
+      <div class="step">
+        <div class="step-icon"><Icon name="folder" size={28} /></div>
+        <h2>Open your writing from Windows</h2>
+        <p class="step-desc">The Windows installer registers .txt and .md with Just Write ehis. Open with routes files into your vault; a second launch hands off to the running window instead of starting another copy.</p>
+        <div class="integration-list">
+          <div class="integration-item"><strong>File associations</strong><span>Use Explorer’s Open with menu after installation.</span></div>
+          <div class="integration-item"><strong>Default Apps</strong><span>Windows decides which editor is default; Just Write ehis never forces the choice.</span></div>
+          <div class="integration-item"><strong>Startup</strong><span>Enable the companion widget first, then choose whether it should start with Windows.</span></div>
+        </div>
+        <button class="secondary-btn" onclick={openDefaultApps}>Open Windows Default Apps</button>
+        <div class="step-actions">
+          <button class="secondary-btn" onclick={prev}>Back</button>
+          <button class="primary-btn" onclick={next}>Continue</button>
+        </div>
+      </div>
+
     {:else}
       <div class="step">
         <div class="step-icon"><Icon name="folder" size={28} /></div>
@@ -299,11 +327,11 @@ Delete this doc whenever you're ready. Happy writing.
     {/if}
 
     <div class="step-dots" aria-label="Setup progress">
-      {#each [0, 1, 2, 3, 4] as i}
+      {#each stepIndexes as i}
         <span class="dot" class:active={step === i}></span>
       {/each}
     </div>
-    <p class="step-count">Step {step + 1} of 5</p>
+    <p class="step-count">Step {step + 1} of {stepIndexes.length}</p>
   </div>
 </div>
 
@@ -446,6 +474,34 @@ Delete this doc whenever you're ready. Happy writing.
     flex-direction: column;
     gap: 6px;
     text-align: left;
+  }
+
+  .integration-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 18px;
+    text-align: left;
+  }
+
+  .integration-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+  }
+
+  .integration-item strong {
+    color: var(--text-primary);
+    font-size: var(--font-size-sm);
+  }
+
+  .integration-item span {
+    color: var(--text-muted);
+    font-size: 12px;
   }
 
   .check-row {

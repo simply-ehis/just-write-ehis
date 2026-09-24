@@ -4,7 +4,7 @@ READ-WHEN: onboarding copy changes; answering "where is X / how do I Y"
 KEY-FILES: HelpOverlay (? shortcut sheet), SettingsPane (every toggle lives here)
 INVARIANTS: every setting stated here must exist in Settings; no documented feature may be a stub
 GOTCHAS: browser preview stores in localStorage; desktop stores files+SQLite — same UI, different persistence
-UPDATED: 2026-09-18
+UPDATED: 2026-09-24
 
 # User guide
 
@@ -50,7 +50,17 @@ autocomplete; auto-suppressed for private workspaces).
   passes) when the sidecar is missing. Wipe anytime via Clear History.
 - **Clear history** (Settings → Privacy): wipe chats, snapshots, usage.
 
-## Updates, export, backup
+## Auto Story Memory
+
+After a successful save pause in Write or Novel Studio, the bundled local
+small model checks the changed scene for characters, locations, objects, and
+stated traits. Existing fact keys are matched first; new names appear in the
+Novel Studio Story Bible as suggested entries. Confirm an entry to make it
+canonical, or reject it. Confirmed entities show their quoted appearances,
+and different values for the same trait show a non-blocking contradiction
+badge with scene links. **Rebuild Memory** explicitly rechecks the project;
+locked documents and unavailable local models are skipped safely.
+
 
 - **Updates** (desktop): Settings → About → Check, or automatic on launch.
   Needs one-time maintainer setup (`docs/UPDATES.md`); otherwise the panel

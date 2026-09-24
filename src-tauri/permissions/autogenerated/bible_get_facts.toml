@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-get-facts"
+description = "Enables the bible_get_facts command without any pre-configured scope."
+commands.allow = ["bible_get_facts"]
+
+[[permission]]
+identifier = "deny-bible-get-facts"
+description = "Denies the bible_get_facts command without any pre-configured scope."
+commands.deny = ["bible_get_facts"]

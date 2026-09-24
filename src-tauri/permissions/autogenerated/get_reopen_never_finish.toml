@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-reopen-never-finish"
+description = "Enables the get_reopen_never_finish command without any pre-configured scope."
+commands.allow = ["get_reopen_never_finish"]
+
+[[permission]]
+identifier = "deny-get-reopen-never-finish"
+description = "Denies the get_reopen_never_finish command without any pre-configured scope."
+commands.deny = ["get_reopen_never_finish"]

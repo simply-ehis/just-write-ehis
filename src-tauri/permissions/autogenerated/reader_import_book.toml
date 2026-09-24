@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reader-import-book"
+description = "Enables the reader_import_book command without any pre-configured scope."
+commands.allow = ["reader_import_book"]
+
+[[permission]]
+identifier = "deny-reader-import-book"
+description = "Denies the reader_import_book command without any pre-configured scope."
+commands.deny = ["reader_import_book"]

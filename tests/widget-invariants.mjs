@@ -23,6 +23,7 @@ const widget = await read("src/WidgetApp.svelte");
 const editor = await read("src/lib/components/EditorPane.svelte");
 const settings = await read("src/lib/stores/settings.ts");
 const settingsPane = await read("src/lib/components/SettingsPane.svelte");
+const widgetAutostart = await read("src/lib/widgetAutostart.ts");
 const lazyWorkspace = await read("src/lib/components/LazyWorkspace.svelte");
 const libraryWorkspace = await read("src/lib/components/LibraryWorkspace.svelte");
 const rust = await read("src-tauri/src/lib.rs");
@@ -60,7 +61,7 @@ check("settings toggle and dock controls wired", settingsPane.includes("setting-
 check("widget emits doc and workspace handoffs", widget.includes('emitTo("main", "widget-open-doc"') && widget.includes('emitTo("main", "widget-open-workspace"'));
 check("main opens and focuses routed doc or workspace", bridge.includes('listen<string>("widget-open-doc"') && bridge.includes('listen<string>("widget-open-workspace"') && bridge.includes("setFocus()"));
 check("tray show/hide entry", rust.includes('MenuItemBuilder::with_id("widget"') && rust.includes('get_webview_window("widget")'));
-check("autostart plugin is wired", rust.includes("tauri_plugin_autostart::init") && mainCapability.permissions.includes("autostart:default") && settingsPane.includes("enableAutostart") && settingsPane.includes("disableAutostart"));
+check("autostart plugin is wired", rust.includes("tauri_plugin_autostart::Builder") && mainCapability.permissions.includes("autostart:default") && widgetAutostart.includes("enableAutostart") && widgetAutostart.includes("disableAutostart"));
 check("no widget backend command", !rust.includes("commands::widget_") && !rust.includes("pub fn widget_"));
 const handlerBlock = rust.match(/generate_handler!\[(.*?)\]/s)?.[1] ?? "";
 const handlerCommands = [...handlerBlock.matchAll(/commands::([a-z0-9_]+)/g)].map((match) => match[1]);

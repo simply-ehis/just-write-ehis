@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-productivity-score"
+description = "Enables the dashboard_productivity_score command without any pre-configured scope."
+commands.allow = ["dashboard_productivity_score"]
+
+[[permission]]
+identifier = "deny-dashboard-productivity-score"
+description = "Denies the dashboard_productivity_score command without any pre-configured scope."
+commands.deny = ["dashboard_productivity_score"]

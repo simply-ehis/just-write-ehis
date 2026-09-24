@@ -120,6 +120,34 @@ impl Database {
                 value TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS bible_mentions (
+                id TEXT PRIMARY KEY,
+                bible_doc_id TEXT NOT NULL,
+                fact_key TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                doc_id TEXT NOT NULL,
+                snippet TEXT NOT NULL,
+                attribute_key TEXT,
+                attribute_value TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS bible_suggestions (
+                id TEXT PRIMARY KEY,
+                bible_doc_id TEXT NOT NULL,
+                source_doc_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                snippet TEXT NOT NULL,
+                attribute_key TEXT,
+                attribute_value TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (source_doc_id) REFERENCES docs(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS craft_metrics (
                 id TEXT PRIMARY KEY,
                 doc_id TEXT NOT NULL,
@@ -138,6 +166,9 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_conversations_doc ON conversations(doc_id);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id);
             CREATE INDEX IF NOT EXISTS idx_bible_facts_doc ON bible_facts(doc_id);
+            CREATE INDEX IF NOT EXISTS idx_bible_mentions_scope ON bible_mentions(bible_doc_id);
+            CREATE INDEX IF NOT EXISTS idx_bible_mentions_doc ON bible_mentions(doc_id);
+            CREATE INDEX IF NOT EXISTS idx_bible_suggestions_scope ON bible_suggestions(bible_doc_id);
             CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);
 
             CREATE TABLE IF NOT EXISTS rag_chunks (
@@ -154,6 +185,22 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_content ON rag_chunks(content);"
         )?;
+
+        let has_suggestion_status: bool = conn.prepare("SELECT status FROM bible_suggestions LIMIT 1").is_ok();
+        if !has_suggestion_status {
+            let _ = conn.execute_batch("ALTER TABLE bible_suggestions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';");
+        }
+        let has_fact_scope_key: bool = conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_bible_facts_doc_key_unique'",
+            [],
+            |_| Ok(()),
+        ).is_ok();
+        if !has_fact_scope_key {
+            conn.execute_batch(
+                "DELETE FROM bible_facts WHERE id NOT IN (SELECT MIN(id) FROM bible_facts GROUP BY doc_id, key);
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_bible_facts_doc_key_unique ON bible_facts(doc_id, key);",
+            ).map_err(|e| e)?;
+        }
 
         // Create vector virtual table for semantic search
         conn.execute_batch(

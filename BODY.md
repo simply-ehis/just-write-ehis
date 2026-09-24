@@ -67,6 +67,10 @@
 | Book parser | bone | frontend | `src/lib/bookparse.ts` | ReaderWorkspace (lazy import) | ✅ wired |
 | Provider test | tendon | frontend | `src/lib/providerTest.ts` | SettingsPane AI slot buttons | ✅ wired |
 | Harness memory | muscle | engine+ui | `sidecars/harness/*` + `memory_server.py`, `sidecar.rs` MemoryManager, `harness.ts`, AiPanel gates, Privacy UI | ✅ wired (not compiled — see BUILD_CHECKLIST) |
+| Story Memory schema | bone | engine | `src-tauri/src/database.rs` + `models.rs` | `bible_mentions` + `bible_suggestions` migration | ✅ wired |
+| Story Memory extraction | muscle | engine | `src-tauri/src/commands.rs` + `src/lib/storyMemory.ts` | `LlmManager` local-only command + debounced save queue | ✅ wired |
+| Story Memory lookup | muscle | frontend | `src/lib/storyMemoryEditor.ts` + `EditorPane.svelte` + `JustWriteWorkspace.svelte` | CodeMirror fact-key decorations + hover card | ✅ wired |
+| Story Memory review UI | skin | ui | `src/lib/components/NovelWorkspace.svelte` + `StoryMemoryHoverCard.svelte` | Bible appearances, suggestions, contradictions, scene jumps | ✅ wired |
 | Place stamp | tendon | frontend | `src/lib/stamp.ts` | LogsWorkspace (opt-in daily stamp) | ✅ wired |
 | Lock store | tendon | frontend | `src/lib/stores/lock.ts` | TabBar, App gate, AiPanel, EditorPane | ✅ wired |
 | Last-place store | tendon | frontend | `src/lib/stores/lastPlace.ts` | App workspace-restore effect | ✅ wired |

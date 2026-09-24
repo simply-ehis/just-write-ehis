@@ -176,7 +176,7 @@
   }
 
   .version-panel {
-    width: 640px;
+    width: min(640px, 100vw);
     height: 100%;
     background: var(--surface-base);
     border-left: 1px solid var(--border-subtle);

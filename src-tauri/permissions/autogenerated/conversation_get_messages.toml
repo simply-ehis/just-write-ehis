@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-conversation-get-messages"
+description = "Enables the conversation_get_messages command without any pre-configured scope."
+commands.allow = ["conversation_get_messages"]
+
+[[permission]]
+identifier = "deny-conversation-get-messages"
+description = "Denies the conversation_get_messages command without any pre-configured scope."
+commands.deny = ["conversation_get_messages"]

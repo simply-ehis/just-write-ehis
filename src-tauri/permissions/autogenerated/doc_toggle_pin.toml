@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-doc-toggle-pin"
+description = "Enables the doc_toggle_pin command without any pre-configured scope."
+commands.allow = ["doc_toggle_pin"]
+
+[[permission]]
+identifier = "deny-doc-toggle-pin"
+description = "Denies the doc_toggle_pin command without any pre-configured scope."
+commands.deny = ["doc_toggle_pin"]

@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["txt", "md"],
+        "description": "Text document"
+      }
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
+}

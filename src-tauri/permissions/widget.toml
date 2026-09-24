@@ -1,5 +1,6 @@
-[widget]
-description = "Existing document, log, capture, save, and conflict commands used by the companion."
+[[permission]]
+identifier = "widget"
+description = "Existing document, log, capture, and save commands used by the companion window. Sidecars, secrets, filesystem, watcher, and updater commands are deliberately absent so the ACL refuses them even if the widget code changes."
 permissions = [
   "allow-doc-get",
   "allow-doc-create",

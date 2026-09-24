@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-craft-metrics-trend"
+description = "Enables the craft_metrics_trend command without any pre-configured scope."
+commands.allow = ["craft_metrics_trend"]
+
+[[permission]]
+identifier = "deny-craft-metrics-trend"
+description = "Denies the craft_metrics_trend command without any pre-configured scope."
+commands.deny = ["craft_metrics_trend"]

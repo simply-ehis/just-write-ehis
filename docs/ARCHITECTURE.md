@@ -1,9 +1,9 @@
 PURPOSE: how the app is layered and how data flows through it
 OWNS: layer decisions, backend selection, cross-cutting rules
 READ-WHEN: adding a command/workspace, touching storage, AI, theming, or icons
-KEY-FILES: src/lib/api.ts (invoke router), src/lib/browserBackend.ts (preview), src/WidgetApp.svelte + src/lib/components/LazyWorkspace.svelte + src-tauri/tauri.conf.json (two-window shell), src-tauri/src/commands.rs + doc_store.rs, src/app.css (theme vars)
-INVARIANTS: files-on-disk truth; every api.ts command has a browserBackend case; one process has main/widget only; setup_file_watcher runs once from main; widget never initializes DB/watcher/sidecars/RAG; no Lucide/emoji icons; all UI strings go through native title/aria-label tooltips on icon buttons
-GOTCHAS: app.css must stay imported by main.ts (the whole theme died once when it wasn't); widget capabilities must include label `widget`; Files is a virtual workspace and deep-links to Library; $lib alias only, no relative climbs; native transparent docking remains build-gated
+KEY-FILES: src/lib/api.ts (invoke router), src/lib/browserBackend.ts (preview), src/WidgetApp.svelte + src/lib/components/LazyWorkspace.svelte + src-tauri/tauri.conf.json (two-window shell), src-tauri/tauri.windows.conf.json + src-tauri/src/windows.rs (Windows integration), src-tauri/src/commands.rs + doc_store.rs, src/app.css (theme vars)
+INVARIANTS: files-on-disk truth; every api.ts command has a browserBackend case; one process has main/widget only; setup_file_watcher runs once from main; widget never initializes DB/watcher/sidecars/RAG; Windows OS registration is Windows-only and opt-in; no Lucide/emoji icons; all UI strings go through native title/aria-label tooltips on icon buttons
+GOTCHAS: app.css must stay imported by main.ts (the whole theme died once when it wasn't); widget capabilities must include label `widget`; Files is a virtual workspace and deep-links to Library; Windows associations are installer-owned; $lib alias only, no relative climbs; native transparent docking remains build-gated
 UPDATED: 2026-09-24
 
 # Architecture
@@ -67,6 +67,19 @@ future encrypted vault (see `TODOS.md`).
 ## Companion window
 
 The desktop shell has exactly two windows in one process: `main` and the taskbar-skipped `widget` declared in `tauri.conf.json`. `?widget=1` dynamically mounts `WidgetApp.svelte`, not `App.svelte`; the widget starts as a transparent 56px figure, resizes into a docked panel, and lazy-loads exactly one selected canonical workspace. It has no application sidebar, tab bar, breadcrumb, inspector, command palette, watcher, sidecar, or RAG initializer. Write reuses `EditorPane` in companion mode; the other canonical workspace IDs use their existing lazy workspace components, with Files deep-linking to Library. Both labels are listed in `capabilities/default.json`. See `docs/WIDGET.md` for lifecycle, proof output, and pending native measurements.
+
+## Auto Story Memory
+
+Story Bible facts remain canonical and manually editable. `bible_mentions` is
+project-scoped evidence keyed to a source scene; `bible_suggestions` holds
+unmatched local-model candidates until the user confirms them. Automatic
+extraction is queued only after a successful document save, runs through the
+managed local llama.cpp `LlmManager` on loopback, and retries silently when
+that model is unavailable. Source and project lock chains are checked before
+any text is sent. The editor lookup is a CodeMirror decoration/hover pass over
+already-loaded fact keys; it never calls a model per hover. Browser preview
+persists the same mention/suggestion records but reports local extraction as
+skipped because the native model is unavailable there.
 
 ## Theming
 

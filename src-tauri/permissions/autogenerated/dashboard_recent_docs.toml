@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-recent-docs"
+description = "Enables the dashboard_recent_docs command without any pre-configured scope."
+commands.allow = ["dashboard_recent_docs"]
+
+[[permission]]
+identifier = "deny-dashboard-recent-docs"
+description = "Denies the dashboard_recent_docs command without any pre-configured scope."
+commands.deny = ["dashboard_recent_docs"]

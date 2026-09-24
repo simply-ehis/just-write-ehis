@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-implicit-links-get"
+description = "Enables the implicit_links_get command without any pre-configured scope."
+commands.allow = ["implicit_links_get"]
+
+[[permission]]
+identifier = "deny-implicit-links-get"
+description = "Denies the implicit_links_get command without any pre-configured scope."
+commands.deny = ["implicit_links_get"]

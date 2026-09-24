@@ -7,7 +7,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
   import BoardColumn from "$lib/components/BoardColumn.svelte";
-  import { statusColor } from "$lib/status";
+  import { statusColor, STATUSES } from "$lib/status";
 
   let allDocs = $state<Doc[]>([]);
   let filteredDocs = $state<Doc[]>([]);
@@ -80,7 +80,7 @@
     return filteredDocs.filter((d) => dayKey(d.created_at) === day);
   }
 
-  const statuses = ['draft', 'revised', 'final', 'done', 'idea', 'cut'];
+  const statuses: readonly string[] = STATUSES;
 
   async function loadDocs() {
     loading = true;

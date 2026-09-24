@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-llm-is-running"
+description = "Enables the llm_is_running command without any pre-configured scope."
+commands.allow = ["llm_is_running"]
+
+[[permission]]
+identifier = "deny-llm-is-running"
+description = "Denies the llm_is_running command without any pre-configured scope."
+commands.deny = ["llm_is_running"]

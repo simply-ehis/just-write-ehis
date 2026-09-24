@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unlinked-mentions"
+description = "Enables the unlinked_mentions command without any pre-configured scope."
+commands.allow = ["unlinked_mentions"]
+
+[[permission]]
+identifier = "deny-unlinked-mentions"
+description = "Denies the unlinked_mentions command without any pre-configured scope."
+commands.deny = ["unlinked_mentions"]

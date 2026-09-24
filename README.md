@@ -12,9 +12,11 @@ A personal super app for **writing and everything around writing** — docs, fic
 - **Sidecar Lifecycle** — `is_running()` now detects crashed processes (non-zero exit codes), proper crash logging for STT/TTS/LLM sidecars.
 - **XSS Fix** — HTML sanitization via `ammonia` crate for published output (replaced incomplete custom escape).
 - **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
+- **Auto Story Memory** — Successful scene saves queue local-only mention extraction; unmatched names wait in the Story Bible suggestion queue, while appearance links and contradiction badges stay informational.
 - **Settings** — `aiRateLimitCooldown` (ms, default 3000), `blankModeDefault` now initializes AI panel state and persists toggle.
 - **Default STT Model** — Moonshine-base (GGUF) now the default (`sttModel: "moonshine-base"`).
 - **Brutalist Theme** — Third theme option alongside Dark/Light: zero border-radius, thick borders, hard offset shadows, Archivo Black headers, Space Mono body.
+- **Windows OS Integration** — NSIS registers `.txt` and `.md`, single-instance file handoff opens the requested file, autostart is explicit opt-in, and Default Apps opens Windows Settings without forcing a default editor.
 
 ## Stack
 
@@ -35,6 +37,7 @@ npm run dev        # browser preview at http://localhost:5173 (fully usable)
 npm run build      # web bundle only — never an executable
 npm run preview    # serve the built bundle
 npm run check      # svelte-check (0 errors required)
+npm run test:os    # Windows OS integration static checks
 npm run test:e2e   # 50+ end-to-end checks, exit 0 required
 ```
 
@@ -57,12 +60,18 @@ local LLM, so no downloads happen at runtime).
 Uninstall anytime via **Settings → Apps → Just Write ehis → Uninstall**
 (the installer registers a standard uninstaller — no leftover services).
 
+## Windows integration
+
+The Windows NSIS installer registers `.txt` and `.md` only. A file launch is handled by the existing process, and a second invocation hands the path to the running window through the single-instance plugin. The Settings UI includes the widget master switch, opt-in **Start with Windows**, the **Make Just Write ehis my default text editor** button, and the associated-extension list. Default-app status is never forced; the button opens `ms-settings:defaultapps`. The autostart registration is removed by the uninstall hook and is never enabled silently.
+
+Native install, Explorer **Open with**, cold/warm timing, Default Apps navigation, and uninstall cleanup are documented separately in `docs/WINDOWS-INTEGRATION.md`; they require an approved Windows installer loop before being treated as verified.
+
 ## Layout
 
 ```
 src/                 Svelte frontend (components, stores, api.ts, browserBackend.ts)
 src-tauri/src/       Rust backend (commands, doc_store, convert, sidecar)
-src-tauri/           tauri.conf.json, capabilities/, icons/
+src-tauri/           tauri.conf.json, tauri.windows.conf.json, capabilities/, icons/, windows/
 public/              brand mark, PWA manifest, generated icons
 tests/               e2e-browser.mjs, make-fixtures.py, fixtures/
 docs/                the docs you are reading (start at docs/ARCHITECTURE.md)
@@ -78,6 +87,8 @@ docs/                the docs you are reading (start at docs/ARCHITECTURE.md)
 - `docs/UPDATES.md` — release + self-update setup
 - `docs/EXPORT.md` — conversion tiers + pandoc sidecar
 - `docs/MODELS.md` — model picks per job + swap guide
+- `docs/AUTO_STORY_MEMORY.md` — local extraction, suggestions, contradictions, and verification report
 - `docs/HARNESS.md` — vendored AI-memory code + privacy behavior
+- `docs/WINDOWS-INTEGRATION.md` — Windows associations, launch handoff, autostart, and native verification status
 - `TODOS.md` — remaining work · `CHANGELOG.md` — session history
 - `BODY.md` / `IMPACT_MAP.md` / `BUILD_CHECKLIST.md` — anatomy, impact, gates

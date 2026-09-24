@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Paper moon collage</title>
+  <desc id="desc">A warm paper collage with a blue moon, orange sun, and green geometry.</desc>
+  <defs>
+    <pattern id="paper" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M0 34L34 0" stroke="#1c1c18" stroke-opacity=".06"/><circle cx="8" cy="10" r="1" fill="#1c1c18" fill-opacity=".08"/></pattern>
+  </defs>
+  <rect width="1600" height="900" fill="#e9e3d2"/>
+  <rect width="1600" height="900" fill="url(#paper)"/>
+  <circle cx="1230" cy="390" r="280" fill="#2c5f77"/>
+  <circle cx="1230" cy="390" r="218" fill="#e9e3d2"/>
+  <circle cx="1230" cy="390" r="155" fill="#2c5f77"/>
+  <path d="M0 650h930v250H0z" fill="#d68b42"/>
+  <path d="M170 0h360v640H170z" fill="#88a679" opacity=".9"/>
+  <path d="M530 0h420L820 420H530z" fill="#2c5f77" opacity=".88"/>
+  <path d="M0 170L340 0v190L0 360z" fill="#d68b42"/>
+  <circle cx="330" cy="720" r="100" fill="#2c5f77"/>
+  <path d="M880 650h720" stroke="#1c1c18" stroke-width="10"/>
+  <path d="M880 680h510" stroke="#1c1c18" stroke-width="4"/>
+  <text x="1020" y="770" fill="#e9e3d2" font-family="monospace" font-size="22" letter-spacing="5">MAKE ROOM / 03</text>
+</svg>

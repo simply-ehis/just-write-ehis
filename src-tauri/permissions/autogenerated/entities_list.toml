@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-entities-list"
+description = "Enables the entities_list command without any pre-configured scope."
+commands.allow = ["entities_list"]
+
+[[permission]]
+identifier = "deny-entities-list"
+description = "Denies the entities_list command without any pre-configured scope."
+commands.deny = ["entities_list"]

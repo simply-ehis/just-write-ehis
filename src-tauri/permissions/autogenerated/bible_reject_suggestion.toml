@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-reject-suggestion"
+description = "Enables the bible_reject_suggestion command without any pre-configured scope."
+commands.allow = ["bible_reject_suggestion"]
+
+[[permission]]
+identifier = "deny-bible-reject-suggestion"
+description = "Denies the bible_reject_suggestion command without any pre-configured scope."
+commands.deny = ["bible_reject_suggestion"]

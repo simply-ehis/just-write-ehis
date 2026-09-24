@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-streak-heatmap"
+description = "Enables the dashboard_streak_heatmap command without any pre-configured scope."
+commands.allow = ["dashboard_streak_heatmap"]
+
+[[permission]]
+identifier = "deny-dashboard-streak-heatmap"
+description = "Denies the dashboard_streak_heatmap command without any pre-configured scope."
+commands.deny = ["dashboard_streak_heatmap"]

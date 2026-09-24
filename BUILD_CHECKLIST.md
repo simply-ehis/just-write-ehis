@@ -104,3 +104,14 @@
 - Rust backend untouched this pass and **not compiled** (user prohibited exe builds); Tauri-shell behavior changes (watcher guard, preview banner) are additive and inert under Tauri
 - 2026-09-16 updater pass: `svelte-check` **0 errors**, `vite build` **passes**, `test:e2e` **27/27 PASS**. Rust changes (`tauri-plugin-updater/process` deps, plugin init, `app_update_status`, `bundle.active: true`, `createUpdaterArtifacts: true`, new capability file) are **uncompiled by constraint** — the first `npm run tauri build` must confirm them and will refresh `Cargo.lock` for the two new deps. `docs/UPDATES.md` covers keygen → publish.
 - 2026-09-16 batch pass (lock/craft/order/pinned/place/sparkline): `svelte-check` **0 errors** (warnings 31→27), `vite build` **passes**, `test:e2e` **40/40 PASS**, in-app self-test extended (lock exclusion, pinned, metrics, rhythm). Rust changes (`locked` column + 14 selects/11 mappings, `craft_metrics` rebuild, lock filters, pinned/rhythm queries, beat `order` sort, 3 new commands) are **uncompiled by constraint** — same first-build confirmation needed.
+
+## Auto Story Memory (2026-09-24)
+
+- [x] SQLite mention/suggestion schema, migrations, scoped CRUD, and browser-preview parity
+- [x] Bundled-local-only extraction, exact/fuzzy matching, confirm/reject suggestions, and scene-local delta recompute
+- [x] Locked source/project chains excluded before local model input and from mention/suggestion reads
+- [x] Story Bible appearances, scene jumps, contradiction badges, and CodeMirror fact-key hover lookup
+- [x] Regression coverage for parser repair/rejection, attribute grounding, suggestion gating and rejection tombstones, contradiction values, delta isolation, empty-scene clearing, atomic confirmation, and locked reads
+- [x] `cargo test` 31 passed, `npm run check` clean, `npm run build` passed, `npm run test:e2e` passed
+- [x] Supplemental browser preview recording in `artifacts/auto-story-memory-preview.webm`
+- [ ] Native Tauri/WebView screen recording remains manual; preview recording is explicitly seeded because native LFM extraction is unavailable in browser preview

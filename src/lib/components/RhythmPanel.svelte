@@ -1,6 +1,7 @@
 <script lang="ts">
   import RhythmWaveform from "./RhythmWaveform.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
+  import { countWords } from "$lib/text";
 
   let {
     content,
@@ -17,7 +18,7 @@
   let stats = $derived.by(() => {
     if (!content) return { avg: 0, longest: 0, shortest: 0, dialoguePct: 0, paraCount: 0, pacing: "" };
     const blocks = content.split(/\n\n+/).filter((b) => b.trim().length > 0);
-    const wcs = blocks.map((b) => b.trim().split(/\s+/).filter(Boolean).length);
+    const wcs = blocks.map((b) => countWords(b));
     const dialogue = blocks.filter((b) => {
       const t = b.trim();
       return t.startsWith('"') || t.startsWith("\u201c") || t.startsWith("\u2018") || t.startsWith(">");

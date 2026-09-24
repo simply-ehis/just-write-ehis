@@ -129,7 +129,7 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     padding: 24px;
-    width: 480px;
+    width: min(480px, 94vw);
     max-height: 80vh;
     overflow-y: auto;
   }

@@ -8,6 +8,7 @@
   import { saveState } from "$lib/stores/saveState";
   import { showConflict } from "$lib/stores/conflict";
   import { showToast } from "$lib/stores/notifications";
+  import { promptWidgetAutostart } from "$lib/widgetAutostart";
   import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
@@ -260,6 +261,7 @@
         await track(listen("widget-show", () => {
           widgetVisible = true;
           settings.update((current) => ({ ...current, companionWidgetVisible: true }));
+          void promptWidgetAutostart();
           void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
         }));
         await track(listen("widget-hide", () => {
@@ -269,7 +271,10 @@
           if (typeof event.payload !== "boolean") return;
           widgetVisible = event.payload;
           settings.update((current) => ({ ...current, companionWidgetVisible: event.payload }));
-          if (event.payload) void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
+          if (event.payload) {
+            void promptWidgetAutostart();
+            void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
+          }
         }));
         await track(listen<string>("file-changed", (event) => {
           if (typeof event.payload !== "string") return;

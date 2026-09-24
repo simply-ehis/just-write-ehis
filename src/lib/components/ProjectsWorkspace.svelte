@@ -10,7 +10,7 @@
   import DeleteButton from "./DeleteButton.svelte";
   import DockSplit from "./DockSplit.svelte";
   import BoardColumn from "./BoardColumn.svelte";
-  import { statusColor } from "$lib/status";
+  import { statusColor, BOARD_STATUSES } from "$lib/status";
 
   let projects = $state<Doc[]>([]);
   let selectedProject = $state<Doc | null>(null);
@@ -45,7 +45,7 @@
     }
   }
 
-  const statusOrder = ['idea', 'draft', 'revised', 'final', 'done'];
+  const statusOrder = BOARD_STATUSES;
 
   async function loadProjects() {
     try {

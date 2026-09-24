@@ -124,8 +124,9 @@
         $openTabs = [doc, ...$openTabs];
       }
       await api.usageRecord(doc.id, "open");
-      // logGetOrCreate may have minted the day — keep dots + list fresh.
+      // logGetOrCreate may have minted the day — keep dots + list + footer fresh.
       await refreshEntries();
+      await loadTouchedToday();
       stampFreshLog(doc, dateStr).catch(() => {});
     } catch (e) {
       console.error("Failed to open log:", e);
@@ -253,18 +254,21 @@
           <h2>{formatDisplayDate($currentDoc.title)}</h2>
           <span class="word-count">{$currentDoc.word_count} words</span>
           <span class="log-header-spacer"></span>
-          <DeleteButton
-            doc={$currentDoc}
-            label="Delete this day's note"
-            onDeleted={(id) => {
-              logEntries = logEntries.filter((e) => e.id !== id);
-              // Deleted the open day: today always exists, so reopen it
-              // (recreates a fresh note); other days stay deleted.
-              if ($currentDoc && !logEntries.find((e) => e.id === $currentDoc!.id)) {
-                selectDate($currentDoc.title === selectedDate ? selectedDate : today);
-              }
-            }}
-          />
+            <DeleteButton
+              doc={$currentDoc}
+              label="Delete this day's note"
+              onDeleted={async (id) => {
+                logEntries = logEntries.filter((e) => e.id !== id);
+                // Deleted the open day: today always exists, so reopen it
+                // (recreates a fresh note); other days stay deleted.
+                if ($currentDoc && !logEntries.find((e) => e.id === $currentDoc!.id)) {
+                  await selectDate($currentDoc.title === selectedDate ? selectedDate : today);
+                }
+                // Any delete changes dots + footer — refresh both.
+                await refreshEntries();
+                await loadTouchedToday();
+              }}
+            />
         </div>
         <div class="log-editor">
           <EditorPane />

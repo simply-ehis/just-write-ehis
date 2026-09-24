@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rag-chunk-document"
+description = "Enables the rag_chunk_document command without any pre-configured scope."
+commands.allow = ["rag_chunk_document"]
+
+[[permission]]
+identifier = "deny-rag-chunk-document"
+description = "Denies the rag_chunk_document command without any pre-configured scope."
+commands.deny = ["rag_chunk_document"]

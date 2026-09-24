@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-script-timeline-get"
+description = "Enables the script_timeline_get command without any pre-configured scope."
+commands.allow = ["script_timeline_get"]
+
+[[permission]]
+identifier = "deny-script-timeline-get"
+description = "Denies the script_timeline_get command without any pre-configured scope."
+commands.deny = ["script_timeline_get"]

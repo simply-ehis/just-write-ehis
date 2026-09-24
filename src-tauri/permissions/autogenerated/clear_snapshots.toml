@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-snapshots"
+description = "Enables the clear_snapshots command without any pre-configured scope."
+commands.allow = ["clear_snapshots"]
+
+[[permission]]
+identifier = "deny-clear-snapshots"
+description = "Denies the clear_snapshots command without any pre-configured scope."
+commands.deny = ["clear_snapshots"]

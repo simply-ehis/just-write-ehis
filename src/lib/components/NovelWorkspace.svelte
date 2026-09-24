@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact, type EntitySummary, type EntityHit } from '$lib/api';
+  import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact, type BibleMention, type BibleSuggestion, type EntitySummary, type EntityHit } from '$lib/api';
   import { currentDoc, currentWorkspace, openTabs } from '$lib/stores/app';
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
@@ -9,10 +9,12 @@
   import DeleteButton from './DeleteButton.svelte';
   import DockSplit from './DockSplit.svelte';
   import DocForkPanel from './DocForkPanel.svelte';
+  import Icon from './Icon.svelte';
 
   import ForkBadge from './ForkBadge.svelte';
   import { readImportFile, contentHash } from '$lib/importFile';
   import { statusColor } from '$lib/status';
+  import { rebuildStoryMemory } from '$lib/storyMemory';
   let splitMode = $state<'chapters' | 'scenes'>('chapters');
   let castEntities = $state<EntitySummary[]>([]);
   let castLoading = $state(false);
@@ -94,6 +96,11 @@
   let projects = $state<Doc[]>([]);
   let board = $state<BeatBoard>({ acts: [], sequences: [], scenes: [] });
   let bibleFacts = $state<BibleFact[]>([]);
+  let bibleMentions = $state<BibleMention[]>([]);
+  let bibleSuggestions = $state<BibleSuggestion[]>([]);
+  let projectLoadToken = 0;
+  let memoryJumpToken = 0;
+  let memoryRebuilding = $state(false);
   let bibleNewKey = $state<Record<string, string>>({});
   let bibleNewVal = $state<Record<string, string>>({});
   let selectedBeat = $state<BeatNode | null>(null);
@@ -322,8 +329,10 @@
   $effect(() => {
     const doc = $currentDoc;
     if (doc?.workspace === 'novel') {
-      const pid = doc.kind === 'project' ? doc.id : (doc.parent_id ?? null);
-      if (pid && pid !== projectId) projectId = pid;
+      const docId = doc.id;
+      void api.bibleScopeId(docId).then((pid) => {
+        if ($currentDoc?.id === docId && pid !== projectId) projectId = pid;
+      }).catch(() => {});
     }
   });
 
@@ -334,23 +343,39 @@
   onMount(() => {
     loadProjects();
     if (projectId) loadProject();
+    function handleMemoryUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (!detail.scopeId || detail.scopeId === projectId) loadProject();
+    }
+    window.addEventListener('story-memory-updated', handleMemoryUpdated);
+    return () => window.removeEventListener('story-memory-updated', handleMemoryUpdated);
   });
 
   let projectDoc = $derived(projectId ? board.acts[0]?.doc ?? board.scenes[0]?.doc : null);
 
   async function loadProject() {
     if (!projectId) return;
+    const requestedProjectId = projectId;
+    const loadToken = ++projectLoadToken;
     loading = true;
     try {
-      board = await api.novelGetBeatBoard(projectId);
-      if (board.acts.length > 0) {
-        bibleFacts = await api.bibleGetFacts(projectId);
-      }
+      const nextBoard = await api.novelGetBeatBoard(requestedProjectId);
+      if (loadToken !== projectLoadToken || projectId !== requestedProjectId) return;
+      board = nextBoard;
+      const [facts, mentions, suggestions] = await Promise.all([
+        api.bibleGetFacts(requestedProjectId),
+        api.bibleGetMentions(requestedProjectId),
+        api.bibleGetSuggestions(requestedProjectId),
+      ]);
+      if (loadToken !== projectLoadToken || projectId !== requestedProjectId) return;
+      bibleFacts = facts;
+      bibleMentions = mentions;
+      bibleSuggestions = suggestions;
       loadGhostCounts();
     } catch (e) {
-      console.error('Failed to load novel project:', e);
+      if (loadToken === projectLoadToken && projectId === requestedProjectId) console.error('Failed to load novel project:', e);
     } finally {
-      loading = false;
+      if (loadToken === projectLoadToken && projectId === requestedProjectId) loading = false;
     }
   }
 
@@ -450,10 +475,11 @@
   async function handleBibleUpsert(kind: string, key: string, value: string) {
     if (!projectId) return;
     const fact = await api.bibleUpsertFact(projectId, kind, key, value);
-    const idx = bibleFacts.findIndex(f => f.kind === kind && f.key === key);
-    if (idx >= 0) bibleFacts[idx] = fact;
-    else bibleFacts.push(fact);
-  }
+     const idx = bibleFacts.findIndex(f => f.key === key);
+     if (idx >= 0) bibleFacts[idx] = fact;
+     else bibleFacts.push(fact);
+     window.dispatchEvent(new CustomEvent('story-memory-updated', { detail: { scopeId: projectId } }));
+   }
 
   async function handleBibleAdd(kind: string) {
     const key = (bibleNewKey[kind] ?? '').trim();
@@ -472,8 +498,93 @@
     try {
       await api.bibleDeleteFact(factId);
       bibleFacts = bibleFacts.filter(f => f.id !== factId);
+      window.dispatchEvent(new CustomEvent('story-memory-updated', { detail: { scopeId: projectId } }));
     } catch (e) {
       showToast(`Couldn't delete fact: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
+
+  function mentionsForFact(key: string): BibleMention[] {
+    const normalized = key.trim().toLowerCase();
+    return bibleMentions.filter(mention => mention.fact_key.trim().toLowerCase() === normalized);
+  }
+
+  function contradictionsForFact(key: string) {
+    const groups = new Map<string, Map<string, { value: string; mentions: BibleMention[] }>>();
+    for (const mention of mentionsForFact(key)) {
+      if (!mention.attribute_key || !mention.attribute_value) continue;
+      const attributeKey = mention.attribute_key.toLowerCase();
+      const values = groups.get(attributeKey) ?? new Map();
+      const valueKey = mention.attribute_value.toLowerCase();
+      const value = values.get(valueKey) ?? { value: mention.attribute_value, mentions: [] };
+      value.mentions.push(mention);
+      values.set(valueKey, value);
+      groups.set(attributeKey, values);
+    }
+    return [...groups.entries()]
+      .filter(([, values]) => values.size > 1)
+      .map(([attributeKey, values]) => ({ attributeKey, values: [...values.values()] }));
+  }
+
+  async function openMemoryMention(mention: BibleMention) {
+    const jumpToken = ++memoryJumpToken;
+    try {
+      const beat = board.scenes.find(scene => scene.doc.id === mention.doc_id);
+      if (beat) {
+        viewMode = 'board';
+        selectBeat(beat);
+      } else {
+        const doc = await api.docGet(mention.doc_id);
+        if (jumpToken !== memoryJumpToken) return;
+        $currentDoc = doc;
+        if (!$openTabs.find(tab => tab.id === doc.id)) $openTabs = [doc, ...$openTabs];
+      }
+      window.setTimeout(() => {
+        if (jumpToken !== memoryJumpToken || $currentDoc?.id !== mention.doc_id) return;
+        window.dispatchEvent(new CustomEvent('editor-scroll-to-text', { detail: { snippet: mention.snippet, spanStart: mention.span_start } }));
+      }, 80);
+    } catch (e) {
+      showToast(`Couldn't open appearance: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
+
+  async function confirmSuggestion(suggestion: BibleSuggestion) {
+    if (!projectId) return;
+    try {
+      await api.bibleConfirmSuggestion(projectId, suggestion.id);
+      bibleSuggestions = bibleSuggestions.filter(item => item.id !== suggestion.id);
+      bibleFacts = await api.bibleGetFacts(projectId);
+      bibleMentions = await api.bibleGetMentions(projectId);
+      window.dispatchEvent(new CustomEvent('story-memory-updated', { detail: { scopeId: projectId } }));
+      showToast(`Added ${suggestion.key} to the Story Bible`, 'success');
+    } catch (e) {
+      showToast(`Couldn't confirm suggestion: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
+
+  async function rejectSuggestion(suggestion: BibleSuggestion) {
+    if (!projectId) return;
+    try {
+      await api.bibleRejectSuggestion(projectId, suggestion.id);
+      bibleSuggestions = bibleSuggestions.filter(item => item.id !== suggestion.id);
+    } catch (e) {
+      showToast(`Couldn't reject suggestion: ${e instanceof Error ? e.message : e}`, 'error');
+    }
+  }
+
+  async function rebuildMemory() {
+    if (!projectId || memoryRebuilding) return;
+    const project = projects.find(item => item.id === projectId);
+    if (!project) return;
+    memoryRebuilding = true;
+    try {
+      const result = await rebuildStoryMemory(project);
+      if (result.processed > 0) showToast(`Memory rebuilt — ${result.processed} scene${result.processed === 1 ? '' : 's'} checked`, 'success');
+      else if (result.retryable) showToast('Story Memory is waiting for the bundled local model', 'info');
+      else showToast('No eligible manuscript scenes were available to rebuild', 'info');
+      await loadProject();
+    } finally {
+      memoryRebuilding = false;
     }
   }
 
@@ -807,46 +918,110 @@
     </div>
       {/if}
       {#if viewMode === 'bible'}
-    <div class="bible-view">
-      <h2>Story Bible</h2>
-      {#each ['world_rules', 'world_timeline', 'world_characters', 'world_settings'] as kind}
-        <div class="bible-section">
-          <h3>{kind.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</h3>
-          {#each bibleFacts.filter(f => f.kind === kind) as fact}
-            <div class="bible-fact">
-              <span class="fact-text"><strong>{fact.key}</strong>: {fact.value}</span>
-              <button
-                class="fact-delete"
-                onclick={() => handleBibleDelete(fact.id)}
-                title="Delete this fact"
-                aria-label="Delete fact {fact.key}"
-              >×</button>
-            </div>
-          {/each}
-          <div class="bible-add">
-            <input
-              class="bible-input"
-              placeholder="Key (e.g. Elena — motive)"
-              bind:value={bibleNewKey[kind]}
-              aria-label="New fact key for {kind}"
-            />
-            <input
-              class="bible-input"
-              placeholder="Value"
-              bind:value={bibleNewVal[kind]}
-              aria-label="New fact value for {kind}"
-              onkeydown={(e) => { if (e.key === 'Enter') handleBibleAdd(kind); }}
-            />
-            <button
-              class="bible-add-btn"
-              onclick={() => handleBibleAdd(kind)}
-              disabled={!bibleNewKey[kind]?.trim()}
-              title="Add fact"
-            >Add</button>
-          </div>
-        </div>
-      {/each}
-    </div>
+     <div class="bible-view">
+       <div class="bible-memory-header">
+         <div>
+           <h2>Story Bible</h2>
+           <p class="bible-memory-note">Auto memory uses the bundled local model. New names wait for your confirmation.</p>
+         </div>
+         <div class="bible-memory-actions">
+           {#if bibleSuggestions.length > 0}
+             <span class="suggestion-counter" aria-live="polite">{bibleSuggestions.length} suggested</span>
+           {/if}
+           <button class="bible-add-btn" onclick={rebuildMemory} disabled={memoryRebuilding} title="Rebuild memory for every scene using the bundled local model">
+             {memoryRebuilding ? 'Rebuilding…' : 'Rebuild Memory'}
+           </button>
+         </div>
+       </div>
+       {#if bibleSuggestions.length > 0}
+         <details class="suggestion-queue" open>
+           <summary>Suggested entries ({bibleSuggestions.length})</summary>
+           {#each bibleSuggestions as suggestion}
+             <div class="suggestion-item">
+               <div class="suggestion-copy">
+                 <strong>{suggestion.key}</strong>
+                 <span>{suggestion.kind} · {suggestion.doc_title}</span>
+                 <small>{suggestion.snippet}</small>
+                 {#if suggestion.attribute_key && suggestion.attribute_value}
+                   <em>{suggestion.attribute_key}: {suggestion.attribute_value}</em>
+                 {/if}
+               </div>
+               <div class="suggestion-actions">
+                 <button class="suggestion-confirm" onclick={() => confirmSuggestion(suggestion)}>Confirm</button>
+                 <button class="suggestion-reject" onclick={() => rejectSuggestion(suggestion)}>Reject</button>
+               </div>
+             </div>
+           {/each}
+         </details>
+       {/if}
+       {#each ['world_rules', 'world_timeline', 'world_characters', 'world_settings'] as kind}
+         <div class="bible-section">
+           <h3>{kind.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</h3>
+           {#each bibleFacts.filter(f => f.kind === kind) as fact}
+             {@const factMentions = mentionsForFact(fact.key)}
+             {@const factContradictions = contradictionsForFact(fact.key)}
+             <div class="bible-fact">
+               <div class="fact-main">
+                 <span class="fact-text"><strong>{fact.key}</strong>: {fact.value}</span>
+                 {#if factContradictions.length > 0}
+                   <span class="contradiction-badge" title="Different values are recorded for the same trait"><Icon name="warn" size={12} /> Contradiction</span>
+                 {/if}
+                 <button
+                   class="fact-delete"
+                   onclick={() => handleBibleDelete(fact.id)}
+                   title="Delete this fact"
+                   aria-label="Delete fact {fact.key}"
+                 >×</button>
+               </div>
+               {#if factContradictions.length > 0}
+                 <div class="contradiction-details">
+                   {#each factContradictions as contradiction}
+                     <div class="contradiction-row">
+                       <strong>{contradiction.attributeKey}</strong>
+                       {#each contradiction.values as value}
+                         <button onclick={() => openMemoryMention(value.mentions[0])}>{value.value} · {value.mentions[0]?.doc_title}</button>
+                       {/each}
+                     </div>
+                   {/each}
+                 </div>
+               {/if}
+               {#if factMentions.length > 0}
+                 <div class="appearance-section">
+                   <div class="appearance-heading">Appearances ({factMentions.length})</div>
+                   {#each factMentions as mention}
+                     <button class="appearance-item" onclick={() => openMemoryMention(mention)}>
+                       <span>{mention.doc_title}</span>
+                       <small>“{mention.snippet}”</small>
+                     </button>
+                   {/each}
+                 </div>
+               {/if}
+             </div>
+           {/each}
+           <div class="bible-add">
+             <input
+               class="bible-input"
+               placeholder="Key (e.g. Elena — motive)"
+               bind:value={bibleNewKey[kind]}
+               aria-label="New fact key for {kind}"
+             />
+             <input
+               class="bible-input"
+               placeholder="Value"
+               bind:value={bibleNewVal[kind]}
+               aria-label="New fact value for {kind}"
+               onkeydown={(e) => { if (e.key === 'Enter') handleBibleAdd(kind); }}
+             />
+             <button
+               class="bible-add-btn"
+               onclick={() => handleBibleAdd(kind)}
+               disabled={!bibleNewKey[kind]?.trim()}
+               title="Add fact"
+             >Add</button>
+           </div>
+         </div>
+       {/each}
+     </div>
       {/if}
       {#if viewMode === 'cast'}
     <div class="cast-view">
@@ -1301,12 +1476,7 @@
     margin-left: auto;
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+  /* .status-dot lives in app.css (shared with BoardColumn). */
 
   .add-beat-btn {
     padding: var(--space-1) var(--space-2);
@@ -1619,5 +1789,235 @@
     line-height: var(--line-height-relaxed);
     white-space: pre-wrap;
     max-height: 60vh;
+  }
+
+  .bible-memory-header,
+  .bible-memory-actions,
+  .fact-main,
+  .appearance-heading,
+  .suggestion-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .bible-memory-header {
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .bible-memory-header h2 {
+    margin: 0;
+  }
+
+  .bible-memory-note {
+    margin: 4px 0 0;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  .bible-memory-actions {
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .suggestion-counter {
+    padding: 3px 7px;
+    border: 1px solid var(--accent-semantic-purple);
+    border-radius: var(--radius-sm);
+    color: var(--accent-semantic-purple);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .suggestion-queue {
+    margin: var(--space-3) 0;
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-overlay);
+  }
+
+  .suggestion-queue summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .suggestion-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-base);
+  }
+
+  .suggestion-copy {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .suggestion-copy strong {
+    color: var(--text-primary);
+    font-size: 12px;
+  }
+
+  .suggestion-copy span,
+  .suggestion-copy small,
+  .suggestion-copy em {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-style: normal;
+  }
+
+  .suggestion-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .suggestion-copy em {
+    color: var(--accent-semantic-purple);
+  }
+
+  .suggestion-actions {
+    flex-shrink: 0;
+  }
+
+  .suggestion-actions button,
+  .contradiction-row button,
+  .appearance-item {
+    cursor: pointer;
+  }
+
+  .suggestion-confirm,
+  .suggestion-reject {
+    padding: 4px 7px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 10px;
+  }
+
+  .suggestion-confirm {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+
+  .suggestion-reject:hover {
+    color: var(--accent-semantic-red);
+  }
+
+  .bible-fact {
+    position: relative;
+  }
+
+  .fact-main {
+    align-items: flex-start;
+  }
+
+  .fact-main .fact-text {
+    flex: 1;
+  }
+
+  .contradiction-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 5px;
+    border: 1px solid var(--accent-semantic-yellow);
+    border-radius: var(--radius-sm);
+    color: var(--accent-semantic-yellow);
+    font-size: 9px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .contradiction-details {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 6px 0 0 0;
+    padding: 6px;
+    border-left: 2px solid var(--accent-semantic-yellow);
+    background: var(--surface-overlay);
+  }
+
+  .contradiction-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+  }
+
+  .contradiction-row strong {
+    color: var(--text-secondary);
+  }
+
+  .contradiction-row button {
+    padding: 2px 5px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-base);
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .appearance-section {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin: 7px 0 0 0;
+    padding: 6px;
+    border-left: 2px solid var(--accent-primary);
+    background: var(--surface-overlay);
+  }
+
+  .appearance-heading {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .appearance-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 5px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+  }
+
+  .appearance-item:hover {
+    border-color: var(--border-subtle);
+    background: var(--surface-hover);
+  }
+
+  .appearance-item span {
+    color: var(--accent-primary);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .appearance-item small {
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.35;
   }
 </style>

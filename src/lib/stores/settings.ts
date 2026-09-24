@@ -41,6 +41,8 @@ export interface AppSettings {
   widgetDockEdge: "left" | "right" | "top" | "bottom";
   widgetDockOffset: number;
   widgetLaunchAtStartup: boolean;
+  widgetAutostartPromptShown: boolean;
+  associatedFileExtensions: string[];
 
   fontSize: number;
   lineHeight: number;
@@ -237,6 +239,8 @@ const defaultSettings: AppSettings = {
   widgetDockEdge: "right",
   widgetDockOffset: 96,
   widgetLaunchAtStartup: false,
+  widgetAutostartPromptShown: false,
+  associatedFileExtensions: ["txt", "md"],
 
   autoCheckUpdates: true,
 
@@ -272,7 +276,7 @@ export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
 );
 
 /** Current onboarding flow version. Bump when the steps change enough to re-prompt. */
-export const ONBOARD_VERSION = 1;
+export const ONBOARD_VERSION = 2;
 /** Sidebar default hides (null hiddenIds): power-user surfaces reachable via palette. */
 export const DEFAULT_HIDDEN_WORKSPACES: readonly string[] = ["inbox", "canvas"];
 /** Resolves once keychain hydration + legacy migration finished. */

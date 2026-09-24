@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-novel-get-beat-board"
+description = "Enables the novel_get_beat_board command without any pre-configured scope."
+commands.allow = ["novel_get_beat_board"]
+
+[[permission]]
+identifier = "deny-novel-get-beat-board"
+description = "Denies the novel_get_beat_board command without any pre-configured scope."
+commands.deny = ["novel_get_beat_board"]

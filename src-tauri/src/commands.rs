@@ -3,7 +3,13 @@ use crate::database::Database;
 use crate::models::*;
 use crate::sidecar;
 use std::time::Duration;
+use std::collections::HashSet;
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
+#[cfg(target_os = "windows")]
+use std::process::Command;
 use ammonia;
+use crate::windows::PendingLaunchFile;
 
 #[tauri::command]
 pub fn doc_create(
@@ -23,6 +29,58 @@ pub fn doc_create(
         content,
         frontmatter_json,
     })
+}
+
+#[tauri::command]
+pub fn open_external_file(db: State<'_, Database>, path: String) -> Result<Option<Doc>, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (db, path);
+        return Ok(None);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let path = PathBuf::from(path);
+        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        if extension != "txt" && extension != "md" {
+            return Err("Only .txt and .md files can be opened from Windows file associations.".into());
+        }
+        if !path.is_file() {
+            return Err(format!("File not found: {}", path.display()));
+        }
+        let bytes = std::fs::read(&path).map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
+        if bytes.contains(&0) {
+            return Err("That file looks binary, not UTF-8 text.".into());
+        }
+        let content = String::from_utf8(bytes).map_err(|_| "The file is not valid UTF-8 text.".to_string())?;
+        let title = path.file_stem().and_then(|value| value.to_str()).filter(|value| !value.is_empty()).unwrap_or("Untitled").to_string();
+        let doc = db.create_doc(CreateDocRequest {
+            workspace: "write".into(),
+            kind: "doc".into(),
+            title,
+            parent_id: None,
+            content: Some(content),
+            frontmatter_json: Some(serde_json::json!({ "source_path": path.to_string_lossy() }).to_string()),
+        })?;
+        Ok(Some(doc))
+    }
+}
+
+#[tauri::command]
+pub fn take_launch_file(pending: State<'_, PendingLaunchFile>) -> Option<String> {
+    pending.take()
+}
+
+#[tauri::command]
+pub fn open_default_apps() -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    return Ok(());
+    #[cfg(target_os = "windows")]
+    Command::new("explorer.exe")
+        .arg("ms-settings:defaultapps")
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Couldn't open Windows Default Apps settings: {}", error))
 }
 
 #[tauri::command]
@@ -284,6 +342,11 @@ pub fn novel_compile(db: State<'_, Database>, project_id: String) -> Result<Stri
 }
 
 #[tauri::command]
+pub fn bible_scope_id(db: State<'_, Database>, doc_id: String) -> Result<String, String> {
+    db.bible_scope_id(&doc_id)
+}
+
+#[tauri::command]
 pub fn bible_get_facts(db: State<'_, Database>, doc_id: String) -> Result<Vec<BibleFact>, String> {
     db.bible_get_facts(&doc_id)
 }
@@ -296,6 +359,96 @@ pub fn bible_upsert_fact(db: State<'_, Database>, doc_id: String, kind: String, 
 #[tauri::command]
 pub fn bible_delete_fact(db: State<'_, Database>, fact_id: String) -> Result<(), String> {
     db.bible_delete_fact(&fact_id)
+}
+
+#[tauri::command]
+pub fn bible_get_mentions(db: State<'_, Database>, bible_doc_id: String) -> Result<Vec<BibleMention>, String> {
+    db.bible_get_mentions(&bible_doc_id)
+}
+
+#[tauri::command]
+pub fn bible_upsert_mention(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+    doc_id: String,
+    fact_key: String,
+    kind: String,
+    snippet: String,
+    attribute_key: Option<String>,
+    attribute_value: Option<String>,
+) -> Result<BibleMention, String> {
+    db.bible_upsert_mention(
+        &bible_doc_id,
+        &doc_id,
+        &fact_key,
+        &kind,
+        &snippet,
+        attribute_key.as_deref(),
+        attribute_value.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn bible_delete_mentions(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+    doc_id: Option<String>,
+    fact_key: Option<String>,
+) -> Result<(), String> {
+    db.bible_delete_mentions(&bible_doc_id, doc_id.as_deref(), fact_key.as_deref())
+}
+
+#[tauri::command]
+pub fn bible_get_suggestions(db: State<'_, Database>, bible_doc_id: String) -> Result<Vec<BibleSuggestion>, String> {
+    db.bible_get_suggestions(&bible_doc_id)
+}
+
+#[tauri::command]
+pub fn bible_confirm_suggestion(db: State<'_, Database>, bible_doc_id: String, suggestion_id: String) -> Result<BibleFact, String> {
+    db.bible_confirm_suggestion(&bible_doc_id, &suggestion_id)
+}
+
+#[tauri::command]
+pub fn bible_reject_suggestion(db: State<'_, Database>, bible_doc_id: String, suggestion_id: String) -> Result<(), String> {
+    db.bible_reject_suggestion(&bible_doc_id, &suggestion_id)
+}
+
+#[tauri::command]
+pub async fn bible_extract_mentions(
+    db: State<'_, Database>,
+    llm: State<'_, sidecar::LlmManager>,
+    doc_id: String,
+    expected_content: String,
+) -> Result<BibleMemoryUpdate, String> {
+    extract_bible_memory(&db, &llm, &doc_id, &expected_content).await
+}
+
+#[tauri::command]
+pub async fn bible_rebuild_memory(
+    db: State<'_, Database>,
+    llm: State<'_, sidecar::LlmManager>,
+    project_id: String,
+) -> Result<BibleMemoryRebuild, String> {
+    let docs = db.bible_descendant_docs(&project_id)?;
+    let mut processed = 0u64;
+    let mut matched = 0u64;
+    let mut suggested = 0u64;
+    let mut skipped = false;
+    let mut retryable = false;
+    for doc in docs {
+        if !matches!(doc.kind.as_str(), "scene" | "chapter") {
+            continue;
+        }
+        let update = extract_bible_memory(&db, &llm, &doc.id, &doc.content).await?;
+        skipped |= update.skipped;
+        retryable |= update.retryable;
+        if !update.skipped {
+            processed += 1;
+            matched += update.matched;
+            suggested += update.suggested;
+        }
+    }
+    Ok(BibleMemoryRebuild { skipped, retryable, processed, matched, suggested })
 }
 
 #[tauri::command]
@@ -557,6 +710,221 @@ Output the final transformed document. Use markdown where appropriate."#
     .await?;
 
     Ok(StructurizeResponse { result, tokens_used: tokens })
+}
+
+fn normalize_memory_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .flat_map(|c| c.to_lowercase())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_memory_kind(value: &str) -> Option<&'static str> {
+    match value.trim().to_lowercase().as_str() {
+        "character" | "person" | "people" => Some("character"),
+        "location" | "place" | "setting" => Some("location"),
+        "object" | "item" | "thing" => Some("object"),
+        _ => None,
+    }
+}
+
+fn clean_model_quote(value: &str) -> String {
+    value.trim().trim_matches(['"', '\'', '“', '”']).trim().to_string()
+}
+
+fn collapse_model_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn surface_for_key(text: &str, key: &str) -> Option<String> {
+    let key = key.trim();
+    if key.is_empty() { return None; }
+    let exact = text.find(key).map(|start| (start, start + key.len()));
+    let lower = text.to_lowercase().find(&key.to_lowercase()).map(|start| (start, start + key.len()));
+    let (start, end) = exact.or(lower)?;
+    if !text.is_char_boundary(start) || !text.is_char_boundary(end) { return None; }
+    if text[..start].chars().last().is_some_and(|c| c.is_alphanumeric()) { return None; }
+    if text[end..].chars().next().is_some_and(|c| c.is_alphanumeric()) { return None; }
+    Some(text[start..end].to_string())
+}
+
+fn sentence_for_key(text: &str, key: &str) -> Option<String> {
+    let lower_key = key.to_lowercase();
+    text.split_inclusive(['.', '!', '?', '\n'])
+        .map(str::trim)
+        .find(|sentence| !sentence.is_empty() && sentence.to_lowercase().contains(&lower_key))
+        .map(str::to_string)
+}
+
+fn infer_memory_trait(sentence: &str) -> Option<(String, String)> {
+    let words = sentence.split_whitespace().collect::<Vec<_>>();
+    let colors = ["blue", "green", "red", "black", "brown", "white", "gold", "silver", "gray", "grey"];
+    for (index, word) in words.iter().enumerate() {
+        let clean = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        if colors.contains(&clean.as_str()) {
+            if index > 0 {
+                let key = words[index - 1].trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+                if !key.is_empty() && !["a", "an", "the", "has", "have", "had", "is", "are", "was", "were", "wears", "wore"].contains(&key.as_str()) {
+                    return Some((key, clean));
+                }
+            }
+            if index + 1 < words.len() {
+                let key = words[index + 1].trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+                if !key.is_empty() { return Some((key, clean)); }
+            }
+        }
+    }
+    None
+}
+
+fn parse_memory_names(raw: &str, text: &str, facts: &[BibleFact]) -> Vec<BibleMentionCandidate> {
+    let trimmed = raw.trim();
+    let start = trimmed.find('[').or_else(|| trimmed.find('{'));
+    let end = trimmed.rfind(']').or_else(|| trimmed.rfind('}'));
+    let json = match (start, end) {
+        (Some(start), Some(end)) if end >= start => &trimmed[start..=end],
+        _ => trimmed,
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
+    let entries = value.as_array().or_else(|| value.get("mentions").and_then(|v| v.as_array()));
+    let Some(entries) = entries else { return Vec::new() };
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for item in entries {
+        let raw_key = item.as_str().or_else(|| item.get("name").and_then(|v| v.as_str())).or_else(|| item.get("fact_key").and_then(|v| v.as_str())).unwrap_or_default();
+        let Some(key) = surface_for_key(text, raw_key) else { continue };
+        let normalized = normalize_memory_key(&key);
+        let fact = facts.iter().find(|fact| normalize_memory_key(&fact.key) == normalized);
+        let kind = fact.map(|fact| {
+            let kind = fact.kind.to_lowercase();
+            if kind.contains("location") || kind.contains("place") || kind.contains("setting") { "location" }
+            else if kind.contains("object") || kind.contains("item") { "object" }
+            else { "character" }
+        }).unwrap_or_else(|| {
+            let lower_key = key.to_lowercase();
+            let lower_sentence = sentence_for_key(text, &key).unwrap_or_default().to_lowercase();
+            if ["by the ", "at the ", "in the ", "near the ", "inside the "].iter().any(|prefix| lower_sentence.contains(&format!("{}{}", prefix, lower_key))) { "location" }
+            else if key.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) { "character" }
+            else { "object" }
+        });
+        let Some(snippet) = sentence_for_key(text, &key) else { continue };
+        let (attribute_key, attribute_value) = infer_memory_trait(&snippet).map(|(key, value)| (Some(key), Some(value))).unwrap_or((None, None));
+        let signature = format!("{}|{}|{}|{}", kind, normalized, snippet, attribute_value.clone().unwrap_or_default());
+        if seen.insert(signature) {
+            candidates.push(BibleMentionCandidate { key, kind: kind.to_string(), snippet, attribute_key, attribute_value });
+        }
+    }
+    candidates
+}
+
+fn parse_memory_candidates(raw: &str, text: &str) -> Option<Vec<BibleMentionCandidate>> {
+    let trimmed = raw.trim();
+    let start = trimmed.find('{').or_else(|| trimmed.find('['));
+    let end = trimmed.rfind('}').or_else(|| trimmed.rfind(']'));
+    let json = match (start, end) {
+        (Some(start), Some(end)) if end >= start => &trimmed[start..=end],
+        _ => trimmed,
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return None };
+    let entries = value.get("mentions").and_then(|v| v.as_array())
+        .or_else(|| value.as_array());
+    let Some(entries) = entries else { return None };
+    let source = collapse_model_text(text);
+    let mut seen = HashSet::new();
+    let mut candidates = Vec::new();
+    for item in entries {
+        let raw_key = item.get("fact_key").or_else(|| item.get("key")).or_else(|| item.get("name"))
+            .and_then(|v| v.as_str()).unwrap_or_default();
+        let Some(key) = surface_for_key(text, raw_key) else { continue };
+        let kind = item.get("kind").and_then(|v| v.as_str()).and_then(normalize_memory_kind);
+        let model_snippet = clean_model_quote(
+            item.get("snippet").or_else(|| item.get("quote"))
+                .and_then(|v| v.as_str()).unwrap_or_default(),
+        );
+        let snippet = sentence_for_key(text, &key).unwrap_or(model_snippet);
+        let Some(kind) = kind else { continue };
+        if key.is_empty() || key.len() > 160 || snippet.is_empty() || snippet.len() > 1200 {
+            continue;
+        }
+        if !source.contains(&collapse_model_text(&snippet)) {
+            continue;
+        }
+        let attribute_key = item.get("attribute_key").or_else(|| item.get("trait_key"))
+            .and_then(|v| v.as_str()).and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
+        let attribute_value = item.get("attribute_value").or_else(|| item.get("trait_value"))
+            .and_then(|v| v.as_str()).and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
+        if attribute_key.is_some() != attribute_value.is_some() {
+            continue;
+        }
+        if let (Some(attribute_key), Some(attribute_value)) = (&attribute_key, &attribute_value) {
+            let sentence = snippet.to_lowercase();
+            if !sentence.contains(&attribute_key.to_lowercase()) || !sentence.contains(&attribute_value.to_lowercase()) {
+                continue;
+            }
+        }
+        let signature = format!("{}|{}|{}|{}|{}", kind, key.to_lowercase(), snippet, attribute_key.clone().unwrap_or_default(), attribute_value.clone().unwrap_or_default());
+        if seen.insert(signature) {
+            candidates.push(BibleMentionCandidate { key, kind: kind.to_string(), snippet, attribute_key, attribute_value });
+        }
+    }
+    Some(candidates)
+}
+
+async fn extract_bible_memory(
+    db: &Database,
+    llm: &sidecar::LlmManager,
+    doc_id: &str,
+    expected_content: &str,
+) -> Result<BibleMemoryUpdate, String> {
+    let doc = db.get_doc(doc_id)?;
+    if !db.bible_source_allowed(doc_id)? || !matches!(doc.kind.as_str(), "scene" | "chapter") {
+        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+    }
+    if doc.content != expected_content {
+        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+    }
+    let scope_id = db.bible_scope_id(doc_id)?;
+    if doc.content.trim().is_empty() {
+        return db.bible_replace_scene_memory(&scope_id, doc_id, &doc.content, Some(expected_content), &[]);
+    }
+    let facts = db.bible_get_facts(&scope_id)?;
+    let known_keys = facts.iter().map(|fact| format!("{} ({})", fact.key, fact.kind)).collect::<Vec<_>>().join(", ");
+    let system_prompt = format!(
+        "{}\nKnown Story Bible fact keys: {}",
+        r#"You extract Story Bible evidence from manuscript text. Return ONLY valid JSON with this shape: {"mentions":[{"fact_key":"exact name","kind":"character|location|object","snippet":"one exact supporting sentence","attribute_key":"optional trait name","attribute_value":"optional trait value"}]}. Include every character, location, and object mentioned. Do not infer facts not stated. The snippet must be copied exactly from the text. Do not add commentary or markdown."#,
+        if known_keys.is_empty() { "none".to_string() } else { known_keys }
+    );
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": system_prompt}),
+        serde_json::json!({"role": "user", "content": doc.content}),
+    ];
+    let raw = match llm.chat_completion(messages, 768, 0.1).await {
+        Ok(value) => value,
+        Err(_) => return Ok(BibleMemoryUpdate { skipped: true, retryable: true, matched: 0, suggested: 0 }),
+    };
+    let mut candidates = parse_memory_candidates(&raw, &doc.content).unwrap_or_default();
+    if candidates.is_empty() {
+        let fallback_prompt = format!(
+            "List every character, location, and object name in this text. Return only a JSON array of strings. Do not explain. Text: {}",
+            doc.content
+        );
+        if let Ok(fallback_raw) = llm.chat_completion(vec![serde_json::json!({"role": "user", "content": fallback_prompt})], 256, 0.0).await {
+            for candidate in parse_memory_names(&fallback_raw, &doc.content, &facts) {
+                let signature = format!("{}|{}|{}", candidate.key, candidate.snippet, candidate.attribute_value.clone().unwrap_or_default());
+                if !candidates.iter().any(|item| format!("{}|{}|{}", item.key, item.snippet, item.attribute_value.clone().unwrap_or_default()) == signature) {
+                    candidates.push(candidate);
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+    }
+    db.bible_replace_scene_memory(&scope_id, doc_id, &doc.content, Some(expected_content), &candidates)
 }
 
 #[tauri::command]
@@ -1687,11 +2055,22 @@ pub fn compile_run(
     }
     let lookup = export_lookup(&db);
     let mut prepared = Vec::with_capacity(doc_ids.len());
+    let mut authors: Vec<String> = Vec::new();
     for id in &doc_ids {
         let doc = db.get_doc(id)?;
+        // Per-doc author/date ride into ONE manuscript-level YAML header
+        // below (mid-document YAML blocks would render as <hr/> noise —
+        // only the leading block is metadata; bodies stay bare here).
+        let fm = crate::convert::parse_frontmatter(doc.frontmatter_json.as_deref());
+        if let Some(a) = fm.author {
+            let a = a.trim().to_string();
+            if !a.is_empty() && !authors.contains(&a) {
+                authors.push(a);
+            }
+        }
         prepared.push((
             doc.title.clone(),
-            crate::convert::prepare_export(&doc.title, &doc.content, None, &lookup),
+            crate::convert::prepare_export_body(&doc.content, &lookup),
         ));
     }
     let refs: Vec<(&str, &str)> = prepared.iter().map(|(t, c)| (t.as_str(), c.as_str())).collect();
@@ -1703,6 +2082,15 @@ pub fn compile_run(
         ));
     }
     let name = title.unwrap_or_else(|| "manuscript".into());
+    // ONE leading YAML header for the whole manuscript (title + merged
+    // authors). Per-section blocks would render as visible noise.
+    let header = crate::convert::ExportFrontmatter {
+        title: Some(name.clone()),
+        author: if authors.is_empty() { None } else { Some(authors.join(", ")) },
+        date: None,
+        extra: Vec::new(),
+    };
+    let manuscript = crate::convert::inject_frontmatter(&manuscript, &header);
     let resource_dir = app
         .path()
         .resource_dir()
@@ -1882,5 +2270,42 @@ mod ai_slot_tests {
         assert!(friendly_http_status(429).contains("Rate limited"));
         assert!(friendly_http_status(408).contains("timed out"));
         assert!(friendly_http_status(500).contains("500"));
+    }
+
+    #[test]
+    fn memory_parser_repairs_short_model_snippets() {
+        let text = "Elena has blue eyes. Mara waited by the gate.";
+        let candidates = parse_memory_candidates(
+            r#"{"mentions":[{"fact_key":"Elena","kind":"character","snippet":"Elena","attribute_key":"eyes","attribute_value":"blue"},{"fact_key":"Mara","kind":"character","snippet":"Mara","attribute_key":null,"attribute_value":null}]}"#,
+            text,
+        ).unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].snippet, "Elena has blue eyes.");
+        assert_eq!(candidates[0].attribute_value.as_deref(), Some("blue"));
+        assert_eq!(candidates[1].snippet, "Mara waited by the gate.");
+    }
+
+    #[test]
+    fn memory_parser_rejects_malformed_output() {
+        assert!(parse_memory_candidates("not json", "Elena waited.").is_none());
+    }
+
+    #[test]
+    fn memory_parser_grounds_model_attributes_in_the_snippet() {
+        let candidates = parse_memory_candidates(
+            r#"{"mentions":[{"fact_key":"Elena","kind":"character","snippet":"Elena wore a coat.","attribute_key":"color","attribute_value":"blue"}]}"#,
+            "Elena wore a coat.",
+        ).unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn memory_name_fallback_infers_real_sentences_and_traits() {
+        let facts = vec![BibleFact { id: "f".into(), doc_id: "b".into(), kind: "world_characters".into(), key: "Elena".into(), value: "protagonist".into() }];
+        let candidates = parse_memory_names(r#"["Elena", "Mara"]"#, "Elena has blue eyes. Mara waited by the gate.", &facts);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].snippet, "Elena has blue eyes.");
+        assert_eq!(candidates[0].attribute_key.as_deref(), Some("eyes"));
+        assert_eq!(candidates[1].snippet, "Mara waited by the gate.");
     }
 }

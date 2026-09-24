@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-recall"
+description = "Enables the memory_recall command without any pre-configured scope."
+commands.allow = ["memory_recall"]
+
+[[permission]]
+identifier = "deny-memory-recall"
+description = "Denies the memory_recall command without any pre-configured scope."
+commands.deny = ["memory_recall"]

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Just Write ehis — Brutalist / Notion Structure</title>
+  <style>
+    :root { --paper:#f4f4f0; --white:#fff; --ink:#111; --muted:#555; --line:#111; --red:#e61919; --red-soft:#ffd9d7; --mono:'Space Mono','Courier New',monospace; --display:'Arial Black',Impact,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:Arial,Helvetica,sans-serif; }
+    a { color:inherit; text-decoration:none; }
+    .top { height:70px; display:flex; align-items:center; justify-content:space-between; padding:0 28px; border-bottom:3px solid var(--line); background:var(--white); }
+    .wordmark { display:flex; align-items:center; gap:10px; font:700 15px var(--display); letter-spacing:-.04em; }
+    .mark { display:grid; place-items:center; width:30px; height:30px; background:var(--ink); color:var(--paper); font:700 18px var(--display); }
+    .top nav { display:flex; gap:26px; font:11px var(--mono); text-transform:uppercase; }
+    .top nav a:hover { color:var(--red); }
+    .hero { max-width:1160px; margin:auto; padding:110px 28px 95px; text-align:center; }
+    .code { color:var(--red); font:11px var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+    h1 { max-width:930px; margin:24px auto 24px; font:900 clamp(4.4rem, 13vw, 12rem)/.78 var(--display); letter-spacing:-.1em; text-transform:uppercase; }
+    .hero p { max-width:570px; margin:0 auto; color:var(--muted); font-size:19px; line-height:1.45; }
+    .hero-actions { display:flex; justify-content:center; gap:10px; margin-top:34px; }
+    .btn { min-height:46px; display:inline-flex; align-items:center; padding:0 16px; border:2px solid var(--line); font:12px var(--mono); text-transform:uppercase; }
+    .btn.primary { background:var(--red); color:#fff; }
+    .btn:hover { background:var(--ink); color:var(--paper); }
+    .hero-grid { display:grid; grid-template-columns:1.2fr .8fr; gap:0; margin-top:90px; border:3px solid var(--line); text-align:left; }
+    .hero-grid > div { min-height:240px; padding:22px; }
+    .hero-grid > div + div { border-left:3px solid var(--line); }
+    .label { color:var(--red); font:10px var(--mono); text-transform:uppercase; letter-spacing:.12em; }
+    .hero-grid h2 { margin:20px 0 12px; font:900 34px/.9 var(--display); letter-spacing:-.07em; text-transform:uppercase; }
+    .hero-grid p { max-width:400px; margin:0; color:var(--muted); line-height:1.55; }
+    .stamp { display:grid; place-items:center; background:var(--red-soft); }
+    .stamp strong { display:block; font:900 clamp(3rem,7vw,6rem)/.8 var(--display); letter-spacing:-.1em; }
+    .stamp span { display:block; margin-top:16px; font:10px var(--mono); text-transform:uppercase; }
+    .band { border-top:3px solid var(--line); border-bottom:3px solid var(--line); background:var(--ink); color:var(--paper); }
+    .band-inner { max-width:1160px; margin:auto; padding:22px 28px; display:flex; justify-content:space-between; gap:20px; font:11px var(--mono); text-transform:uppercase; }
+    .band-inner strong { color:#ff5b5b; }
+    .section { max-width:1160px; margin:auto; padding:100px 28px; }
+    .section h2 { max-width:760px; margin:0 0 18px; font:900 clamp(2.7rem,7vw,7rem)/.8 var(--display); letter-spacing:-.09em; text-transform:uppercase; }
+    .intro { max-width:580px; margin:0 0 50px; color:var(--muted); font-size:18px; line-height:1.5; }
+    .feature-grid { display:grid; grid-template-columns:1fr 1fr; border:3px solid var(--line); }
+    .feature { min-height:225px; padding:24px; }
+    .feature:nth-child(odd) { border-right:3px solid var(--line); }
+    .feature:nth-child(n+3) { border-top:3px solid var(--line); }
+    .feature:nth-child(3) { background:var(--red-soft); }
+    .feature h3 { margin:0 0 42px; font:900 24px/.9 var(--display); letter-spacing:-.06em; text-transform:uppercase; }
+    .feature p { max-width:420px; margin:0; color:var(--muted); line-height:1.55; }
+    .manifesto { display:grid; grid-template-columns:1fr 1.4fr; gap:40px; border-top:3px solid var(--line); padding-top:26px; }
+    .manifesto .big { font:900 clamp(3.5rem,8vw,8rem)/.78 var(--display); letter-spacing:-.1em; text-transform:uppercase; }
+    .manifesto .copy { align-self:end; max-width:480px; color:var(--muted); font-size:18px; line-height:1.5; }
+    .os { background:var(--red); color:#fff; }
+    .os .section h2, .os .intro { color:#fff; }
+    .os .intro { max-width:700px; }
+    .os-grid { display:grid; grid-template-columns:repeat(4, 1fr); border:3px solid #fff; }
+    .os-grid div { min-height:150px; padding:20px; border-right:3px solid #fff; }
+    .os-grid div:last-child { border-right:0; }
+    .os-grid b { display:block; margin-bottom:44px; font:900 20px/.9 var(--display); }
+    .os-grid span { font:10px var(--mono); text-transform:uppercase; }
+    footer { display:flex; justify-content:space-between; max-width:1160px; margin:auto; padding:28px; border-top:3px solid var(--line); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:800px) { .top nav { display:none; } .hero { padding-top:75px; } .hero-grid, .feature-grid, .manifesto { grid-template-columns:1fr; } .hero-grid > div + div, .feature:nth-child(odd) { border-left:0; border-top:3px solid var(--line); } .feature:nth-child(n+3) { border-top:3px solid var(--line); } .os-grid { grid-template-columns:1fr 1fr; } .os-grid div:nth-child(2) { border-right:0; } .os-grid div:nth-child(n+3) { border-top:3px solid #fff; } }
+    @media (max-width:520px) { h1 { font-size:clamp(3.4rem,18vw,5.7rem); } .hero-actions { flex-direction:column; align-items:stretch; } .btn { justify-content:center; } .section { padding:74px 18px; } .os-grid { grid-template-columns:1fr; } .os-grid div { border-right:0; border-top:3px solid #fff; } .os-grid div:first-child { border-top:0; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="wordmark" href="./index.html"><span class="mark">E</span> Just Write ehis</a>
+    <nav><a href="#system">The system</a><a href="#windows">Windows</a><a href="#start">Download</a></nav>
+  </header>
+  <main>
+    <section class="hero">
+      <div class="code">LOCAL-FIRST / WRITING SYSTEM / BUILD 02</div>
+      <h1>Make the work the main event.</h1>
+      <p>A simple, serious home for every document, idea, chapter, book, and note that belongs to you.</p>
+      <div class="hero-actions"><a class="btn primary" href="#start">Download for Windows</a><a class="btn" href="#system">Read the system</a></div>
+      <div class="hero-grid"><div><div class="label">[ 01 / THE PROMISE ]</div><h2>Everything around writing.</h2><p>Not a feature checklist. A connected room for the things that make writing possible: structure, memory, references, drafts, and the next scene.</p></div><div class="stamp"><div><strong>THIS</strong><span>the work stays yours</span></div></div></div>
+    </section>
+    <div class="band"><div class="band-inner"><span><strong>STATUS:</strong> files first / local models optional / Windows native</span><span>NO DASHBOARD MARATHON →</span></div></div>
+    <section class="section" id="system">
+      <h2>A system, not a pile of apps.</h2>
+      <p class="intro">Use the same underlying vault across the full writing life. Switch modes without switching identities.</p>
+      <div class="feature-grid"><article class="feature"><h3>Write</h3><p>A focused editor with autosave, local files, and the option to think beside yourself.</p></article><article class="feature"><h3>Map</h3><p>See projects, references, and loose threads as a structure instead of another list.</p></article><article class="feature"><h3>Story memory</h3><p>Names, facts, and suggestions stay attached to the work they came from.</p></article><article class="feature"><h3>Open files</h3><p>.txt and .md open from Explorer. The running app takes the next file without starting over.</p></article></div>
+    </section>
+    <section class="os" id="windows"><div class="section"><h2>Windows integration, without the magic trick.</h2><p class="intro">The installer declares the file types. Windows decides defaults. Autostart stays opt-in. The companion dock waits at the edge when you ask it to.</p><div class="os-grid"><div><b>.TXT</b><span>registered by installer</span></div><div><b>.MD</b><span>open with Just Write ehis</span></div><div><b>01</b><span>one running process</span></div><div><b>ON</b><span>only when you choose it</span></div></div></div></section>
+    <section class="section" id="start"><div class="manifesto"><div class="big">Start<br>where<br>you are.</div><div class="copy">No account wall. No forced cloud. No decorative dashboard pretending to be a method. Download the app, open the file, and let the room get out of the way.</div></div><div class="hero-actions" style="justify-content:flex-start;margin-top:54px"><a class="btn primary" href="#top">Download Just Write ehis</a></div></section>
+  </main>
+  <footer><span>JUST WRITE EHIS / PROTOTYPE 02</span><span>NOTION STRUCTURE × BRUTALIST UI</span></footer>
+</body>
+</html>

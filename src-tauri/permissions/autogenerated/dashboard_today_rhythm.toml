@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-today-rhythm"
+description = "Enables the dashboard_today_rhythm command without any pre-configured scope."
+commands.allow = ["dashboard_today_rhythm"]
+
+[[permission]]
+identifier = "deny-dashboard-today-rhythm"
+description = "Denies the dashboard_today_rhythm command without any pre-configured scope."
+commands.deny = ["dashboard_today_rhythm"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ghost-list"
+description = "Enables the ghost_list command without any pre-configured scope."
+commands.allow = ["ghost_list"]
+
+[[permission]]
+identifier = "deny-ghost-list"
+description = "Denies the ghost_list command without any pre-configured scope."
+commands.deny = ["ghost_list"]

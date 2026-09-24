@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-log-list-entries"
+description = "Enables the log_list_entries command without any pre-configured scope."
+commands.allow = ["log_list_entries"]
+
+[[permission]]
+identifier = "deny-log-list-entries"
+description = "Denies the log_list_entries command without any pre-configured scope."
+commands.deny = ["log_list_entries"]

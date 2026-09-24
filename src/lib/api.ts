@@ -144,6 +144,47 @@ export interface BibleFact {
   value: string;
 }
 
+export interface BibleMention {
+  id: string;
+  bible_doc_id: string;
+  fact_key: string;
+  kind: string;
+  doc_id: string;
+  doc_title: string;
+  snippet: string;
+  attribute_key: string | null;
+  attribute_value: string | null;
+  span_start: number | null;
+  created_at: string;
+}
+
+export interface BibleSuggestion {
+  id: string;
+  bible_doc_id: string;
+  source_doc_id: string;
+  doc_title: string;
+  kind: string;
+  key: string;
+  value: string;
+  snippet: string;
+  attribute_key: string | null;
+  attribute_value: string | null;
+  span_start: number | null;
+  status: "pending" | "rejected";
+  created_at: string;
+}
+
+export interface BibleMemoryUpdate {
+  skipped: boolean;
+  retryable: boolean;
+  matched: number;
+  suggested: number;
+}
+
+export interface BibleMemoryRebuild extends BibleMemoryUpdate {
+  processed: number;
+}
+
 export interface BeatNode {
   doc: Doc;
   act: number | null;
@@ -279,6 +320,15 @@ export const api = {
   docCreate: (workspace: string, kind: string, title: string, parentId?: string, content?: string, frontmatterJson?: string) =>
     safeInvoke<Doc>("doc_create", { workspace, kind, title, parentId, content, frontmatterJson }),
 
+  openExternalFile: (path: string) =>
+    safeInvoke<Doc | null>("open_external_file", { path }),
+
+  takeLaunchFile: () =>
+    safeInvoke<string | null>("take_launch_file"),
+
+  openDefaultApps: () =>
+    safeInvoke<void>("open_default_apps"),
+
   docGet: (id: string) =>
     safeInvoke<Doc>("doc_get", { id }),
 
@@ -363,6 +413,9 @@ export const api = {
   novelCompile: (projectId: string) =>
     safeInvoke<string>("novel_compile", { projectId }),
 
+  bibleScopeId: (docId: string) =>
+    safeInvoke<string>("bible_scope_id", { docId }),
+
   bibleGetFacts: (docId: string) =>
     safeInvoke<BibleFact[]>("bible_get_facts", { docId }),
 
@@ -371,6 +424,30 @@ export const api = {
 
   bibleDeleteFact: (factId: string) =>
     safeInvoke<void>("bible_delete_fact", { factId }),
+
+  bibleGetMentions: (bibleDocId: string) =>
+    safeInvoke<BibleMention[]>("bible_get_mentions", { bibleDocId }),
+
+  bibleUpsertMention: (bibleDocId: string, docId: string, factKey: string, kind: string, snippet: string, attributeKey?: string | null, attributeValue?: string | null) =>
+    safeInvoke<BibleMention>("bible_upsert_mention", { bibleDocId, docId, factKey, kind, snippet, attributeKey, attributeValue }),
+
+  bibleDeleteMentions: (bibleDocId: string, docId?: string, factKey?: string) =>
+    safeInvoke<void>("bible_delete_mentions", { bibleDocId, docId, factKey }),
+
+  bibleGetSuggestions: (bibleDocId: string) =>
+    safeInvoke<BibleSuggestion[]>("bible_get_suggestions", { bibleDocId }),
+
+  bibleConfirmSuggestion: (bibleDocId: string, suggestionId: string) =>
+    safeInvoke<BibleFact>("bible_confirm_suggestion", { bibleDocId, suggestionId }),
+
+  bibleRejectSuggestion: (bibleDocId: string, suggestionId: string) =>
+    safeInvoke<void>("bible_reject_suggestion", { bibleDocId, suggestionId }),
+
+  bibleExtractMentions: (docId: string, expectedContent: string) =>
+    safeInvoke<BibleMemoryUpdate>("bible_extract_mentions", { docId, expectedContent }),
+
+  bibleRebuildMemory: (projectId: string) =>
+    safeInvoke<BibleMemoryRebuild>("bible_rebuild_memory", { projectId }),
 
   conversationCreate: (docId?: string, mode?: string) =>
     safeInvoke<Conversation>("conversation_create", { docId, mode }),

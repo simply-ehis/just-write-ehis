@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-publish-static-site"
+description = "Enables the publish_static_site command without any pre-configured scope."
+commands.allow = ["publish_static_site"]
+
+[[permission]]
+identifier = "deny-publish-static-site"
+description = "Denies the publish_static_site command without any pre-configured scope."
+commands.deny = ["publish_static_site"]

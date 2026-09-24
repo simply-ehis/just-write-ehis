@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-is-running"
+description = "Enables the tts_is_running command without any pre-configured scope."
+commands.allow = ["tts_is_running"]
+
+[[permission]]
+identifier = "deny-tts-is-running"
+description = "Denies the tts_is_running command without any pre-configured scope."
+commands.deny = ["tts_is_running"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-get-streak"
+description = "Enables the memory_get_streak command without any pre-configured scope."
+commands.allow = ["memory_get_streak"]
+
+[[permission]]
+identifier = "deny-memory-get-streak"
+description = "Denies the memory_get_streak command without any pre-configured scope."
+commands.deny = ["memory_get_streak"]

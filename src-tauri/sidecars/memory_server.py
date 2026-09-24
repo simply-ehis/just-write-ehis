@@ -125,9 +125,6 @@ class MemoryHandler(BaseHTTPRequestHandler):
             q = parse_qs(parsed.query).get("q", [""])[0]
             block = STORE.mem.build_memory_prompt(q) if STORE else ""
             self._json({"facts": block})
-        elif parsed.path == "/facts":
-            facts = [f.to_dict() for f in STORE.mem.facts] if STORE else []
-            self._json({"facts": facts})
         else:
             self._json({"error": "unknown endpoint"}, 404)
 
@@ -142,13 +139,6 @@ class MemoryHandler(BaseHTTPRequestHandler):
             self._json({"stored": len(stored)})
         elif self.path == "/redact":
             self._json({"text": redact_secrets(str(body.get("text", "")))})
-        elif self.path == "/forget":
-            try:
-                forgotten = STORE.mem.forget(int(body.get("id", -1)))
-            except (TypeError, ValueError):
-                forgotten = False
-            STORE.save()
-            self._json({"forgotten": forgotten})
         elif self.path == "/clear":
             STORE.mem.clear()
             STORE.save()

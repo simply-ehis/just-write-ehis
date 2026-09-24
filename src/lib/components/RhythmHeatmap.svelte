@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { countWords } from "$lib/text";
+
   let { content, height = 12 }: { content: string; height?: number } = $props();
 
   let bars = $derived.by(() => {
     if (!content) return [];
     const blocks = content.split(/\n\n+/).filter((b) => b.trim().length > 0);
-    const wcs = blocks.map((b) => b.trim().split(/\s+/).filter(Boolean).length);
+    const wcs = blocks.map((b) => countWords(b));
     const max = Math.max(1, ...wcs);
     return wcs.map((wc) => wc / max);
   });

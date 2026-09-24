@@ -62,7 +62,9 @@ then Download exports it in board order (acts → sequences → scenes) via
 
 Join rule: each doc gets an `# Title` header with its content headings
 demoted one level (H1→H2 … H5→H6), so titles can never collide with
-content; docs are separated by `---` rules.
+content; docs are separated by `---` rules. Section bodies carry no YAML
+of their own (mid-document blocks would render as visible rules) — one
+manuscript-level header holds the title plus merged per-doc authors.
 
 Cost bound: the joined manuscript is capped at 5M source characters
 (`COMPILE_CHAR_CAP`, ~800k words). Past it, `compile_run` refuses with

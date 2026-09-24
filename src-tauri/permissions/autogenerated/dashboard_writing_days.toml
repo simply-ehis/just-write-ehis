@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-writing-days"
+description = "Enables the dashboard_writing_days command without any pre-configured scope."
+commands.allow = ["dashboard_writing_days"]
+
+[[permission]]
+identifier = "deny-dashboard-writing-days"
+description = "Denies the dashboard_writing_days command without any pre-configured scope."
+commands.deny = ["dashboard_writing_days"]

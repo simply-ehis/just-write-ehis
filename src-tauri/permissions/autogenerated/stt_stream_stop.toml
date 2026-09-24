@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-stt-stream-stop"
+description = "Enables the stt_stream_stop command without any pre-configured scope."
+commands.allow = ["stt_stream_stop"]
+
+[[permission]]
+identifier = "deny-stt-stream-stop"
+description = "Denies the stt_stream_stop command without any pre-configured scope."
+commands.deny = ["stt_stream_stop"]

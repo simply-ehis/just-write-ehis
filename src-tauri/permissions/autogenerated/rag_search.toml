@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rag-search"
+description = "Enables the rag_search command without any pre-configured scope."
+commands.allow = ["rag_search"]
+
+[[permission]]
+identifier = "deny-rag-search"
+description = "Denies the rag_search command without any pre-configured scope."
+commands.deny = ["rag_search"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ghost-dismiss"
+description = "Enables the ghost_dismiss command without any pre-configured scope."
+commands.allow = ["ghost_dismiss"]
+
+[[permission]]
+identifier = "deny-ghost-dismiss"
+description = "Denies the ghost_dismiss command without any pre-configured scope."
+commands.deny = ["ghost_dismiss"]

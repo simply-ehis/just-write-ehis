@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-sidecar-start"
+description = "Enables the memory_sidecar_start command without any pre-configured scope."
+commands.allow = ["memory_sidecar_start"]
+
+[[permission]]
+identifier = "deny-memory-sidecar-start"
+description = "Denies the memory_sidecar_start command without any pre-configured scope."
+commands.deny = ["memory_sidecar_start"]

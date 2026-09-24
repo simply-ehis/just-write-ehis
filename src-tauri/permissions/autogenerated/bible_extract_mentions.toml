@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-extract-mentions"
+description = "Enables the bible_extract_mentions command without any pre-configured scope."
+commands.allow = ["bible_extract_mentions"]
+
+[[permission]]
+identifier = "deny-bible-extract-mentions"
+description = "Denies the bible_extract_mentions command without any pre-configured scope."
+commands.deny = ["bible_extract_mentions"]

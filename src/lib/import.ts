@@ -184,29 +184,3 @@ export async function batchExport(
     attachmentsSkipped,
   };
 }
-
-export function generateSyncManifest(documents: any[]): string {
-  return JSON.stringify({
-    version: 1,
-    exported: new Date().toISOString(),
-    app: 'Just Write ehis',
-    documents: documents.map(d => ({
-      id: d.id,
-      title: d.title,
-      workspace: d.workspace,
-      kind: d.kind,
-      content: d.content,
-      frontmatter: d.frontmatter_json,
-      created_at: d.created_at,
-      updated_at: d.updated_at,
-      word_count: d.word_count,
-      status: d.status,
-      parent_id: d.parent_id,
-    })),
-  }, null, 2);
-}
-
-export async function parseSyncManifest(manifest: string): Promise<any[]> {
-  const data = JSON.parse(manifest);
-  return data.documents || [];
-}

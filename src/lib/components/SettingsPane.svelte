@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
   import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
@@ -16,6 +15,8 @@
   import { validateLlmModel, validatePythonPath, validateSttModel, validateTtsModel } from "$lib/sidecarValidate";
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
+  import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
+  import { MIN_PIN_LENGTH } from "$lib/stores/lock";
 
   // Export setup probe (Settings → About): surfaces pandoc presence +
   // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
@@ -231,6 +232,17 @@
 
   async function setCompanionWidgetVisible(visible: boolean) {
     const previous = $settings.companionWidgetVisible;
+    if (!visible && $settings.widgetLaunchAtStartup) {
+      const error = await setWidgetAutostart(false);
+      if (error) {
+        showToast(`Could not disable Windows startup: ${error}`, "error");
+        return;
+      }
+    }
+    if (visible) {
+      const error = await promptWidgetAutostart();
+      if (error) showToast(`Windows startup was not enabled: ${error}`, "error");
+    }
     settings.update((current) => ({ ...current, companionWidgetVisible: visible }));
     if (isBrowserPreview()) return;
     try {
@@ -245,6 +257,7 @@
         await widget.hide();
       }
     } catch (e) {
+      if (visible) await setWidgetAutostart(false);
       settings.update((current) => ({ ...current, companionWidgetVisible: previous }));
       const widget = await WebviewWindow.getByLabel("widget").catch(() => null);
       if (widget) {
@@ -262,17 +275,21 @@
   }
 
   async function setWidgetLaunchAtStartup(enabled: boolean) {
-    const previous = $settings.widgetLaunchAtStartup;
-    settings.update((current) => ({ ...current, widgetLaunchAtStartup: enabled }));
-    if (isBrowserPreview()) return;
+    const error = await setWidgetAutostart(enabled);
+    if (error) showToast(`Startup setting failed: ${error}`, "error");
+  }
+
+  async function openDefaultApps() {
     try {
-      if (enabled) await enableAutostart();
-      else await disableAutostart();
-      if ((await isAutostartEnabled()) !== enabled) throw new Error("the operating system did not apply the startup setting");
+      await api.openDefaultApps();
     } catch (e) {
-      settings.update((current) => ({ ...current, widgetLaunchAtStartup: previous }));
-      showToast(`Startup setting failed: ${e instanceof Error ? e.message : e}`, "error");
+      showToast(`Couldn't open Windows Default Apps: ${e instanceof Error ? e.message : e}`, "error");
     }
+  }
+
+  function setAssociatedFileExtensions(value: string) {
+    const extensions = [...new Set(value.split(",").map((item) => item.trim().replace(/^\./, "").toLowerCase()).filter(Boolean))];
+    settings.update((current) => ({ ...current, associatedFileExtensions: extensions }));
   }
 
   const categories: { id: SettingsCategory; label: string; icon: string }[] = [
@@ -580,9 +597,18 @@
           <input id="setting-widget-dock-offset" type="number" min="0" max="100000" bind:value={$settings.widgetDockOffset} onblur={() => clampSettingKey("widgetDockOffset")} />
         </div>
         <div class="setting-row">
-          <label for="setting-widget-startup">Launch at OS startup</label>
-          <input id="setting-widget-startup" type="checkbox" checked={$settings.widgetLaunchAtStartup} onchange={(event) => setWidgetLaunchAtStartup((event.currentTarget as HTMLInputElement).checked)} />
+          <label for="setting-widget-startup">Start with Windows</label>
+          <input id="setting-widget-startup" type="checkbox" disabled={!$settings.companionWidgetVisible || !isWindowsRuntime()} checked={$settings.widgetLaunchAtStartup} onchange={(event) => setWidgetLaunchAtStartup((event.currentTarget as HTMLInputElement).checked)} />
         </div>
+        <div class="setting-row">
+          <span class="setting-label">Default text editor</span>
+          <button id="setting-default-app" class="secondary-btn" disabled={!isWindowsRuntime()} onclick={openDefaultApps}>Make Just Write ehis my default text editor</button>
+        </div>
+        <div class="setting-row">
+          <label for="setting-associated-extensions">Associated file extensions</label>
+          <input id="setting-associated-extensions" type="text" value={$settings.associatedFileExtensions.join(", ")} onchange={(event) => setAssociatedFileExtensions((event.currentTarget as HTMLInputElement).value)} />
+        </div>
+        <p class="setting-hint">The installer registers the shipped .txt and .md associations. Editing this list changes the app preference; rebuild/reinstall to change Windows registration.</p>
         <div class="setting-row">
           <label for="setting-icon-set">Icon Set</label>
           <select id="setting-icon-set" bind:value={$settings.iconSet}>
@@ -947,7 +973,7 @@
               onclick={() => { $settings = { ...$settings, appLockPin: "" }; }}
             >Remove</button>
           </div>
-          <p class="setting-desc">Type a new PIN to change it — it saves automatically and syncs to the OS keychain. Removing the PIN unlocks nothing by itself; clear per-doc locks from each doc.</p>
+          <p class="setting-desc">Type a new PIN to change it — it saves automatically and syncs to the OS keychain. At least {MIN_PIN_LENGTH} characters; repeated wrong guesses trigger a growing wait. Removing the PIN unlocks nothing by itself; clear per-doc locks from each doc.</p>
         {/if}
         <div class="setting-row">
           <label for="setting-craft-profiling-enabled">Craft analytics recording</label>

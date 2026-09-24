@@ -25,6 +25,10 @@ import VersionHistory from "./VersionHistory.svelte";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { splitTarget } from "$lib/stores/split";
   import { markUsed } from "$lib/features";
+  import { scheduleStoryMemory } from "$lib/storyMemory";
+  import { createStoryMemoryExtension, setStoryMemoryData, type StoryMemoryData, type StoryMemoryView } from "$lib/storyMemoryEditor";
+  import StoryMemoryHoverCard from "./StoryMemoryHoverCard.svelte";
+ import { countWords } from "$lib/text";
 
   let editorContainer = $state<HTMLDivElement>();
   // $state.raw: the CodeMirror view is an opaque handle (never deep-read by
@@ -58,7 +62,11 @@ import VersionHistory from "./VersionHistory.svelte";
   let ghostSuggestion = $state("");
   let ghostVisible = $state(false);
   let ghostDebounce: ReturnType<typeof setTimeout> | null = null;
-
+  let storyMemoryVisible = $state(false);
+  let storyMemoryPosition = $state({ x: 0, y: 0 });
+  let storyMemoryEntity = $state<StoryMemoryView | null>(null);
+  let storyMemoryLoadToken = 0;
+  let storyMemoryJumpToken = 0;
 
 
   // Appearance/behavior compartments: theme, focus-dimming, typewriter
@@ -87,6 +95,48 @@ import VersionHistory from "./VersionHistory.svelte";
       .catch(() => {
         bibleWords = new Set();
       });
+  }
+
+  function handleStoryMemoryHover(view: StoryMemoryView | null, position: { x: number; y: number }) {
+    storyMemoryEntity = view;
+    storyMemoryPosition = position;
+    storyMemoryVisible = !!view;
+  }
+
+  async function refreshStoryMemory(doc: Doc | null): Promise<void> {
+    const loadToken = ++storyMemoryLoadToken;
+    if (!doc) {
+      setStoryMemoryData(editorView, null);
+      storyMemoryVisible = false;
+      return;
+    }
+    try {
+      const scopeId = await api.bibleScopeId(doc.id);
+      const [facts, mentions] = await Promise.all([api.bibleGetFacts(scopeId), api.bibleGetMentions(scopeId)]);
+      if (loadToken !== storyMemoryLoadToken || $currentDoc?.id !== doc.id) return;
+      setStoryMemoryData(editorView, { facts, mentions } satisfies StoryMemoryData);
+    } catch {
+      if (loadToken !== storyMemoryLoadToken || $currentDoc?.id !== doc.id) return;
+      setStoryMemoryData(editorView, null);
+    }
+  }
+
+  async function jumpToStoryMemoryMention(mention: { doc_id: string; snippet: string; span_start: number | null }) {
+    const jumpToken = ++storyMemoryJumpToken;
+    try {
+      if ($currentDoc?.id !== mention.doc_id) {
+        const doc = await api.docGet(mention.doc_id);
+        if (jumpToken !== storyMemoryJumpToken) return;
+        $currentDoc = doc;
+        if (!$openTabs.find((tab) => tab.id === doc.id)) $openTabs = [doc, ...$openTabs];
+      }
+      window.setTimeout(() => {
+        if (jumpToken !== storyMemoryJumpToken || $currentDoc?.id !== mention.doc_id) return;
+        window.dispatchEvent(new CustomEvent("editor-scroll-to-text", { detail: { snippet: mention.snippet, spanStart: mention.span_start } }));
+      }, 80);
+    } catch (e) {
+      showToast(`Couldn't open appearance: ${e instanceof Error ? e.message : e}`, "error");
+    }
   }
 
   async function requestGhostSuggestion(content: string) {
@@ -309,9 +359,10 @@ import VersionHistory from "./VersionHistory.svelte";
       basicSetup,
       markdown(),
       themeCompartment.of(currentThemeExt()),
-      search({ top: true }),
-      highlightSelectionMatches(),
-      ghostField,
+       search({ top: true }),
+       highlightSelectionMatches(),
+       createStoryMemoryExtension({ onHover: handleStoryMemoryHover }),
+       ghostField,
       ghostInlinePlugin(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -415,33 +466,38 @@ import VersionHistory from "./VersionHistory.svelte";
     }
   }
 
-  function handleContentChange(content: string) {
-    if (!$currentDoc) return;
-    const words = content.split(/\s+/).filter(Boolean).length;
-    sessionWords = words;
-    if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
+  let saveQueue: Promise<void> = Promise.resolve();
+
+  function queueDocSave(editingDocId: string, content: string) {
+    saveQueue = saveQueue.then(async () => {
       try {
-        await api.docSave($currentDoc!.id, undefined, content);
-        $currentDoc = { ...$currentDoc!, word_count: words };
-        // Same craft/write heartbeat as the main editor (at most 1/min).
-        // Write heartbeat always; craft snapshots only when opted in.
+        const updated = await api.docSave(editingDocId, undefined, content);
+        if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: updated.word_count };
+        scheduleStoryMemory(updated, content);
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
-          const docId = $currentDoc!.id;
-          api.usageRecord(docId, "write").catch(() => {});
+          api.usageRecord(editingDocId, "write").catch(() => {});
           if ($settings.craftProfilingEnabled) {
             const stats = craftStats(content);
-            api.memoryRecordMetric(docId, "filter_words", stats.filterWords).catch(() => {});
-            api.memoryRecordMetric(docId, "dialogue_ratio", stats.dialogue).catch(() => {});
-            api.memoryRecordMetric(docId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch(() => {});
           }
         }
       } catch (e) {
         console.error("Failed to save:", e);
       }
-    }, 500);
+    });
+  }
+
+  function handleContentChange(content: string) {
+    if (!$currentDoc) return;
+    const editingDocId = $currentDoc.id;
+    const words = countWords(content);
+    sessionWords = words;
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => queueDocSave(editingDocId, content), 500);
     if (typewriterEnabled) {
       requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
     }
@@ -575,20 +631,23 @@ import VersionHistory from "./VersionHistory.svelte";
   }
 
   function handleSplitChange(docId: string, content: string) {
-    const words = content.split(/\s+/).filter(Boolean).length;
+    const words = countWords(content);
     if (splitDoc?.id === docId) splitWords = words;
     if (splitSaveTimeout) clearTimeout(splitSaveTimeout);
-    splitSaveTimeout = setTimeout(async () => {
-      try {
-        await api.docSave(docId, undefined, content);
-        if (splitDoc?.id === docId) {
-          splitDoc = { ...splitDoc, word_count: words };
-        }
-        $openTabs = $openTabs.map((t) => (t.id === docId ? { ...t, word_count: words } : t));
-      } catch (e) {
-        console.error("Failed to save split doc:", e);
-      }
-    }, 500);
+     splitSaveTimeout = setTimeout(() => {
+       saveQueue = saveQueue.then(async () => {
+         try {
+           const updated = await api.docSave(docId, undefined, content);
+           scheduleStoryMemory(updated, content);
+           if (splitDoc?.id === docId) {
+             splitDoc = { ...splitDoc, word_count: words };
+           }
+           $openTabs = $openTabs.map((t) => (t.id === docId ? { ...t, word_count: words } : t));
+         } catch (e) {
+           console.error("Failed to save split doc:", e);
+         }
+       });
+     }, 500);
   }
 
   /** Drop/paste files as vault attachments (A8.9), same as the main editor. */
@@ -653,19 +712,21 @@ import VersionHistory from "./VersionHistory.svelte";
           // A pending suggestion belongs to the previous doc — never let
           // it render (or Tab-accept) into the newly opened one.
           if (ghostDebounce) clearTimeout(ghostDebounce);
-          dismissGhost();
-          refreshBibleWords(doc);
-          sessionStartTime = Date.now();
+           dismissGhost();
+           refreshBibleWords(doc);
+           refreshStoryMemory(doc);
+           sessionStartTime = Date.now();
           sessionWords = doc.word_count;
         }
       });
     } else {
       untrack(() => {
         openDocId = null;
-      });
-      refreshBibleWords(null);
-    }
-  });
+       });
+       refreshBibleWords(null);
+       refreshStoryMemory(null);
+     }
+   });
 
   // Apply theme/type changes live WITHOUT rebuilding: reconfigure keeps
   // document history, cursor, and scroll position (a full rebuild would
@@ -749,6 +810,39 @@ import VersionHistory from "./VersionHistory.svelte";
     }
     window.addEventListener("editor-scroll-to-line", handleScrollToLine);
     return () => window.removeEventListener("editor-scroll-to-line", handleScrollToLine);
+  });
+
+  $effect(() => {
+    function handleScrollToText(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (!editorView) return;
+      let pos = typeof detail.spanStart === "number" ? detail.spanStart : -1;
+      if (pos < 0 || pos > editorView.state.doc.length) pos = editorView.state.doc.toString().indexOf(String(detail.snippet ?? ""));
+      if (pos < 0) return;
+      editorView.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      editorView.focus();
+    }
+    window.addEventListener("editor-scroll-to-text", handleScrollToText);
+    return () => window.removeEventListener("editor-scroll-to-text", handleScrollToText);
+  });
+
+  $effect(() => {
+    async function handleMemoryUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      const doc = $currentDoc;
+      if (!doc) return;
+      if (detail.scopeId) {
+        try {
+          const scopeId = await api.bibleScopeId(doc.id);
+          if ($currentDoc?.id !== doc.id || scopeId !== detail.scopeId) return;
+        } catch {
+          return;
+        }
+      }
+      refreshStoryMemory(doc);
+    }
+    window.addEventListener("story-memory-updated", handleMemoryUpdated);
+    return () => window.removeEventListener("story-memory-updated", handleMemoryUpdated);
   });
 
   onMount(() => {
@@ -900,6 +994,7 @@ import VersionHistory from "./VersionHistory.svelte";
       {/each}
     </div>
   {/if}
+  <StoryMemoryHoverCard bind:visible={storyMemoryVisible} bind:position={storyMemoryPosition} bind:entity={storyMemoryEntity} onJump={jumpToStoryMemoryMention} />
 </div>
 
 <style>

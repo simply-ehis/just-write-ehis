@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-scope-id"
+description = "Enables the bible_scope_id command without any pre-configured scope."
+commands.allow = ["bible_scope_id"]
+
+[[permission]]
+identifier = "deny-bible-scope-id"
+description = "Denies the bible_scope_id command without any pre-configured scope."
+commands.deny = ["bible_scope_id"]

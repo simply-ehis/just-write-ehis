@@ -585,12 +585,7 @@ input:focus, textarea:focus, select:focus {
 
 .app-shell.zen .sidebar,
 .app-shell.zen .tab-bar,
-.app-shell.zen .breadcrumb-bar,
-.app-shell.zen .status-strip {
-  display: none !important;
-}
-
-.app-shell.zen .mobile-header {
+.app-shell.zen .breadcrumb-bar {
   display: none !important;
 }
 
@@ -955,27 +950,9 @@ input:focus, textarea:focus, select:focus {
     display: block;
   }
 
-  .mobile-header {
-    display: flex;
-    align-items: center;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-    gap: 8px;
-  }
-
-  .mobile-menu-btn {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    font-size: 18px;
-  }
-
-  .mobile-menu-btn:hover {
-    background: var(--bg-hover);
+  /* Phones have no top bar; the shell itself clears the notch. */
+  .app-shell.mobile {
+    padding-top: env(safe-area-inset-top, 0px);
   }
 
   .tab-bar {
@@ -1015,6 +992,21 @@ input:focus, textarea:focus, select:focus {
   .command-palette .palette {
     width: 95vw;
     max-height: 70vh;
+  }
+
+  /* Thumb-reachable controls on phones; desktop sizes untouched. */
+  .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Touch devices have no hover: reveal affordances that are
+  hover-only on desktop (tab close is the critical one — an
+  invisible 18px target can never be tapped). */
+@media (hover: none), (pointer: coarse) {
+  .tab-bar .close {
+    opacity: 1;
   }
 }
 
@@ -1606,10 +1598,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* Glass — cards and elevated surfaces */
-[data-theme="glass"] .card,
-[data-theme="glass"] .panel,
-[data-theme="glass"] .modal-content,
-[data-theme="glass"] .dropdown-menu {
+[data-theme="glass"] .card {
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
@@ -1641,4 +1630,20 @@ input:focus, textarea:focus, select:focus {
 /* Glass — workspace top bar */
 [data-theme="glass"] .content-pane[data-workspace] {
   border-top: 1px solid var(--glass-border);
+}
+
+/* Shared bits: status dot used by BoardColumn columns and Novel
+  act/sequence headers (single definition — was tripled). */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.story-memory-known {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }

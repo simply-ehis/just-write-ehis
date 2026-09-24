@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-doc-search-full"
+description = "Enables the doc_search_full command without any pre-configured scope."
+commands.allow = ["doc_search_full"]
+
+[[permission]]
+identifier = "deny-doc-search-full"
+description = "Denies the doc_search_full command without any pre-configured scope."
+commands.deny = ["doc_search_full"]

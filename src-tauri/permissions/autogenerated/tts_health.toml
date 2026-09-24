@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-health"
+description = "Enables the tts_health command without any pre-configured scope."
+commands.allow = ["tts_health"]
+
+[[permission]]
+identifier = "deny-tts-health"
+description = "Denies the tts_health command without any pre-configured scope."
+commands.deny = ["tts_health"]

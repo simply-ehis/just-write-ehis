@@ -203,7 +203,7 @@
   .template-picker {
     display: flex;
     flex-direction: column;
-    width: 480px;
+    width: min(480px, 94vw);
     max-height: 600px;
     background: var(--surface-base);
     border: 1px solid var(--border);
@@ -321,7 +321,7 @@
 
   .modal {
     width: 90%;
-    max-width: 480px;
+    max-width: min(480px, 94vw);
     max-height: 80vh;
     overflow-y: auto;
     background: var(--surface-base);

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-upsert-mention"
+description = "Enables the bible_upsert_mention command without any pre-configured scope."
+commands.allow = ["bible_upsert_mention"]
+
+[[permission]]
+identifier = "deny-bible-upsert-mention"
+description = "Denies the bible_upsert_mention command without any pre-configured scope."
+commands.deny = ["bible_upsert_mention"]

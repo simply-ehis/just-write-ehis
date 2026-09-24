@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-goals"
+description = "Enables the dashboard_goals command without any pre-configured scope."
+commands.allow = ["dashboard_goals"]
+
+[[permission]]
+identifier = "deny-dashboard-goals"
+description = "Denies the dashboard_goals command without any pre-configured scope."
+commands.deny = ["dashboard_goals"]

@@ -7,6 +7,7 @@
   import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
+import { formatRelativeTime } from "$lib/text";
 
   let inboxItems = $state<Doc[]>([]);
   let loading = $state(false);
@@ -120,18 +121,7 @@
     selectedIds = new Set();
   }
 
-  function timeAgo(dateStr: string): string {
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    const diff = now - then;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
+  const timeAgo = formatRelativeTime;
 
   onMount(() => {
     loadInbox();

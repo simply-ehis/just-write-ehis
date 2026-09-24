@@ -57,6 +57,10 @@
 | Model slots + voice models | `AiPanel.svelte` (chat/composer/structurize → main slot), `providerTest.ts` + Settings test buttons, `settings.ts` + audio store (sttModel/ttsModel), `sidecar.rs` + `commands.rs` + `api.ts` (model argv), both `.py` sidecars (argv overrides), `docs/MODELS.md` picks | Medium |
 | AI memory harness (vendored) | `sidecars/harness/*` (MIT, attributed) + `memory_server.py`, `sidecar.rs` MemoryManager, `commands.rs` + `lib.rs` (8 commands), `api.ts`, `harness.ts`, `AiPanel.svelte` (recall/scrub/learn), `SettingsPane.svelte` (Privacy UI + wipe), `docs/HARNESS.md` | Medium |
 | Companion widget | `tauri.conf.json` (transparent 56px figure, runtime resize/dock), `capabilities/*.json` (window + autostart ACL), `Cargo.toml`/`Cargo.lock` + npm autostart plugin, `main.ts` (static App import, lazy WidgetApp), `WidgetApp.svelte`, `LazyWorkspace.svelte`, all canonical workspace components, `LibraryWorkspace.svelte` (Files deep-link), `widgetBridge.ts`, `App.svelte`, `SettingsPane.svelte`, `settings.ts` + `settingsValidate.ts`, `lib.rs`, `docs/WIDGET.md` | High |
+| Mobile shell (Area 15) | `index.html` (viewport-fit=cover, theme-color), `app.css` (44px controls, touch reveal, safe-area insets, dialog clamps), `App.svelte` (visualViewport breakpoint, mobile AI/Inspector sheets), `BottomBar.svelte` (Outline entry, insets), `tests/mobile-parity.mjs`, `package.json` (test:mobile), `docs/MOBILE.md` | Low |
+| Windows OS integration | `tauri.windows.conf.json` (NSIS .txt/.md associations), `windows/hooks.nsh` (autostart cleanup), `Cargo.toml`/`Cargo.lock` (Windows-only single-instance/autostart), `src/windows.rs`, `commands.rs` (`open_external_file`, `take_launch_file`, `open_default_apps`), `lib.rs` (single-instance handoff), `api.ts`/`browserBackend.ts`, `nativeLaunch.ts`, `widgetAutostart.ts`, `App.svelte`, `SettingsPane.svelte`, `docs/WINDOWS-INTEGRATION.md` | High |
+| Cross-cutting sweep (Area 16) | `text.ts` (NEW: countWords/formatRelativeTime; EditorPane, JustWrite, RhythmPanel, RhythmHeatmap, Sidebar, Inbox, browserStore), `status.ts` (STATUSES/BOARD_STATUSES; PropertiesView, ProjectsWorkspace), `stores/app.ts` (workspaceIcons single source; dead `workspaceStates` removed), `import.ts` (dead manifest exports), `browserBackend.ts` (memory-only secrets), `stores/lock.ts` + `LockScreen.svelte` + `SettingsPane.svelte` (4-char PIN + lockout), `WikilinkPreview.svelte` (locked gate), `doc_store.rs` (resolve_in_vault confinement, 4 tests), `main.ts`, `capabilities/*.json`, `tests/e2e-browser.mjs` (chunk/capability-aware checks) | High |
+| Auto Story Memory | `database.rs` + `models.rs` (mention/suggestion schema and retryability), `doc_store.rs` (scoped CRUD/matching/delta/lock chains/tombstones/transactions), `commands.rs` + `lib.rs` (local LLM extraction/rebuild IPC), `sidecar.rs` (loopback redirect policy), `api.ts` + browser mirrors, `storyMemory.ts`, `storyMemoryEditor.ts`, `EditorPane.svelte`, `JustWriteWorkspace.svelte`, `NovelWorkspace.svelte`, `StoryMemoryHoverCard.svelte`, `BODY.md`, `docs/AUTO_STORY_MEMORY.md` | High |
 
 ## Dependency Graph
 
@@ -65,16 +69,17 @@ App.svelte
   ├── Sidebar.svelte → stores/app.ts, api.ts
   ├── TabBar.svelte → stores/app.ts, api.ts
   ├── BreadcrumbBar.svelte → stores/app.ts
-  ├── EditorPane.svelte → stores/app.ts, api.ts, stores/writeBack.ts, codemirror/*
-  ├── AiPanel.svelte → stores/app.ts, stores/writeBack.ts
+   ├── EditorPane.svelte → stores/app.ts, api.ts, text.ts, storyMemory.ts, storyMemoryEditor.ts, stores/writeBack.ts, codemirror/*
+   ├── JustWriteWorkspace.svelte → stores/app.ts, api.ts, storyMemory.ts, storyMemoryEditor.ts
+   ├── NovelWorkspace.svelte → api.ts, storyMemory.ts, StoryMemoryHoverCard.svelte
+   ├── AiPanel.svelte → stores/app.ts, stores/writeBack.ts
   ├── StatusBar.svelte → stores/app.ts
   └── EmptyState.svelte → stores/app.ts, api.ts
 ```
+
 `main.ts?widget=1` → `WidgetApp.svelte` (dynamic import) → `LazyWorkspace.svelte` (selected canonical workspace),
 `EmptyState.svelte`, normal workspace/settings stores, save state, and main/widget events.
-`main.ts` mounts `App.svelte` statically — a dynamic import there emits
-root-absolute chunk URLs that the jsdom probes cannot resolve.
-
+`main.ts` dynamically imports `App.svelte` and mounts it after the route is selected. The jsdom probes may not resolve Vite's lazy CSS preload in that environment; browser preview and the recorded Playwright flow exercise the real bundle.
 
 ---
 

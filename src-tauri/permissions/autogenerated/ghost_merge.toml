@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ghost-merge"
+description = "Enables the ghost_merge command without any pre-configured scope."
+commands.allow = ["ghost_merge"]
+
+[[permission]]
+identifier = "deny-ghost-merge"
+description = "Denies the ghost_merge command without any pre-configured scope."
+commands.deny = ["ghost_merge"]

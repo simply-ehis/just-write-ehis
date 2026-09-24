@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vault-rename-execute"
+description = "Enables the vault_rename_execute command without any pre-configured scope."
+commands.allow = ["vault_rename_execute"]
+
+[[permission]]
+identifier = "deny-vault-rename-execute"
+description = "Denies the vault_rename_execute command without any pre-configured scope."
+commands.deny = ["vault_rename_execute"]

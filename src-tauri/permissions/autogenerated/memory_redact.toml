@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-redact"
+description = "Enables the memory_redact command without any pre-configured scope."
+commands.allow = ["memory_redact"]
+
+[[permission]]
+identifier = "deny-memory-redact"
+description = "Denies the memory_redact command without any pre-configured scope."
+commands.deny = ["memory_redact"]

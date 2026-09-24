@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Just Write ehis — Dark Workbench</title>
+  <style>
+    :root { --bg:#141512; --surface:#1c1e1a; --surface-2:#232721; --ink:#ede9db; --muted:#9b9d91; --line:#363c32; --pine:#8fc7a9; --amber:#d9a441; --red:#e08a7a; --mono:'Space Mono','Courier New',monospace; --sans:Inter,'Segoe UI',sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { height:66px; display:flex; align-items:center; justify-content:space-between; padding:0 30px; border-bottom:1px solid var(--line); background:rgba(20,21,18,.96); }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:700; }
+    .brand-mark { display:grid; place-items:center; width:30px; height:30px; background:var(--pine); color:var(--bg); font:700 18px var(--sans); }
+    .status { display:flex; align-items:center; gap:9px; color:var(--muted); font:10px var(--mono); text-transform:uppercase; letter-spacing:.08em; }
+    .status i { width:7px; height:7px; border-radius:50%; background:var(--pine); }
+    .hero { width:min(1320px,calc(100% - 60px)); margin:auto; display:grid; grid-template-columns:.8fr 1.2fr; gap:64px; align-items:center; min-height:700px; padding:90px 0 110px; }
+    .kicker { color:var(--pine); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1 { max-width:590px; margin:22px 0; font:700 clamp(3.5rem,7vw,7.2rem)/.87 'Arial Black',Impact,sans-serif; letter-spacing:-.09em; }
+    .lede { max-width:460px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .actions { display:flex; gap:10px; margin-top:34px; }
+    .button { min-height:46px; display:inline-flex; align-items:center; padding:0 16px; border:1px solid var(--line); font:11px var(--mono); text-transform:uppercase; }
+    .button.primary { border-color:var(--pine); background:var(--pine); color:var(--bg); }
+    .button:hover { border-color:var(--ink); }
+    .app { border:1px solid var(--line); background:var(--surface); box-shadow:12px 12px 0 #0b0c0a; }
+    .app-bar { display:flex; justify-content:space-between; padding:11px 14px; border-bottom:1px solid var(--line); color:var(--muted); font:10px var(--mono); }
+    .app-grid { display:grid; grid-template-columns:160px 1fr; min-height:440px; }
+    .nav { padding:18px 14px; border-right:1px solid var(--line); color:var(--muted); font:11px var(--mono); line-height:2.5; }
+    .nav strong { display:block; margin-bottom:14px; color:var(--ink); font:12px var(--sans); }
+    .nav .active { color:var(--pine); }
+    .workspace { padding:28px; }
+    .workspace small { color:var(--amber); font:10px var(--mono); letter-spacing:.1em; text-transform:uppercase; }
+    .workspace h2 { margin:15px 0 20px; font:700 32px/1 var(--sans); letter-spacing:-.07em; }
+    .workspace p { max-width:470px; margin:0; color:#b5b6aa; font:16px/1.7 Georgia,serif; }
+    .workspace .line { height:1px; margin:32px 0 16px; background:var(--line); }
+    .workspace .data { color:var(--muted); font:10px var(--mono); }
+    .dock { position:absolute; right:-30px; bottom:-26px; width:215px; padding:11px; border:1px solid var(--pine); background:#0e100e; box-shadow:6px 6px 0 var(--pine); }
+    .visual { position:relative; }
+    .dock-top { display:flex; justify-content:space-between; color:var(--muted); font:9px var(--mono); }
+    .dock strong { display:block; margin:10px 0 3px; font:12px var(--sans); }
+    .dock span { color:var(--pine); font:9px var(--mono); }
+    .signal { width:6px; height:6px; display:inline-block; margin-right:6px; border-radius:50%; background:var(--pine); }
+    .ticker { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--surface); }
+    .ticker-inner { width:min(1320px,calc(100% - 60px)); margin:auto; display:flex; justify-content:space-between; padding:14px 0; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    .ticker strong { color:var(--pine); font-weight:400; }
+    .section { width:min(1320px,calc(100% - 60px)); margin:auto; padding:100px 0; }
+    .section-head { display:grid; grid-template-columns:.85fr 1.15fr; gap:60px; align-items:end; margin-bottom:55px; }
+    .section h2 { margin:0; font:700 clamp(2.5rem,5vw,5.8rem)/.86 'Arial Black',Impact,sans-serif; letter-spacing:-.09em; }
+    .section-head p { max-width:520px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .modules { display:grid; grid-template-columns:repeat(4,1fr); border:1px solid var(--line); }
+    .module { min-height:190px; padding:18px; border-right:1px solid var(--line); }
+    .module:last-child { border-right:0; }
+    .module:nth-child(2) { background:var(--surface-2); }
+    .module:nth-child(3) { background:#1e2922; }
+    .module b { display:block; margin-bottom:65px; font:700 18px var(--sans); }
+    .module span { color:var(--muted); font:10px/1.5 var(--mono); }
+    .flow { display:grid; grid-template-columns:1fr 1fr; border:1px solid var(--line); }
+    .flow > div { min-height:270px; padding:28px; }
+    .flow > div + div { border-left:1px solid var(--line); }
+    .flow .dark { background:var(--pine); color:#132019; }
+    .flow h3 { margin:0 0 45px; font:700 30px/1 var(--sans); letter-spacing:-.06em; }
+    .flow p { max-width:430px; margin:0; color:var(--muted); line-height:1.6; }
+    .flow .dark p { color:#274235; }
+    .windows { background:var(--pine); color:#132019; }
+    .windows .section-head p { color:#274235; }
+    .windows-grid { display:grid; grid-template-columns:repeat(3,1fr); border:1px solid #132019; }
+    .windows-grid div { min-height:145px; padding:18px; border-right:1px solid #132019; }
+    .windows-grid div:last-child { border-right:0; }
+    .windows-grid b { display:block; margin-bottom:42px; font:700 18px var(--sans); }
+    .windows-grid span { font:10px var(--mono); text-transform:uppercase; }
+    .cta { width:min(1320px,calc(100% - 60px)); margin:auto; padding:120px 0 140px; text-align:center; }
+    .cta h2 { max-width:900px; margin:0 auto 28px; font:700 clamp(3.6rem,9vw,9rem)/.82 'Arial Black',Impact,sans-serif; letter-spacing:-.1em; }
+    .cta p { color:var(--muted); }
+    footer { width:min(1320px,calc(100% - 60px)); margin:auto; display:flex; justify-content:space-between; padding:24px 0 40px; border-top:1px solid var(--line); color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:950px) { .hero { grid-template-columns:1fr; gap:70px; } .dock { right:0; } .section-head { grid-template-columns:1fr; gap:22px; } .modules { grid-template-columns:repeat(2,1fr); } .module:nth-child(2) { border-right:0; } .module:nth-child(n+3) { border-top:1px solid var(--line); } .flow { grid-template-columns:1fr; } .flow > div + div { border-left:0; border-top:1px solid var(--line); } }
+    @media (max-width:560px) { .top { padding:0 16px; } .status span { display:none; } .hero, .section, .cta, footer, .ticker-inner { width:calc(100% - 32px); } .hero { min-height:auto; padding:76px 0 94px; } h1 { font-size:clamp(3.3rem,17vw,5.3rem); } .actions { flex-direction:column; align-items:stretch; } .button { justify-content:center; } .app-grid { grid-template-columns:1fr; } .nav { display:none; } .workspace { padding:24px 18px; } .modules, .windows-grid { grid-template-columns:1fr; } .module, .windows-grid div { border-right:0; border-top:1px solid var(--line); } .module:first-child, .windows-grid div:first-child { border-top:0; } .ticker-inner { display:block; line-height:2; } footer { display:block; line-height:2; } }
+  </style>
+</head>
+<body>
+  <header class="top"><a class="brand" href="./index.html"><span class="brand-mark">E</span> Just Write ehis</a><div class="status"><i></i><span>LOCAL VAULT / READY</span></div></header>
+  <main>
+    <section class="hero">
+      <div><div class="kicker">Dark workbench / local-first writing</div><h1>Your writing, on the machine.</h1><p class="lede">A serious writing workspace for documents, fiction, scripts, references, and the small tools that keep the work moving.</p><div class="actions"><a class="button primary" href="#windows">Download for Windows</a><a class="button" href="#system">Inspect the system</a></div></div>
+      <div class="visual"><div class="app"><div class="app-bar"><span>EHIS / WRITE</span><span>VAULT: C:\WRITING\LOCAL</span></div><div class="app-grid"><aside class="nav"><strong>WORKSPACES</strong><span class="active">WRITE / ACTIVE</span><span>MAP</span><span>NOVEL</span><span>READER</span><span>CANVAS</span></aside><article class="workspace"><small>WORKING DRAFT / AUTO-SAVED</small><h2>The next sentence</h2><p>“The room is not a cage for the work. It is the condition that lets the work become visible.”</p><div class="line"></div><div class="data">2,418 WORDS &nbsp;·&nbsp; LOCAL HISTORY &nbsp;·&nbsp; 14:32:08</div></article></div></div><div class="dock"><div class="dock-top"><span>COMPANION</span><span><i class="signal"></i>SAVED</span></div><strong>One workspace at the edge.</strong><span>NO SECOND INSTANCE / NO DUPLICATE DATA</span></div></div>
+    </section>
+    <div class="ticker"><div class="ticker-inner"><span><strong>STATUS</strong> &nbsp; LOCAL-FIRST / OPTIONAL AI / FILE-BACKED</span><span>WINDOWS INTEGRATION READY &nbsp; →</span></div></div>
+    <section class="section" id="system"><div class="section-head"><h2>Quiet surface.<br>Deep system.</h2><p>The product is dense where it needs to be and quiet everywhere else. Your work should not pass through a dozen disconnected tools to become a book, a log, or a plan.</p></div><div class="modules"><div class="module"><b>WRITE</b><span>Focused editor / autosave / local files</span></div><div class="module"><b>MAP</b><span>Projects, references, and structure</span></div><div class="module"><b>STORY MEMORY</b><span>Facts that stay attached to scenes</span></div><div class="module"><b>DOCK</b><span>The app can wait at the edge</span></div></div></section>
+    <section class="section"><div class="flow"><div><h3>AI is a tool in the room.</h3><p>Use local models, configure providers, or keep the model layer quiet. The product makes the choice visible instead of pretending every feature needs the same intelligence.</p></div><div class="dark"><h3>The file is still yours.</h3><p>Markdown, plain text, a vault path, and an editor that can be understood without us. No forced cloud account to make the work feel complete.</p></div></div></section>
+    <section class="windows" id="windows"><div class="section"><div class="section-head"><h2>Windows integration<br>with receipts.</h2><p>The installer owns the file associations. The app owns the handoff. The OS owns the default-app decision. Nothing is silently forced.</p></div><div class="windows-grid"><div><b>.TXT / .MD</b><span>Installer-registered</span></div><div><b>WARM HANDOFF</b><span>Single process</span></div><div><b>START WITH WINDOWS</b><span>Opt-in only</span></div></div></div></section>
+    <section class="cta"><h2>Open the file.<br>Stay in the work.</h2><p>Download the app. Make the room yours.</p><a class="button primary" href="#windows">Download Just Write ehis</a></section>
+  </main>
+  <footer><span>JUST WRITE EHIS / PROTOTYPE 03</span><span>DARK WORKBENCH / LOCAL-FIRST</span></footer>
+</body>
+</html>

@@ -39,15 +39,40 @@ function readySoon(): Promise<void> {
   ]);
 }
 
+export const MIN_PIN_LENGTH = 4;
+const MAX_FAILED_ATTEMPTS = 5;
+const BASE_BACKOFF_MS = 2000;
+const MAX_BACKOFF_MS = 60000;
+
+let failedAttempts = 0;
+let lockoutUntil = 0;
+
+/** Session-scoped backoff: 0 when the PIN may be attempted now. */
+export function pinLockoutRemaining(now: number = Date.now()): number {
+  return Math.max(0, lockoutUntil - now);
+}
+
 export async function hasPin(): Promise<boolean> {
   await readySoon();
-  return get(settings).appLockPin.trim().length > 0;
+  return get(settings).appLockPin.trim().length >= MIN_PIN_LENGTH;
 }
 
 export async function verifyPin(pin: string): Promise<boolean> {
   await readySoon();
+  if (pinLockoutRemaining() > 0) return false;
   const expected = get(settings).appLockPin.trim();
-  return expected.length > 0 && pin.trim() === expected;
+  const ok = expected.length >= MIN_PIN_LENGTH && pin.trim() === expected;
+  if (ok) {
+    failedAttempts = 0;
+    lockoutUntil = 0;
+  } else {
+    failedAttempts++;
+    if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+      const over = failedAttempts - MAX_FAILED_ATTEMPTS;
+      lockoutUntil = Date.now() + Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** over);
+    }
+  }
+  return ok;
 }
 
 /** Locked docs never reach any model — not even the current one.

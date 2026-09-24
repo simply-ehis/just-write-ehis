@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-script-location-list"
+description = "Enables the script_location_list command without any pre-configured scope."
+commands.allow = ["script_location_list"]
+
+[[permission]]
+identifier = "deny-script-location-list"
+description = "Denies the script_location_list command without any pre-configured scope."
+commands.deny = ["script_location_list"]

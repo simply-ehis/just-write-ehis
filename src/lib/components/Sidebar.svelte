@@ -6,6 +6,7 @@
     sidebarOpen,
     aiPanelOpen,
     workspaces,
+    workspaceIcons,
     showSettings,
   } from "$lib/stores/app";
   import { api } from "$lib/api";
@@ -14,26 +15,14 @@
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
   import { groupOfWorkspace, groupRankOf } from "$lib/workspaceGroups";
   import Icon from "$lib/components/Icon.svelte";
+import { formatRelativeTime } from "$lib/text";
 
   // Ehis pen mark — nib crop for the 20px home icon, full wordmark for
   // the sidebar header. Theme-aware: dark ink on paper, paper ink on dark/glass.
   let markSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
   let logoSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
-  const wsIcons: Record<string, string> = {
-    home: "home",
-    logs: "calendar",
-    write: "pencil",
-    inbox: "inbox",
-    map: "graph",
-    canvas: "board",
-    novel: "book",
-    script: "film",
-    projects: "folder",
-    reader: "book-open",
-    files: "files",
-    properties: "table",
-  };
+  const wsIcons = workspaceIcons;
 
   // Tooltips describe the workspace; drag-reorder needs no announcement.
   const wsTips: Record<string, string> = {
@@ -84,12 +73,13 @@
   // to Library's Files tab — so it never renders here, hidden or not.
   const DEFAULT_HIDDEN_IDS = DEFAULT_HIDDEN_WORKSPACES;
   let effectiveHidden = $derived($settings.hiddenIds ?? DEFAULT_HIDDEN_IDS);
-  // Pinned top-bar ids, validated against known workspaces (pins win
-  // over hides by construction: the grouped list below excludes them).
+  // Pinned top-bar ids, validated against known workspaces.
+  // Hidden wins over pinned (the Settings toggle promises removal from
+  // sidebar AND top bar); unhiding restores the pin, topBarIds untouched.
   // "files" is virtual (Library Files tab) and can never pin.
   let topPins = $derived(
     $settings.topBarIds
-      .filter((id) => id !== "files" && workspaces.some((w) => w.id === id))
+      .filter((id) => id !== "files" && !effectiveHidden.includes(id) && workspaces.some((w) => w.id === id))
       .slice(0, 4)
   );
   let pinnedWorkspaces = $derived(
@@ -203,17 +193,8 @@
       const days = Math.max(1, Math.round(age / 86400000));
       return { label: `Backup ${days}d overdue`, stale: true, off: false };
     }
-    return { label: `Backed up ${timeAgoShort($settings.lastAutoBackup)}`, stale: false, off: false };
+    return { label: `Backed up ${formatRelativeTime($settings.lastAutoBackup)}`, stale: false, off: false };
   });
-
-  function timeAgoShort(iso: string): string {
-    const mins = Math.max(0, Math.floor((Date.now() - +new Date(iso)) / 60000));
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
-  }
 
   onMount(async () => {
     try {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-backlinks-extract"
+description = "Enables the backlinks_extract command without any pre-configured scope."
+commands.allow = ["backlinks_extract"]
+
+[[permission]]
+identifier = "deny-backlinks-extract"
+description = "Denies the backlinks_extract command without any pre-configured scope."
+commands.deny = ["backlinks_extract"]

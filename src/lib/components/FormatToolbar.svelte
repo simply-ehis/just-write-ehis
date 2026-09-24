@@ -164,6 +164,17 @@
     min-height: 32px;
   }
 
+  /* Formatting strip scrolls sideways on phones instead of clipping. */
+  @media (max-width: 480px) {
+    .format-toolbar {
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .format-toolbar::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
   .toolbar-toggle {
     width: 32px;
     height: 32px;

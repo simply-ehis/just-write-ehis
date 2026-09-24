@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-decay-activity"
+description = "Enables the memory_decay_activity command without any pre-configured scope."
+commands.allow = ["memory_decay_activity"]
+
+[[permission]]
+identifier = "deny-memory-decay-activity"
+description = "Denies the memory_decay_activity command without any pre-configured scope."
+commands.deny = ["memory_decay_activity"]

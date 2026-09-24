@@ -14,7 +14,6 @@ Sentence-boundary chunking per A9.3 (~150 tokens/chunk, never mid-sentence).
 Endpoints:
   GET  /health        → {"status": "ok", "model_loaded": bool}
   POST /synthesize    → {"audio": base64, "sample_rate": int, "format": "wav"}
-  POST /voices        → {"voices": [...]}  (voices for current lang)
   POST /stop          → acknowledges stop (client kills audio)
 
 Synthesize body:
@@ -357,7 +356,6 @@ class TtsHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         routes = {
             "/synthesize": self._handle_synthesize,
-            "/voices": self._handle_voices,
             "/stop": lambda: self._json({"status": "stopped"}),
         }
         handler = routes.get(self.path)
@@ -395,19 +393,6 @@ class TtsHandler(BaseHTTPRequestHandler):
             self._json(resp)
         except Exception as e:
             print(f"[tts] Error: {e}", flush=True)
-            self._json({"error": str(e)}, 500)
-
-    def _handle_voices(self):
-        raw = self._read_body()
-        try:
-            data = json.loads(raw) if raw else {}
-            lang = data.get("lang_code", "a")
-            voices = VOICE_CATALOG.get(lang, VOICE_CATALOG["a"])
-            self._json({
-                "voices": [{"id": v[0], "label": v[1], "gender": v[2]} for v in voices],
-                "current_lang": lang,
-            })
-        except Exception as e:
             self._json({"error": str(e)}, 500)
 
 

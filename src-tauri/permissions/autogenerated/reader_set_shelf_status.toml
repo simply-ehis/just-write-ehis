@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reader-set-shelf-status"
+description = "Enables the reader_set_shelf_status command without any pre-configured scope."
+commands.allow = ["reader_set_shelf_status"]
+
+[[permission]]
+identifier = "deny-reader-set-shelf-status"
+description = "Denies the reader_set_shelf_status command without any pre-configured scope."
+commands.deny = ["reader_set_shelf_status"]

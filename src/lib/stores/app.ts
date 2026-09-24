@@ -53,29 +53,6 @@ if (typeof localStorage !== "undefined") {
   inspectorOpen.subscribe((v) => { latest.inspector = v; scheduleSave(latest.sidebar, latest.ai, latest.inspector); });
 }
 
-export interface WorkspaceState {
-  tabs: Doc[];
-  activeId: string | null;
-}
-
-export const workspaceStates: Record<string, WorkspaceState> = {
-  home: { tabs: [], activeId: null },
-  logs: { tabs: [], activeId: null },
-  write: { tabs: [], activeId: null },
-  map: { tabs: [], activeId: null },
-  novel: { tabs: [], activeId: null },
-  script: { tabs: [], activeId: null },
-  projects: { tabs: [], activeId: null },
-  reader: { tabs: [], activeId: null },
-  files: { tabs: [], activeId: null },
-  inbox: { tabs: [], activeId: null },
-  properties: { tabs: [], activeId: null },
-  canvas: { tabs: [], activeId: null },
-  craft: { tabs: [], activeId: null },
-  stats: { tabs: [], activeId: null },
-  skills: { tabs: [], activeId: null },
-};
-
 export const workspaces = [
   { id: "home", label: "Home", icon: "home" },
   { id: "logs", label: "Logs", icon: "calendar" },
@@ -92,3 +69,7 @@ export const workspaces = [
 ] as const;
 
 export type WorkspaceId = (typeof workspaces)[number]["id"];
+
+export const workspaceIcons: Record<string, string> = Object.fromEntries(
+  workspaces.map((w) => [w.id, w.icon])
+);

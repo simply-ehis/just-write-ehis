@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-canvas-list"
+description = "Enables the canvas_list command without any pre-configured scope."
+commands.allow = ["canvas_list"]
+
+[[permission]]
+identifier = "deny-canvas-list"
+description = "Denies the canvas_list command without any pre-configured scope."
+commands.deny = ["canvas_list"]

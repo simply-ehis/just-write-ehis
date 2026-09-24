@@ -4,9 +4,12 @@ mod doc_store;
 mod commands;
 mod convert;
 mod sidecar;
+mod windows;
 
 use rusqlite::Connection;
 use tauri::Manager;
+#[cfg(target_os = "windows")]
+use std::path::{Path, PathBuf};
 #[cfg(desktop)]
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -21,14 +24,31 @@ pub fn run() {
         )));
     }
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        let Some(path) = windows::find_text_file(&args, Path::new(&cwd)) else {
+            return;
+        };
+        if let Some(pending) = app.try_state::<windows::PendingLaunchFile>() {
+            pending.set(path.clone());
+        }
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.show();
+            let _ = main.set_focus();
+            let _ = main.emit("native-file-open", path.to_string_lossy().into_owned());
+        }
+    }));
+    let builder = builder
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
-    #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_autostart::init(
-        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-        Some(vec!["--widget-autostart"]),
-    ));
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(
+        tauri_plugin_autostart::Builder::new()
+            .app_name("Just Write ehis")
+            .arg("--widget-autostart")
+            .build(),
+    );
     builder
         .setup(|app| {
             let app_dir = app.path().app_data_dir()
@@ -52,6 +72,20 @@ pub fn run() {
                 .map_err(|e| format!("Failed to initialize database schema: {}", e))?;
 
             app.manage(db);
+            app.manage(windows::PendingLaunchFile::default());
+            #[cfg(target_os = "windows")]
+            {
+                let args: Vec<String> = std::env::args().collect();
+                let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                if let Some(path) = windows::find_text_file(&args, &cwd) {
+                    app.state::<windows::PendingLaunchFile>().set(path.clone());
+                    if let Some(main) = app.get_webview_window("main") {
+                        let _ = main.show();
+                        let _ = main.set_focus();
+                        let _ = main.emit("native-file-open", path.to_string_lossy().into_owned());
+                    }
+                }
+            }
             app.manage(sidecar::SidecarManager::new());
             app.manage(sidecar::SttManager::new(8090));
             app.manage(sidecar::TtsManager::new(8091));
@@ -126,6 +160,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::doc_create,
+            commands::open_external_file,
+            commands::take_launch_file,
+            commands::open_default_apps,
             commands::doc_get,
             commands::doc_save,
             commands::doc_delete,
@@ -154,9 +191,18 @@ pub fn run() {
             commands::reader_import_book,
             commands::novel_get_beat_board,
             commands::novel_compile,
+            commands::bible_scope_id,
             commands::bible_get_facts,
             commands::bible_upsert_fact,
             commands::bible_delete_fact,
+            commands::bible_get_mentions,
+            commands::bible_upsert_mention,
+            commands::bible_delete_mentions,
+            commands::bible_get_suggestions,
+            commands::bible_confirm_suggestion,
+            commands::bible_reject_suggestion,
+            commands::bible_extract_mentions,
+            commands::bible_rebuild_memory,
             commands::conversation_create,
             commands::conversation_list,
             commands::conversation_add_message,

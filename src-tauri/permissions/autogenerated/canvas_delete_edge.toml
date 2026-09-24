@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-canvas-delete-edge"
+description = "Enables the canvas_delete_edge command without any pre-configured scope."
+commands.allow = ["canvas_delete_edge"]
+
+[[permission]]
+identifier = "deny-canvas-delete-edge"
+description = "Denies the canvas_delete_edge command without any pre-configured scope."
+commands.deny = ["canvas_delete_edge"]

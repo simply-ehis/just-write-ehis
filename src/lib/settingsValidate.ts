@@ -56,6 +56,8 @@ const SCHEMA: Record<string, Rule> = {
   widgetDockEdge: ENUM("left", "right", "top", "bottom"),
   widgetDockOffset: INT(0, 100000),
   widgetLaunchAtStartup: BOOL,
+  widgetAutostartPromptShown: BOOL,
+  associatedFileExtensions: STRARR,
 
   fontSize: NUM(10, 32),
   lineHeight: NUM(1, 3),

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-forget-all"
+description = "Enables the memory_forget_all command without any pre-configured scope."
+commands.allow = ["memory_forget_all"]
+
+[[permission]]
+identifier = "deny-memory-forget-all"
+description = "Denies the memory_forget_all command without any pre-configured scope."
+commands.deny = ["memory_forget_all"]

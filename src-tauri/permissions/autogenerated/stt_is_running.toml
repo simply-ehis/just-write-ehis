@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-stt-is-running"
+description = "Enables the stt_is_running command without any pre-configured scope."
+commands.allow = ["stt_is_running"]
+
+[[permission]]
+identifier = "deny-stt-is-running"
+description = "Denies the stt_is_running command without any pre-configured scope."
+commands.deny = ["stt_is_running"]

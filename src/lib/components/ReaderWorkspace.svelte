@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { api, type Doc, type BookshelfEntry } from '$lib/api';
   import { currentDoc, openTabs } from '$lib/stores/app';
   import { showToast } from '$lib/stores/notifications';
@@ -289,32 +290,41 @@
       ? Math.max(0, readSections.findIndex((s) => s.id === anchor.section))
       : -1;
     renderedCount = Math.min(readSections.length, Math.max(12, anchorIdx + 2));
-    const restore = () => {
-      const el = scrollEl;
-      if (!el) return;
-      const max = el.scrollHeight - el.clientHeight;
-      if (max <= 0) return;
-      if (anchor?.section) {
-        const at = scrollTopFor(anchor, measuredSections(), max);
-        if (at !== null) {
-          el.scrollTop = at;
+    // Wait for Svelte to flush the sections first (restore() measuring a
+    // pre-flush DOM saw scrollHeight=0 and gave up permanently), then for
+    // fonts, retrying a few frames — layout shifts under us otherwise.
+    const restore = async () => {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await tick();
+        const el = scrollEl;
+        if (!el) return;
+        const max = el.scrollHeight - el.clientHeight;
+        if (max > 0) {
+          if (anchor?.section) {
+            const at = scrollTopFor(anchor, measuredSections(), max);
+            if (at !== null) {
+              el.scrollTop = at;
+              return;
+            }
+          }
+          if (readerPosition > 0) el.scrollTop = readerPosition * max;
           return;
         }
+        await new Promise((r) => requestAnimationFrame(r));
       }
-      if (readerPosition > 0) el.scrollTop = readerPosition * max;
     };
     if (typeof document !== "undefined" && document.fonts?.ready) {
       let done = false;
       const go = () => {
         if (!done) {
           done = true;
-          restore();
+          void restore();
         }
       };
       document.fonts.ready.then(go).catch(go);
       setTimeout(go, 1500);
     } else {
-      requestAnimationFrame(restore);
+      void restore();
     }
 
     if (entry.shelf_status === 'to-read') {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-set"
+description = "Enables the tabs_set command without any pre-configured scope."
+commands.allow = ["tabs_set"]
+
+[[permission]]
+identifier = "deny-tabs-set"
+description = "Denies the tabs_set command without any pre-configured scope."
+commands.deny = ["tabs_set"]

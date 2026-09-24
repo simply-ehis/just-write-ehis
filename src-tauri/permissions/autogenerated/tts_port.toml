@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-port"
+description = "Enables the tts_port command without any pre-configured scope."
+commands.allow = ["tts_port"]
+
+[[permission]]
+identifier = "deny-tts-port"
+description = "Denies the tts_port command without any pre-configured scope."
+commands.deny = ["tts_port"]

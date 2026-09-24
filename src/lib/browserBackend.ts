@@ -10,6 +10,8 @@ import { browserStore, countWords, type BrowserCanvasNode, type BrowserDoc } fro
 import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } from "$lib/aiRequest";
 import { markdownToHtmlFragment } from "$lib/markdown";
 
+const browserSecrets = new Map<string, string>();
+
 function frontmatter(doc: BrowserDoc): Record<string, unknown> {
   if (!doc.frontmatter_json) return {};
   try {
@@ -271,6 +273,15 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
         String(payload.workspace), String(payload.kind), String(payload.title ?? "Untitled"),
         str(payload.parentId), str(payload.content), str(payload.frontmatterJson),
       )) as T;
+
+    case "open_external_file":
+      return null as T;
+
+    case "take_launch_file":
+      return null as T;
+
+    case "open_default_apps":
+      return undefined as T;
 
     case "doc_get":
       return docShape(store.get(String(payload.id))) as T;
@@ -544,11 +555,19 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return out as T;
     }
 
-    case "bible_get_facts":
-      return store.bible.filter((b) => b.doc_id === String(payload.docId)) as T;
+    case "bible_scope_id":
+      return store.bibleScopeId(String(payload.docId)) as T;
+
+    case "bible_get_facts": {
+      const facts = store.bibleSourceAllowed(String(payload.docId))
+        ? store.bible.filter((b) => b.doc_id === String(payload.docId))
+        : [];
+      return facts as T;
+    }
 
     case "bible_upsert_fact": {
       const docId = String(payload.docId);
+      if (store.get(docId).kind !== "project" || !store.bibleSourceAllowed(docId)) throw new Error("Story Bible facts require an unlocked project scope");
       const key = String(payload.key);
       const kind = String(payload.kind);
       const existing = store.bible.find((b) => b.doc_id === docId && b.key === key);
@@ -573,14 +592,42 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     }
 
     case "bible_delete_fact":
-      store.bible = store.bible.filter((b) => b.id !== String(payload.factId));
-      store.rebuildEntityIndex();
-      try {
-        localStorage.setItem("jwe-browser-bible-v1", JSON.stringify(store.bible));
-      } catch {
-        /* ignore */
-      }
+      store.deleteBibleFact(String(payload.factId));
       return undefined as T;
+
+    case "bible_get_mentions":
+      return store.bibleGetMentions(String(payload.bibleDocId)) as T;
+
+    case "bible_upsert_mention":
+      return store.bibleUpsertMention(
+        String(payload.bibleDocId),
+        String(payload.docId),
+        String(payload.factKey),
+        String(payload.kind),
+        String(payload.snippet),
+        str(payload.attributeKey) ?? null,
+        str(payload.attributeValue) ?? null,
+      ) as T;
+
+    case "bible_delete_mentions":
+      store.bibleDeleteMentions(String(payload.bibleDocId), str(payload.docId), str(payload.factKey));
+      return undefined as T;
+
+    case "bible_get_suggestions":
+      return store.bibleGetSuggestions(String(payload.bibleDocId)) as T;
+
+    case "bible_confirm_suggestion":
+      return store.bibleConfirmSuggestion(String(payload.bibleDocId), String(payload.suggestionId)) as T;
+
+    case "bible_reject_suggestion":
+      store.bibleRejectSuggestion(String(payload.bibleDocId), String(payload.suggestionId));
+      return undefined as T;
+
+    case "bible_extract_mentions":
+      return { skipped: true, retryable: false, matched: 0, suggested: 0 } as T;
+
+    case "bible_rebuild_memory":
+      return { skipped: true, retryable: false, processed: 0, matched: 0, suggested: 0 } as T;
 
     case "conversation_create": {
       const conv = {
@@ -1336,24 +1383,24 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
           embedding: [],
         })) as T;
 
-    // OS keychain secrets — browser preview fallback is a separate
-    // localStorage bucket (the desktop shell uses the real keychain).
-    // Same allowlist as Rust keychain_entry: no arbitrary bucket writes.
+    // OS keychain secrets — the desktop shell uses the real keychain.
+    // Browser preview has none, so secrets live in memory only: a reload
+    // forgets them instead of leaving plaintext in localStorage. Same
+    // allowlist as Rust keychain_entry: no arbitrary bucket writes.
     case "secret_set": {
       if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
         throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
       }
-      const k = `jwe-secret-${String(payload.key)}`;
       const v = String(payload.value ?? "");
-      if (v) localStorage.setItem(k, v);
-      else localStorage.removeItem(k);
+      if (v) browserSecrets.set(String(payload.key), v);
+      else browserSecrets.delete(String(payload.key));
       return undefined as T;
     }
     case "secret_get": {
       if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
         throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
       }
-      return localStorage.getItem(`jwe-secret-${String(payload.key)}`) as T;
+      return (browserSecrets.get(String(payload.key)) ?? null) as T;
     }
 
     default:

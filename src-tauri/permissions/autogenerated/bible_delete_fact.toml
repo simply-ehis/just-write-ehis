@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-delete-fact"
+description = "Enables the bible_delete_fact command without any pre-configured scope."
+commands.allow = ["bible_delete_fact"]
+
+[[permission]]
+identifier = "deny-bible-delete-fact"
+description = "Denies the bible_delete_fact command without any pre-configured scope."
+commands.deny = ["bible_delete_fact"]

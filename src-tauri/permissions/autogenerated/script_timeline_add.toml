@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-script-timeline-add"
+description = "Enables the script_timeline_add command without any pre-configured scope."
+commands.allow = ["script_timeline_add"]
+
+[[permission]]
+identifier = "deny-script-timeline-add"
+description = "Denies the script_timeline_add command without any pre-configured scope."
+commands.deny = ["script_timeline_add"]

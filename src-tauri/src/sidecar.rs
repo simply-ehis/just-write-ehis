@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 fn http_client(timeout_secs: u64) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("reqwest client with a timeout always builds")
 }
@@ -64,15 +65,13 @@ impl ManagedSidecar {
     /// respawned (never early-Ok on a corpse). If our port is held by a
     /// stale holder, it is reclaimed (orphan restart) before spawning.
     pub fn start(&self, program: &str, args: &[String], cwd: &str, start_label: &str) -> Result<(), String> {
-        // Reap a corpse so a kill -9 can never leave us "running" forever.
-        if let Ok(mut guard) = self.process.lock() {
-            if let Some(child) = guard.as_mut() {
-                match child.try_wait() {
-                    Ok(None) => return Ok(()), // genuinely alive
-                    _ => {
-                        let _ = child.wait(); // reap the zombie
-                        *guard = None;
-                    }
+        let mut guard = self.process.lock().map_err(|e| e.to_string())?;
+        if let Some(child) = guard.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return Ok(()),
+                _ => {
+                    let _ = child.wait();
+                    *guard = None;
                 }
             }
         }
@@ -84,10 +83,7 @@ impl ManagedSidecar {
             .current_dir(cwd)
             .spawn()
             .map_err(|e| format!("Failed to start {} sidecar ({}): {}", start_label, program, e))?;
-        self.process
-            .lock()
-            .map_err(|e| e.to_string())?
-            .replace(child);
+        guard.replace(child);
         Ok(())
     }
 

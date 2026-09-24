@@ -5,7 +5,7 @@
    * content from AI, search, and stats regardless of this screen.
    */
   import type { Doc } from "$lib/api";
-  import { hasPin, markUnlocked, verifyPin } from "$lib/stores/lock";
+  import { hasPin, markUnlocked, pinLockoutRemaining, verifyPin } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
 
@@ -14,7 +14,15 @@
   let pin = $state("");
   let error = $state("");
   let busy = $state(false);
+  let waitSeconds = $state(0);
   let inputEl = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    const timer = setInterval(() => {
+      waitSeconds = Math.ceil(pinLockoutRemaining() / 1000);
+    }, 500);
+    return () => clearInterval(timer);
+  });
 
   $effect(() => {
     // Depend on doc.id: switching locked docs resets stale PIN/error.
@@ -26,7 +34,7 @@
   });
 
   async function unlock() {
-    if (busy) return;
+    if (busy || waitSeconds > 0) return;
     busy = true;
     try {
       if (!(await hasPin())) {
@@ -37,7 +45,10 @@
         markUnlocked(doc.id);
         showToast(`Unlocked "${doc.title}" for this session`, "success");
       } else {
-        error = "Wrong PIN. Try again.";
+        const wait = Math.ceil(pinLockoutRemaining() / 1000);
+        error = wait > 0
+          ? `Wrong PIN. Too many attempts — wait ${wait}s.`
+          : "Wrong PIN. Try again.";
         pin = "";
       }
     } finally {
@@ -58,10 +69,12 @@
       bind:value={pin}
       placeholder="Enter PIN"
       aria-label="Document PIN"
-      disabled={busy}
+      disabled={busy || waitSeconds > 0}
       onkeydown={(e) => { if (e.key === "Enter") unlock(); }}
     />
-    <button class="unlock-btn" onclick={unlock} disabled={busy}>{busy ? "…" : "Unlock"}</button>
+    <button class="unlock-btn" onclick={unlock} disabled={busy || waitSeconds > 0}>
+      {busy ? "…" : waitSeconds > 0 ? `Wait ${waitSeconds}s` : "Unlock"}
+    </button>
   </div>
   {#if error}
     <p class="lock-error">{error}</p>

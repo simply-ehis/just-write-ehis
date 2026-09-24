@@ -14,7 +14,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-tauri-plugin-autostart = "2.5.1"
 pulldown-cmark = "0.12"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
@@ -32,3 +31,7 @@ notify = "7"
 tempfile = "3"
 ammonia = "3.3"
 keyring = "4"
+
+[target."cfg(target_os = \"windows\")".dependencies]
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2.4.5"

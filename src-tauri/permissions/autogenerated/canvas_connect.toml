@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-canvas-connect"
+description = "Enables the canvas_connect command without any pre-configured scope."
+commands.allow = ["canvas_connect"]
+
+[[permission]]
+identifier = "deny-canvas-connect"
+description = "Denies the canvas_connect command without any pre-configured scope."
+commands.deny = ["canvas_connect"]

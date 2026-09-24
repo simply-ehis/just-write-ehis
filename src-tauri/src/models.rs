@@ -140,6 +140,64 @@ pub struct BibleFact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibleMention {
+    pub id: String,
+    pub bible_doc_id: String,
+    pub fact_key: String,
+    pub kind: String,
+    pub doc_id: String,
+    pub doc_title: String,
+    pub snippet: String,
+    pub attribute_key: Option<String>,
+    pub attribute_value: Option<String>,
+    pub span_start: Option<i64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibleSuggestion {
+    pub id: String,
+    pub bible_doc_id: String,
+    pub source_doc_id: String,
+    pub doc_title: String,
+    pub kind: String,
+    pub key: String,
+    pub value: String,
+    pub snippet: String,
+    pub attribute_key: Option<String>,
+    pub attribute_value: Option<String>,
+    pub span_start: Option<i64>,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibleMentionCandidate {
+    pub key: String,
+    pub kind: String,
+    pub snippet: String,
+    pub attribute_key: Option<String>,
+    pub attribute_value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibleMemoryUpdate {
+    pub skipped: bool,
+    pub retryable: bool,
+    pub matched: u64,
+    pub suggested: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BibleMemoryRebuild {
+    pub skipped: bool,
+    pub retryable: bool,
+    pub processed: u64,
+    pub matched: u64,
+    pub suggested: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateDocRequest {
     pub workspace: String,
     pub kind: String,

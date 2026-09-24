@@ -447,14 +447,24 @@ pub fn prepare_export(
     frontmatter_json: Option<&str>,
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> String {
-    let with_embeds = inline_embeds(content, lookup);
-    let resolved = resolve_wikilinks(&with_embeds);
+    let body = prepare_export_body(content, lookup);
     let fm = parse_frontmatter(frontmatter_json);
     let mut fm = fm;
     if fm.title.is_none() {
         fm.title = Some(title.to_string());
     }
-    inject_frontmatter(&resolved, &fm)
+    inject_frontmatter(&body, &fm)
+}
+
+/// Content-only half of prepare_export (embeds + wikilinks, no YAML).
+/// Compile uses this per section — mid-document YAML blocks would render
+/// as visible rules + stray text, so the manuscript gets ONE header.
+pub fn prepare_export_body(
+    content: &str,
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    let with_embeds = inline_embeds(content, lookup);
+    resolve_wikilinks(&with_embeds)
 }
 
 /// Copy `.attachments/` refs from the vault into `tempdir` and rewrite
@@ -639,5 +649,18 @@ mod convert_tests {
         assert!(out.contains("note about ch1"));
         assert!(!out.contains("[["));
         assert!(!out.contains("![["));
+    }
+
+    #[test]
+    fn manuscript_sections_stay_bare() {
+        // Compile bodies must carry NO yaml blocks of their own — only the
+        // single manuscript header is metadata, or every chapter renders
+        // visible `---` rules + stray `title:` paragraphs.
+        let body = prepare_export_body("# Ch1\n\nSee [[x]].", &|_| None);
+        assert!(!body.contains("---\n"));
+        assert!(body.contains("See x."));
+        let joined = join_manuscript(&[("Ch1", &body), ("Ch2", "Plain.")]);
+        assert!(joined.starts_with("# Ch1\n\n## Ch1"));
+        assert_eq!(joined.matches("---").count(), 1, "only the doc separator: {}", joined);
     }
 }

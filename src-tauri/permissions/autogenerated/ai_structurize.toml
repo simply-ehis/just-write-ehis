@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ai-structurize"
+description = "Enables the ai_structurize command without any pre-configured scope."
+commands.allow = ["ai_structurize"]
+
+[[permission]]
+identifier = "deny-ai-structurize"
+description = "Denies the ai_structurize command without any pre-configured scope."
+commands.deny = ["ai_structurize"]

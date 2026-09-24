@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reader-set-rating"
+description = "Enables the reader_set_rating command without any pre-configured scope."
+commands.allow = ["reader_set_rating"]
+
+[[permission]]
+identifier = "deny-reader-set-rating"
+description = "Denies the reader_set_rating command without any pre-configured scope."
+commands.deny = ["reader_set_rating"]

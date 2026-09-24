@@ -22,8 +22,8 @@ let r = v.validateSettings({ theme: "dark", notARealKey: 1, fileWatcherEnabled: 
 check("valid passes", r.valid.theme === "dark");
 check("unknown rejected", r.rejected.includes("notARealKey"));
 check("removed key rejected", r.rejected.includes("fileWatcherEnabled"));
-r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs" });
-check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs");
+r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs", associatedFileExtensions: ["txt", "md"], widgetAutostartPromptShown: true });
+check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs" && r.valid.associatedFileExtensions.length === 2 && r.valid.widgetAutostartPromptShown === true);
 r = v.validateSettings({ companionWidgetVisible: "yes", widgetWorkspace: "unknown" });
 check("bad widget settings rejected", r.rejected.includes("companionWidgetVisible") && r.rejected.includes("widgetWorkspace"));
 

@@ -7,7 +7,7 @@
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
-  import { currentDoc, aiPanelOpen, currentWorkspace, inspectorOpen, structurizePreset } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, aiPanelOpen, inspectorOpen, openTabs, structurizePreset } from "$lib/stores/app";
   import { api, type Doc } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
@@ -28,8 +28,13 @@
   import { craftStats } from "$lib/browserBackend";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
   import { markUsed } from "$lib/features";
+  import { scheduleStoryMemory } from "$lib/storyMemory";
+  import { createStoryMemoryExtension, setStoryMemoryData, type StoryMemoryData, type StoryMemoryView } from "$lib/storyMemoryEditor";
+  import StoryMemoryHoverCard from "./StoryMemoryHoverCard.svelte";
   import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
+import { countWords } from "$lib/text";
+
   let { companionMode = false }: { companionMode?: boolean } = $props();
 
   let editorContainer = $state<HTMLDivElement>();
@@ -89,6 +94,11 @@
   let previewPos = $state({ x: 0, y: 0 });
   let previewDocId = $state("");
   let previewDocTitle = $state("");
+  let storyMemoryVisible = $state(false);
+  let storyMemoryPosition = $state({ x: 0, y: 0 });
+  let storyMemoryEntity = $state<StoryMemoryView | null>(null);
+  let storyMemoryLoadToken = 0;
+  let storyMemoryJumpToken = 0;
 
   function triggerStructurize() {
     if (companionMode || !editorView) return;
@@ -224,6 +234,53 @@
   function handleEditorMouseleave() {
     previewVisible = false;
     lastPreviewTitle = null;
+  }
+
+  function handleStoryMemoryHover(view: StoryMemoryView | null, position: { x: number; y: number }) {
+    storyMemoryEntity = view;
+    storyMemoryPosition = position;
+    storyMemoryVisible = !!view;
+  }
+
+  async function refreshStoryMemory(doc: Doc | null): Promise<void> {
+    const loadToken = ++storyMemoryLoadToken;
+    if (companionMode || !doc) {
+      setStoryMemoryData(editorView, null);
+      storyMemoryVisible = false;
+      return;
+    }
+    try {
+      const scopeId = await api.bibleScopeId(doc.id);
+      const [facts, mentions] = await Promise.all([
+        api.bibleGetFacts(scopeId),
+        api.bibleGetMentions(scopeId),
+      ]);
+      if (loadToken !== storyMemoryLoadToken || $currentDoc?.id !== doc.id) return;
+      setStoryMemoryData(editorView, { facts, mentions } satisfies StoryMemoryData);
+    } catch {
+      if (loadToken !== storyMemoryLoadToken || $currentDoc?.id !== doc.id) return;
+      setStoryMemoryData(editorView, null);
+    }
+  }
+
+  async function jumpToStoryMemoryMention(mention: { doc_id: string; snippet: string; span_start: number | null }) {
+    const jumpToken = ++storyMemoryJumpToken;
+    try {
+      if ($currentDoc?.id !== mention.doc_id) {
+        const doc = await api.docGet(mention.doc_id);
+        if (jumpToken !== storyMemoryJumpToken) return;
+        $currentDoc = doc;
+        if (!$openTabs.find((tab) => tab.id === doc.id)) $openTabs = [doc, ...$openTabs];
+      }
+      window.setTimeout(() => {
+        if (jumpToken !== storyMemoryJumpToken || $currentDoc?.id !== mention.doc_id) return;
+        window.dispatchEvent(new CustomEvent("editor-scroll-to-text", {
+          detail: { snippet: mention.snippet, spanStart: mention.span_start },
+        }));
+      }, 80);
+    } catch (e) {
+      showToast(`Couldn't open appearance: ${e instanceof Error ? e.message : e}`, "error");
+    }
   }
 
   // Story Bible vocabulary for autocorrect's custom dictionary (A8.8):
@@ -462,6 +519,9 @@
         darkTheme,
         search({ top: true }),
         highlightSelectionMatches(),
+        ...(!companionMode
+          ? [createStoryMemoryExtension({ onHover: handleStoryMemoryHover })]
+          : []),
         ...(focusDimming ? [focusDimmingPlugin(() => focusDimming)] : []),
         ...(typewriterEnabled
           ? [EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))]
@@ -514,6 +574,31 @@
 
   let lastMetricAt = 0;
 
+  let saveQueue: Promise<void> = Promise.resolve();
+
+  function queueDocSave(editingDocId: string, content: string) {
+    saveQueue = saveQueue.then(async () => {
+      try {
+        const updated = await api.docSave(editingDocId, undefined, content);
+        if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: updated.word_count };
+        if (!companionMode) scheduleStoryMemory(updated, content);
+        const now = Date.now();
+        if (now - lastMetricAt > 60000) {
+          lastMetricAt = now;
+          api.usageRecord(editingDocId, "write").catch(() => {});
+          if (!companionMode && $settings.craftProfilingEnabled) {
+            const stats = craftStats(content);
+            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.error("Failed to save:", e);
+      }
+    });
+  }
+
   function handleContentChange(content: string) {
     if (!$currentDoc || (companionMode && $currentDoc.locked)) return;
     const editingDocId = $currentDoc.id;
@@ -525,39 +610,17 @@
     }
 
     if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(async () => {
-      try {
-        const wordCount = content.split(/\s+/).filter(Boolean).length;
-        await api.docSave(editingDocId, undefined, content);
-        if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: wordCount };
-        // Craft profiling + write heartbeat, at most once a minute per doc.
-        // (Drives streaks, heatmaps, patterns, and the craft skill nudge.)
-        // The write heartbeat is always recorded; craft metric snapshots are
-        // opt-in via Settings → Craft analytics recording (default off).
-        const now = Date.now();
-        if (now - lastMetricAt > 60000) {
-          lastMetricAt = now;
-          const docId = editingDocId;
-          api.usageRecord(docId, "write").catch(() => {});
-          if (!companionMode && $settings.craftProfilingEnabled) {
-            const stats = craftStats(content);
-            api.memoryRecordMetric(docId, "filter_words", stats.filterWords).catch(() => {});
-            api.memoryRecordMetric(docId, "dialogue_ratio", stats.dialogue).catch(() => {});
-            api.memoryRecordMetric(docId, "avg_sentence_length", stats.avgSentence).catch(() => {});
-          }
-        }
-      } catch (e) {
-        console.error("Failed to save:", e);
-      }
-    }, 500);
+    saveTimeout = setTimeout(() => queueDocSave(editingDocId, content), 500);
 
     if (flushTimeout) clearTimeout(flushTimeout);
-    flushTimeout = setTimeout(async () => {
-      try {
-        await api.atomicSave(editingDocId, content);
-      } catch (e) {
-        console.error("Failed to flush to disk:", e);
-      }
+    flushTimeout = setTimeout(() => {
+      saveQueue = saveQueue.then(async () => {
+        try {
+          await api.atomicSave(editingDocId, content);
+        } catch (e) {
+          console.error("Failed to flush to disk:", e);
+        }
+      });
     }, 5000);
 
     if (!companionMode && $settings.ghostEnabled && content.length > 20) {
@@ -684,9 +747,11 @@
         createEditor(doc);
       });
       refreshBibleWords(doc);
+      refreshStoryMemory(doc);
       if (!companionMode) loadCraftMetrics(doc.id);
     } else {
       refreshBibleWords(null);
+      refreshStoryMemory(null);
     }
   });
 
@@ -714,6 +779,41 @@
     }
     window.addEventListener("editor-scroll-to-line", handleScrollToLine);
     return () => window.removeEventListener("editor-scroll-to-line", handleScrollToLine);
+  });
+
+  $effect(() => {
+    function handleScrollToText(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (!editorView) return;
+      let pos = typeof detail.spanStart === "number" ? detail.spanStart : -1;
+      if (pos < 0 || pos > editorView.state.doc.length) {
+        pos = editorView.state.doc.toString().indexOf(String(detail.snippet ?? ""));
+      }
+      if (pos < 0) return;
+      editorView.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      editorView.focus();
+    }
+    window.addEventListener("editor-scroll-to-text", handleScrollToText);
+    return () => window.removeEventListener("editor-scroll-to-text", handleScrollToText);
+  });
+
+  $effect(() => {
+    async function handleMemoryUpdated(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      const doc = $currentDoc;
+      if (!doc) return;
+      if (detail.scopeId) {
+        try {
+          const scopeId = await api.bibleScopeId(doc.id);
+          if ($currentDoc?.id !== doc.id || scopeId !== detail.scopeId) return;
+        } catch {
+          return;
+        }
+      }
+      refreshStoryMemory(doc);
+    }
+    window.addEventListener("story-memory-updated", handleMemoryUpdated);
+    return () => window.removeEventListener("story-memory-updated", handleMemoryUpdated);
   });
 
   async function loadCraftMetrics(docId: string) {
@@ -745,8 +845,9 @@
 
   onDestroy(() => {
     if (editorView) editorView.destroy();
-    if (saveTimeout) clearTimeout(saveTimeout);
-    if (ghostDebounce) clearTimeout(ghostDebounce);
+     if (saveTimeout) clearTimeout(saveTimeout);
+     if (flushTimeout) clearTimeout(flushTimeout);
+     if (ghostDebounce) clearTimeout(ghostDebounce);
   });
 </script>
 
@@ -938,6 +1039,9 @@
   {/if}
 
   <WikilinkPreview bind:visible={previewVisible} bind:position={previewPos} bind:docId={previewDocId} bind:docTitle={previewDocTitle} />
+  {#if !companionMode}
+    <StoryMemoryHoverCard bind:visible={storyMemoryVisible} bind:position={storyMemoryPosition} bind:entity={storyMemoryEntity} onJump={jumpToStoryMemoryMention} />
+  {/if}
 </div>
 
 <style>

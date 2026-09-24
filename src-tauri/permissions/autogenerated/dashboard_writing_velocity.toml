@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-writing-velocity"
+description = "Enables the dashboard_writing_velocity command without any pre-configured scope."
+commands.allow = ["dashboard_writing_velocity"]
+
+[[permission]]
+identifier = "deny-dashboard-writing-velocity"
+description = "Denies the dashboard_writing_velocity command without any pre-configured scope."
+commands.deny = ["dashboard_writing_velocity"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bible-get-mentions"
+description = "Enables the bible_get_mentions command without any pre-configured scope."
+commands.allow = ["bible_get_mentions"]
+
+[[permission]]
+identifier = "deny-bible-get-mentions"
+description = "Denies the bible_get_mentions command without any pre-configured scope."
+commands.deny = ["bible_get_mentions"]

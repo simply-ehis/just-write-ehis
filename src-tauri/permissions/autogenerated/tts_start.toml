@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-start"
+description = "Enables the tts_start command without any pre-configured scope."
+commands.allow = ["tts_start"]
+
+[[permission]]
+identifier = "deny-tts-start"
+description = "Denies the tts_start command without any pre-configured scope."
+commands.deny = ["tts_start"]

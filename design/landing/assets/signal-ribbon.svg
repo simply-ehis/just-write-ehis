@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Signal ribbon</title>
+  <desc id="desc">Layered electric ribbons and noisy marks over a near-black field.</desc>
+  <defs>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="2" seed="9"/><feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 .16 0"/></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+  <rect width="1600" height="900" fill="#0b0b0c"/>
+  <g filter="url(#soft)" opacity=".8">
+    <path d="M-100 610C190 110 390 820 670 320S1180 50 1710 360" fill="none" stroke="#e61919" stroke-width="90"/>
+    <path d="M-80 290C300 820 550 70 900 610s430 80 780-250" fill="none" stroke="#4af626" stroke-width="54"/>
+    <path d="M-60 770C240 280 510 690 820 190s590 390 870 30" fill="none" stroke="#168cff" stroke-width="22"/>
+  </g>
+  <g fill="none" stroke="#f5f2e8" stroke-opacity=".7">
+    <path d="M80 130h240M80 148h120M1280 710h220M1320 728h180" stroke-width="4"/>
+    <circle cx="130" cy="138" r="34"/><circle cx="130" cy="138" r="8" fill="#f5f2e8"/>
+    <path d="M1350 120v100M1300 170h100" stroke-width="2"/>
+  </g>
+  <rect width="1600" height="900" filter="url(#grain)" opacity=".6"/>
+  <text x="72" y="820" fill="#f5f2e8" font-family="monospace" font-size="24" letter-spacing="8">SIGNAL / LOCAL / 02</text>
+</svg>

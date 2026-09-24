@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-atomic-save"
+description = "Enables the atomic_save command without any pre-configured scope."
+commands.allow = ["atomic_save"]
+
+[[permission]]
+identifier = "deny-atomic-save"
+description = "Denies the atomic_save command without any pre-configured scope."
+commands.deny = ["atomic_save"]

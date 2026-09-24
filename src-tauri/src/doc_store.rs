@@ -1,9 +1,9 @@
-use rusqlite::params;
+use rusqlite::{params, Transaction};
 use crate::database::Database;
 use crate::models::*;
 use chrono::Utc;
 use uuid::Uuid;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use zerocopy::IntoBytes;
 use tauri::Emitter;
 
@@ -58,7 +58,7 @@ fn compute_disk_path(
             vault.join("inbox").join(format!("{}.md", id))
         }
         _ => {
-            vault.join(workspace).join(format!("{}.md", id))
+            vault.join(sanitize_component(workspace, "misc")).join(format!("{}.md", id))
         }
     }
 }
@@ -77,10 +77,63 @@ fn sanitize_filename(s: &str) -> String {
     if result.len() > 64 {
         result.truncate(64);
     }
-    if result.is_empty() {
+    // "." / ".." are path segments, not names: a title like ".." would
+    // otherwise walk out of the workspace folder.
+    if result.is_empty() || result.chars().all(|c| c == '.') {
         result = "untitled".to_string();
     }
     result
+}
+
+/// One safe path segment for caller-supplied names (workspace folders).
+fn sanitize_component(s: &str, fallback: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'))
+        .collect();
+    let trimmed = cleaned.trim().to_string();
+    if trimmed.is_empty() || trimmed.chars().all(|c| c == '.') {
+        fallback.to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Lexically resolve `.`/`..` without touching the filesystem.
+fn normalize_lexically(path: &std::path::Path) -> std::path::PathBuf {
+    let mut out: Vec<std::path::Component> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if matches!(out.last(), Some(std::path::Component::Normal(_))) {
+                    out.pop();
+                } else if !matches!(
+                    out.last(),
+                    None | Some(std::path::Component::RootDir) | Some(std::path::Component::Prefix(_))
+                ) {
+                    out.push(comp);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out.iter().collect()
+}
+
+/// Resolve a stored doc path inside the vault. Absolute paths, `..`
+/// traversal, and any other escape are refused: a doc write must never
+/// touch a file outside the vault the user chose.
+fn resolve_in_vault(vault: &std::path::Path, stored: &str) -> Result<std::path::PathBuf, String> {
+    let raw = std::path::Path::new(stored);
+    let joined = if raw.is_absolute() { raw.to_path_buf() } else { vault.join(raw) };
+    let normalized = normalize_lexically(&joined);
+    let root = normalize_lexically(vault);
+    if normalized.starts_with(&root) {
+        Ok(normalized)
+    } else {
+        Err(format!("Refusing to touch a path outside the vault: {}", stored))
+    }
 }
 
 /// Write content to disk atomically (temp file + rename).
@@ -144,6 +197,115 @@ fn snippet_around(content: &str, start: i64, end: i64) -> String {
         out = format!("{out}…");
     }
     out
+}
+
+fn normalize_memory_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .flat_map(|c| c.to_lowercase())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn memory_edit_distance(left: &str, right: &str) -> usize {
+    let a: Vec<char> = left.chars().collect();
+    let b: Vec<char> = right.chars().collect();
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            current.push(std::cmp::min(
+                std::cmp::min(current[j] + 1, previous[j + 1] + 1),
+                previous[j] + usize::from(ca != cb),
+            ));
+        }
+        previous = current;
+    }
+    previous[b.len()]
+}
+
+fn memory_kind_matches(candidate_kind: &str, fact_kind: &str) -> bool {
+    let candidate = candidate_kind.to_lowercase();
+    let fact = fact_kind.to_lowercase();
+    if candidate == fact {
+        return true;
+    }
+    if candidate == "character" {
+        return fact.contains("character") || fact.contains("person");
+    }
+    if candidate == "location" {
+        return fact.contains("location") || fact.contains("place") || fact.contains("setting");
+    }
+    if candidate == "object" {
+        return fact.contains("object") || fact.contains("item") || fact.contains("setting");
+    }
+    false
+}
+
+fn snippet_position(content: &str, snippet: &str) -> Option<i64> {
+    content.find(snippet).and_then(|index| content.get(..index)).map(|prefix| prefix.encode_utf16().count() as i64)
+}
+
+fn bible_mention_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BibleMention> {
+    let content: String = row.get(9)?;
+    let snippet: String = row.get(6)?;
+    Ok(BibleMention {
+        id: row.get(0)?,
+        bible_doc_id: row.get(1)?,
+        fact_key: row.get(2)?,
+        kind: row.get(3)?,
+        doc_id: row.get(4)?,
+        doc_title: row.get(5)?,
+        snippet,
+        attribute_key: row.get(7)?,
+        attribute_value: row.get(8)?,
+        span_start: snippet_position(&content, &row.get::<_, String>(6)?),
+        created_at: row.get(10)?,
+    })
+}
+
+fn bible_suggestion_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BibleSuggestion> {
+    let content: String = row.get(11)?;
+    let snippet: String = row.get(7)?;
+    Ok(BibleSuggestion {
+        id: row.get(0)?,
+        bible_doc_id: row.get(1)?,
+        source_doc_id: row.get(2)?,
+        doc_title: row.get(3)?,
+        kind: row.get(4)?,
+        key: row.get(5)?,
+        value: row.get(6)?,
+        snippet,
+        attribute_key: row.get(8)?,
+        attribute_value: row.get(9)?,
+        span_start: snippet_position(&content, &row.get::<_, String>(7)?),
+        status: row.get(10)?,
+        created_at: row.get(12)?,
+    })
+}
+
+fn mention_signature(mention: &BibleMention) -> String {
+    mention_signature_from_parts(
+        &mention.fact_key,
+        &mention.kind,
+        &mention.snippet,
+        mention.attribute_key.as_deref(),
+        mention.attribute_value.as_deref(),
+    )
+}
+
+fn mention_signature_from_parts(fact_key: &str, kind: &str, snippet: &str, attribute_key: Option<&str>, attribute_value: Option<&str>) -> String {
+    format!(
+        "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
+        normalize_memory_key(fact_key),
+        kind.to_lowercase(),
+        snippet.trim(),
+        attribute_key.unwrap_or(""),
+        attribute_value.unwrap_or("")
+    )
 }
 
 const EMBEDDING_DIM: usize = 256;
@@ -308,6 +470,11 @@ impl Database {
         {
             let conn = self.conn.lock().map_err(|e| e.to_string())?;
             let now = Utc::now().to_rfc3339();
+            let old_parent = if req.parent_id.is_some() {
+                Some(conn.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get::<_, Option<String>>(0)).map_err(|e| e.to_string())?)
+            } else {
+                None
+            };
 
             if let Some(title) = &req.title {
                 conn.execute(
@@ -335,6 +502,10 @@ impl Database {
                 ).map_err(|e| e.to_string())?;
             }
             if let Some(parent_id) = &req.parent_id {
+                if old_parent.as_ref() != Some(parent_id) {
+                    conn.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                    conn.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                }
                 conn.execute(
                     "UPDATE docs SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
                     params![parent_id, now, req.id],
@@ -359,8 +530,7 @@ impl Database {
             }
 
             let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-            let disk_path = std::path::PathBuf::from(&doc.path);
-            let full_path = if disk_path.is_absolute() { disk_path } else { vault.join(&doc.path) };
+            let full_path = resolve_in_vault(&vault, &doc.path)?;
             drop(vault);
             // Files are the source of truth (ARCHITECTURE.md): a failed
             // disk write must surface, never pass as a successful save.
@@ -404,9 +574,9 @@ impl Database {
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
         for del_id in &ids {
             if let Ok(doc) = self.get_doc(del_id) {
-                let p = std::path::PathBuf::from(&doc.path);
-                let full = if p.is_absolute() { p } else { vault.join(&p) };
-                let _ = std::fs::remove_file(&full);
+                if let Ok(full) = resolve_in_vault(&vault, &doc.path) {
+                    let _ = std::fs::remove_file(&full);
+                }
             }
         }
 
@@ -611,10 +781,22 @@ impl Database {
     }
 
     pub fn move_doc(&self, req: MoveDocRequest) -> Result<Doc, String> {
+        // Validate the destination before mutating the row: a path that
+        // escapes the vault must fail loudly, not rewrite the index.
+        if let Some(path) = &req.new_path {
+            let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
+            resolve_in_vault(&vault, path)?;
+        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
+        let old_parent: Option<String> = conn.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
 
         if let Some(parent_id) = &req.new_parent_id {
+            if old_parent.as_deref() != Some(parent_id.as_str()) {
+                conn.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                conn.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+            }
             conn.execute(
                 "UPDATE docs SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
                 params![parent_id, now, req.id],
@@ -627,6 +809,7 @@ impl Database {
             ).map_err(|e| e.to_string())?;
         }
 
+        drop(conn);
         self.get_doc(&req.id)
     }
 
@@ -1026,7 +1209,10 @@ impl Database {
         for (kind, key) in &facts {
             let key = key.trim();
             if key.len() < 2 { continue; }
-            let pattern = format!(r"(?i)(?:^|\W)({})(?=\W|$)", regex::escape(key));
+            // \b boundaries (not lookahead — the regex crate rejects it,
+            // which once failed this whole pass silently; not consumed
+            // separators either, so repeated names still match).
+            let pattern = format!(r"(?i)\b({})\b", regex::escape(key));
             let re = match regex::Regex::new(&pattern) {
                 Ok(re) => re,
                 Err(_) => continue,
@@ -1376,42 +1562,430 @@ impl Database {
         })
     }
 
+    pub fn bible_scope_id(&self, doc_id: &str) -> Result<String, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut current = doc_id.to_string();
+        let mut seen = HashSet::new();
+        loop {
+            let row: Option<(Option<String>, String)> = conn.query_row(
+                "SELECT parent_id, kind FROM docs WHERE id = ?1",
+                params![&current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).ok();
+            let Some((parent_id, kind)) = row else { return Err("Document is missing".into()) };
+            if !seen.insert(current.clone()) { return Err("Document hierarchy contains a cycle".into()); }
+            if kind == "project" { return Ok(current); }
+            let Some(parent_id) = parent_id else { return Ok(current); };
+            if parent_id == current { return Err("Document hierarchy contains a cycle".into()); }
+            current = parent_id;
+        }
+    }
+
+    fn bible_source_allowed_tx(tx: &Transaction<'_>, doc_id: &str) -> Result<bool, String> {
+        let mut current = doc_id.to_string();
+        let mut seen = HashSet::new();
+        loop {
+            let row: Option<(Option<String>, i64)> = tx.query_row(
+                "SELECT parent_id, locked FROM docs WHERE id = ?1",
+                params![&current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).ok();
+            let Some((parent_id, locked)) = row else { return Ok(false) };
+            if locked != 0 || !seen.insert(current.clone()) { return Ok(false); }
+            let Some(parent_id) = parent_id else { return Ok(true) };
+            if parent_id == current { return Ok(false) };
+            current = parent_id;
+        }
+    }
+
+    fn bible_scope_id_tx(tx: &Transaction<'_>, doc_id: &str) -> Result<String, String> {
+        let mut current = doc_id.to_string();
+        let mut seen = HashSet::new();
+        loop {
+            let (parent_id, kind): (Option<String>, String) = tx.query_row(
+                "SELECT parent_id, kind FROM docs WHERE id = ?1",
+                params![&current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).map_err(|e| e.to_string())?;
+            if !seen.insert(current.clone()) { return Err("Document hierarchy contains a cycle".into()); }
+            if kind == "project" { return Ok(current); }
+            let Some(parent_id) = parent_id else { return Ok(current); };
+            if parent_id == current { return Err("Document hierarchy contains a cycle".into()); }
+            current = parent_id;
+        }
+    }
+
+    pub fn bible_source_allowed(&self, doc_id: &str) -> Result<bool, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut current = doc_id.to_string();
+        let mut seen = HashSet::new();
+        loop {
+            let row: Option<(Option<String>, i64)> = conn.query_row(
+                "SELECT parent_id, locked FROM docs WHERE id = ?1",
+                params![&current],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            ).ok();
+            let Some((parent_id, locked)) = row else { return Ok(false) };
+            if locked != 0 || !seen.insert(current.clone()) { return Ok(false); }
+            let Some(parent_id) = parent_id else { return Ok(true) };
+            if parent_id == current { return Ok(false); }
+            current = parent_id;
+        }
+    }
     pub fn bible_get_facts(&self, doc_id: &str) -> Result<Vec<BibleFact>, String> {
+        if !self.bible_source_allowed(doc_id)? {
+            return Ok(Vec::new());
+        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, doc_id, kind, key, value FROM bible_facts WHERE doc_id = ?1 ORDER BY kind, key"
         ).map_err(|e| e.to_string())?;
-
         let facts = stmt.query_map(params![doc_id], |row| {
             Ok(BibleFact {
-                id: row.get(0)?,
-                doc_id: row.get(1)?,
-                kind: row.get(2)?,
-                key: row.get(3)?,
-                value: row.get(4)?,
+                id: row.get(0)?, doc_id: row.get(1)?, kind: row.get(2)?,
+                key: row.get(3)?, value: row.get(4)?,
             })
-        }).map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect();
-
+        }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
         Ok(facts)
     }
 
     pub fn bible_upsert_fact(&self, doc_id: &str, kind: &str, key: &str, value: &str) -> Result<BibleFact, String> {
+        if self.bible_scope_id(doc_id)? != doc_id || !self.bible_source_allowed(doc_id)? {
+            return Err("Story Bible facts require an unlocked project scope".into());
+        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let id = uuid_v7();
+        let existing: Option<String> = conn.query_row(
+            "SELECT id FROM bible_facts WHERE doc_id = ?1 AND key = ?2 LIMIT 1",
+            params![doc_id, key],
+            |row| row.get(0),
+        ).ok();
+        let id = existing.unwrap_or_else(uuid_v7);
         conn.execute(
-            "INSERT OR REPLACE INTO bible_facts (id, doc_id, kind, key, value) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO bible_facts (id, doc_id, kind, key, value) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(doc_id, key) DO UPDATE SET kind = excluded.kind, value = excluded.value",
             params![id, doc_id, kind, key, value],
         ).map_err(|e| e.to_string())?;
         Ok(BibleFact { id, doc_id: doc_id.to_string(), kind: kind.to_string(), key: key.to_string(), value: value.to_string() })
     }
 
     pub fn bible_delete_fact(&self, fact_id: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM bible_facts WHERE id = ?1", params![fact_id])
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let fact: Option<(String, String)> = tx.query_row(
+            "SELECT doc_id, key FROM bible_facts WHERE id = ?1",
+            params![fact_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).ok();
+        if let Some((doc_id, key)) = fact {
+            if !Self::bible_source_allowed_tx(&tx, &doc_id)? {
+                return Err("Locked documents cannot modify Story Memory evidence".into());
+            }
+            let mut stmt = tx.prepare("SELECT DISTINCT source_id FROM (SELECT doc_id AS source_id FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2 UNION SELECT source_doc_id AS source_id FROM bible_suggestions WHERE bible_doc_id = ?1 AND key = ?2)")
+                .map_err(|e| e.to_string())?;
+            let sources: Vec<String> = stmt.query_map(params![&doc_id, &key], |row| row.get(0))
+                .map_err(|e| e.to_string())?.filter_map(|row| row.ok()).collect();
+            drop(stmt);
+            if sources.iter().any(|source| !Self::bible_source_allowed_tx(&tx, source).unwrap_or(false)) {
+                return Err("Locked documents cannot modify Story Memory evidence".into());
+            }
+            tx.execute("DELETE FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2", params![doc_id, key])
+                .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM bible_suggestions WHERE bible_doc_id = ?1 AND key = ?2", params![doc_id, key])
+                .map_err(|e| e.to_string())?;
+        }
+        tx.execute("DELETE FROM bible_facts WHERE id = ?1", params![fact_id])
             .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    pub fn bible_get_mentions(&self, bible_doc_id: &str) -> Result<Vec<BibleMention>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.bible_doc_id, m.fact_key, m.kind, m.doc_id, COALESCE(d.title, ''), m.snippet, m.attribute_key, m.attribute_value, COALESCE(d.content, ''), m.created_at
+             FROM bible_mentions m
+             LEFT JOIN docs d ON d.id = m.doc_id
+             LEFT JOIN docs b ON b.id = m.bible_doc_id
+             WHERE m.bible_doc_id = ?1 AND COALESCE(d.locked, 0) = 0 AND COALESCE(b.locked, 0) = 0 ORDER BY d.title, m.created_at"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![bible_doc_id], bible_mention_from_row)
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<BibleMention> = rows.filter_map(|r| r.ok()).collect();
+        drop(stmt);
+        drop(conn);
+        Ok(rows.into_iter().filter(|mention| {
+            self.bible_source_allowed(bible_doc_id).unwrap_or(false)
+                && self.bible_scope_id(&mention.doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
+                && self.bible_source_allowed(&mention.doc_id).unwrap_or(false)
+        }).collect())
+    }
+
+    pub fn bible_upsert_mention(&self, bible_doc_id: &str, doc_id: &str, fact_key: &str, kind: &str, snippet: &str, attribute_key: Option<&str>, attribute_value: Option<&str>) -> Result<BibleMention, String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let actual_scope = Self::bible_scope_id_tx(&tx, doc_id)?;
+        if actual_scope != bible_doc_id {
+            return Err("Mention source does not belong to this Story Bible".into());
+        }
+        if !Self::bible_source_allowed_tx(&tx, doc_id)? || !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
+            return Err("Locked documents cannot receive Story Memory evidence".into());
+        }
+        let existing: Option<String> = tx.query_row(
+            "SELECT id FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2 AND kind = ?3 AND doc_id = ?4 AND snippet = ?5 AND attribute_key IS ?6 AND attribute_value IS ?7 LIMIT 1",
+            params![bible_doc_id, fact_key, kind, doc_id, snippet, attribute_key, attribute_value],
+            |row| row.get(0),
+        ).ok();
+        let id = existing.clone().unwrap_or_else(uuid_v7);
+        if existing.is_none() {
+            tx.execute(
+                "INSERT INTO bible_mentions (id, bible_doc_id, fact_key, kind, doc_id, snippet, attribute_key, attribute_value, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![id, bible_doc_id, fact_key, kind, doc_id, snippet, attribute_key, attribute_value, now_iso()],
+            ).map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        drop(conn);
+        self.bible_get_mentions(bible_doc_id)?.into_iter().find(|m| m.id == id)
+            .ok_or_else(|| "Mention was not readable after write".to_string())
+    }
+
+    pub fn bible_delete_mentions(&self, bible_doc_id: &str, doc_id: Option<&str>, fact_key: Option<&str>) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        if !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
+            return Err("Locked documents cannot modify Story Memory evidence".into());
+        }
+        if let Some(source_doc_id) = doc_id {
+            if Self::bible_scope_id_tx(&tx, source_doc_id)? != bible_doc_id || !Self::bible_source_allowed_tx(&tx, source_doc_id)? {
+                return Err("Mention source does not belong to an unlocked Story Bible".into());
+            }
+        } else {
+            let mut stmt = tx.prepare("SELECT DISTINCT doc_id FROM bible_mentions WHERE bible_doc_id = ?1")
+                .map_err(|e| e.to_string())?;
+            let sources: Vec<String> = stmt.query_map(params![bible_doc_id], |row| row.get(0))
+                .map_err(|e| e.to_string())?.filter_map(|row| row.ok()).collect();
+            drop(stmt);
+            if sources.iter().any(|source| !Self::bible_source_allowed_tx(&tx, source).unwrap_or(false)) {
+                return Err("Locked documents cannot modify Story Memory evidence".into());
+            }
+        }
+        tx.execute(
+            "DELETE FROM bible_mentions WHERE bible_doc_id = ?1 AND (?2 IS NULL OR doc_id = ?2) AND (?3 IS NULL OR fact_key = ?3)",
+            params![bible_doc_id, doc_id, fact_key],
+        ).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn bible_get_suggestions(&self, bible_doc_id: &str) -> Result<Vec<BibleSuggestion>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.bible_doc_id, s.source_doc_id, COALESCE(d.title, ''), s.kind, s.key, s.value, s.snippet, s.attribute_key, s.attribute_value, s.status, COALESCE(d.content, ''), s.created_at
+             FROM bible_suggestions s
+             LEFT JOIN docs d ON d.id = s.source_doc_id
+             LEFT JOIN docs b ON b.id = s.bible_doc_id
+             WHERE s.bible_doc_id = ?1 AND s.status = 'pending' AND COALESCE(d.locked, 0) = 0 AND COALESCE(b.locked, 0) = 0 ORDER BY s.created_at"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![bible_doc_id], bible_suggestion_from_row)
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<BibleSuggestion> = rows.filter_map(|r| r.ok()).collect();
+        drop(stmt);
+        drop(conn);
+        Ok(rows.into_iter().filter(|suggestion| {
+            self.bible_source_allowed(bible_doc_id).unwrap_or(false)
+                && self.bible_scope_id(&suggestion.source_doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
+                && self.bible_source_allowed(&suggestion.source_doc_id).unwrap_or(false)
+        }).collect())
+    }
+
+    pub fn bible_reject_suggestion(&self, bible_doc_id: &str, suggestion_id: &str) -> Result<(), String> {
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        if !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
+            return Err("Locked documents cannot modify Story Memory evidence".into());
+        }
+        let source_doc_id: String = tx.query_row(
+            "SELECT source_doc_id FROM bible_suggestions WHERE bible_doc_id = ?1 AND id = ?2 AND status = 'pending'",
+            params![bible_doc_id, suggestion_id],
+            |row| row.get(0),
+        ).map_err(|_| "Suggestion not found".to_string())?;
+        if Self::bible_scope_id_tx(&tx, &source_doc_id)? != bible_doc_id || !Self::bible_source_allowed_tx(&tx, &source_doc_id)? {
+            return Err("Suggestion source does not belong to an unlocked Story Bible".into());
+        }
+        tx.execute("UPDATE bible_suggestions SET status = 'rejected' WHERE bible_doc_id = ?1 AND id = ?2 AND status = 'pending'", params![bible_doc_id, suggestion_id])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn bible_confirm_suggestion(&self, bible_doc_id: &str, suggestion_id: &str) -> Result<BibleFact, String> {
+        if !self.bible_source_allowed(bible_doc_id)? {
+            return Err("Locked documents cannot confirm Story Memory evidence".into());
+        }
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let suggestion = {
+            let mut stmt = tx.prepare(
+                "SELECT s.id, s.bible_doc_id, s.source_doc_id, COALESCE(d.title, ''), s.kind, s.key, s.value, s.snippet, s.attribute_key, s.attribute_value, s.status, COALESCE(d.content, ''), s.created_at
+                 FROM bible_suggestions s
+                 LEFT JOIN docs d ON d.id = s.source_doc_id
+                 WHERE s.bible_doc_id = ?1 AND s.id = ?2 AND s.status = 'pending'",
+            ).map_err(|e| e.to_string())?;
+            stmt.query_row(params![bible_doc_id, suggestion_id], bible_suggestion_from_row)
+                .map_err(|_| "Suggestion not found".to_string())?
+        };
+        let source_scope = Self::bible_scope_id_tx(&tx, &suggestion.source_doc_id)?;
+        let source_content: Option<String> = tx.query_row("SELECT content FROM docs WHERE id = ?1", params![&suggestion.source_doc_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if source_scope != bible_doc_id || !Self::bible_source_allowed_tx(&tx, &suggestion.source_doc_id)? {
+            return Err("Suggestion source is no longer in this Story Bible".into());
+        }
+        if !source_content.unwrap_or_default().contains(&suggestion.snippet) {
+            return Err("Suggestion source changed before confirmation".into());
+        }
+        let fact_kind = match suggestion.kind.as_str() {
+            "character" => "world_characters",
+            "location" | "object" => "world_settings",
+            other => other,
+        };
+        let existing_fact_id: Option<String> = tx.query_row(
+            "SELECT id FROM bible_facts WHERE doc_id = ?1 AND key = ?2 LIMIT 1",
+            params![bible_doc_id, &suggestion.key],
+            |row| row.get(0),
+        ).ok();
+        let fact_id = existing_fact_id.clone().unwrap_or_else(uuid_v7);
+        tx.execute(
+            "INSERT INTO bible_facts (id, doc_id, kind, key, value) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(doc_id, key) DO UPDATE SET kind = excluded.kind, value = excluded.value",
+            params![fact_id, bible_doc_id, fact_kind, &suggestion.key, &suggestion.value],
+        ).map_err(|e| e.to_string())?;
+        let mention_id: Option<String> = tx.query_row(
+            "SELECT id FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2 AND kind = ?3 AND doc_id = ?4 AND snippet = ?5 AND attribute_key IS ?6 AND attribute_value IS ?7 LIMIT 1",
+            params![bible_doc_id, &suggestion.key, &suggestion.kind, &suggestion.source_doc_id, &suggestion.snippet, suggestion.attribute_key, suggestion.attribute_value],
+            |row| row.get(0),
+        ).ok();
+        if mention_id.is_none() {
+            tx.execute(
+                "INSERT INTO bible_mentions (id, bible_doc_id, fact_key, kind, doc_id, snippet, attribute_key, attribute_value, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![uuid_v7(), bible_doc_id, &suggestion.key, &suggestion.kind, &suggestion.source_doc_id, &suggestion.snippet, suggestion.attribute_key, suggestion.attribute_value, now_iso()],
+            ).map_err(|e| e.to_string())?;
+        }
+        tx.execute("DELETE FROM bible_suggestions WHERE bible_doc_id = ?1 AND id = ?2", params![bible_doc_id, suggestion_id])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(BibleFact { id: fact_id, doc_id: bible_doc_id.to_string(), kind: fact_kind.to_string(), key: suggestion.key, value: suggestion.value })
+    }
+
+    pub fn bible_replace_scene_memory(&self, bible_doc_id: &str, doc_id: &str, content: &str, expected_content: Option<&str>, candidates: &[BibleMentionCandidate]) -> Result<BibleMemoryUpdate, String> {
+        let _ = content;
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        if let Some(expected) = expected_content {
+            let current: Option<String> = tx.query_row("SELECT content FROM docs WHERE id = ?1", params![doc_id], |row| row.get(0))
+                .map_err(|e| e.to_string())?;
+            if current.unwrap_or_default() != expected {
+                return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+            }
+        }
+        let actual_scope = Self::bible_scope_id_tx(&tx, doc_id)?;
+        if actual_scope != bible_doc_id || !Self::bible_source_allowed_tx(&tx, bible_doc_id)? || !Self::bible_source_allowed_tx(&tx, doc_id)? {
+            return Err("Mention source does not belong to an unlocked Story Bible".into());
+        }
+        if !content.trim().is_empty() && candidates.is_empty() {
+            return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+        }
+        let facts: Vec<BibleFact> = {
+            let mut stmt = tx.prepare("SELECT id, doc_id, kind, key, value FROM bible_facts WHERE doc_id = ?1 ORDER BY kind, key")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![bible_doc_id], |row| Ok(BibleFact {
+                id: row.get(0)?, doc_id: row.get(1)?, kind: row.get(2)?, key: row.get(3)?, value: row.get(4)?,
+            })).map_err(|e| e.to_string())?;
+            rows.filter_map(|row| row.ok()).collect()
+        };
+        let existing: Vec<BibleMention> = {
+            let mut stmt = tx.prepare(
+                "SELECT m.id, m.bible_doc_id, m.fact_key, m.kind, m.doc_id, COALESCE(d.title, ''), m.snippet, m.attribute_key, m.attribute_value, COALESCE(d.content, ''), m.created_at
+                 FROM bible_mentions m LEFT JOIN docs d ON d.id = m.doc_id
+                 WHERE m.bible_doc_id = ?1 AND m.doc_id = ?2 ORDER BY m.created_at",
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map(params![bible_doc_id, doc_id], bible_mention_from_row).map_err(|e| e.to_string())?;
+            rows.filter_map(|row| row.ok()).collect()
+        };
+        let existing_signatures = existing.iter().map(mention_signature).collect::<HashSet<_>>();
+        let mut desired = HashSet::new();
+        let mut matched = 0u64;
+        let mut suggested = 0u64;
+        tx.execute("DELETE FROM bible_suggestions WHERE bible_doc_id = ?1 AND source_doc_id = ?2 AND status = 'pending'", params![bible_doc_id, doc_id])
+            .map_err(|e| e.to_string())?;
+        for candidate in candidates {
+            let key = candidate.key.trim();
+            if key.is_empty() { continue; }
+            let normalized = normalize_memory_key(key);
+            let fact = facts.iter().find(|fact| memory_kind_matches(&candidate.kind, &fact.kind) && normalize_memory_key(&fact.key) == normalized)
+                .or_else(|| facts.iter().find(|fact| {
+                    if !memory_kind_matches(&candidate.kind, &fact.kind) || normalized.chars().count() < 4 { return false; }
+                    let name = normalize_memory_key(&fact.key);
+                    let prefix = normalized.chars().zip(name.chars()).take_while(|(left, right)| left == right).count();
+                    prefix > 0 && memory_edit_distance(&normalized, &name) <= if name.chars().count() >= 8 { 2 } else { 1 }
+                }));
+            if let Some(fact) = fact {
+                let signature = mention_signature_from_parts(&fact.key, &candidate.kind, &candidate.snippet, candidate.attribute_key.as_deref(), candidate.attribute_value.as_deref());
+                desired.insert(signature.clone());
+                if !existing_signatures.contains(&signature) {
+                    tx.execute(
+                        "INSERT INTO bible_mentions (id, bible_doc_id, fact_key, kind, doc_id, snippet, attribute_key, attribute_value, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![uuid_v7(), bible_doc_id, &fact.key, &candidate.kind, doc_id, &candidate.snippet, candidate.attribute_key, candidate.attribute_value, now_iso()],
+                    ).map_err(|e| e.to_string())?;
+                }
+                matched += 1;
+            } else {
+                let value = candidate.attribute_value.clone().unwrap_or_default();
+                let existing_suggestion: Option<String> = tx.query_row(
+                    "SELECT id FROM bible_suggestions WHERE bible_doc_id = ?1 AND source_doc_id = ?2 AND kind = ?3 AND key = ?4 AND snippet = ?5 AND attribute_key IS ?6 AND attribute_value IS ?7 LIMIT 1",
+                    params![bible_doc_id, doc_id, &candidate.kind, key, &candidate.snippet, candidate.attribute_key, candidate.attribute_value],
+                    |row| row.get(0),
+                ).ok();
+                let rejected = tx.query_row(
+                    "SELECT 1 FROM bible_suggestions WHERE bible_doc_id = ?1 AND source_doc_id = ?2 AND kind = ?3 AND key = ?4 AND status = 'rejected' LIMIT 1",
+                    params![bible_doc_id, doc_id, &candidate.kind, key],
+                    |row| row.get::<_, i64>(0),
+                ).is_ok();
+                if existing_suggestion.is_none() && !rejected {
+                    tx.execute(
+                        "INSERT INTO bible_suggestions (id, bible_doc_id, source_doc_id, kind, key, value, snippet, attribute_key, attribute_value, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        params![uuid_v7(), bible_doc_id, doc_id, &candidate.kind, key, value, &candidate.snippet, candidate.attribute_key, candidate.attribute_value, now_iso()],
+                    ).map_err(|e| e.to_string())?;
+                    suggested += 1;
+                }
+            }
+        }
+        for mention in existing {
+            if !desired.contains(&mention_signature(&mention)) {
+                tx.execute("DELETE FROM bible_mentions WHERE id = ?1", params![mention.id]).map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(BibleMemoryUpdate { skipped: false, retryable: false, matched, suggested })
+    }
+
+    pub fn bible_descendant_docs(&self, project_id: &str) -> Result<Vec<Doc>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "WITH RECURSIVE descendants(id) AS (
+                SELECT id FROM docs WHERE id = ?1
+                 UNION
+                 SELECT d.id FROM docs d JOIN descendants p ON d.parent_id = p.id
+             )
+             SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked
+             FROM docs d JOIN descendants x ON d.id = x.id ORDER BY d.created_at"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map(params![project_id], |row| Ok(Doc {
+            id: row.get(0)?, workspace: row.get(1)?, kind: row.get(2)?, title: row.get(3)?, path: row.get(4)?,
+            parent_id: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)?, content: row.get(8)?,
+            word_count: row.get(9)?, reading_position: row.get(10)?, status: row.get(11)?, frontmatter_json: row.get(12)?,
+            activity_score: row.get(13)?, embedding_ref: row.get(14)?, pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+            goal_words: row.get(16)?, deadline: row.get(17)?, locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+        })).map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     pub fn get_beat_board(&self, project_id: &str) -> Result<BeatBoard, String> {
@@ -1894,8 +2468,7 @@ impl Database {
         // Write restored content to disk
         drop(conn);
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let disk_path = std::path::PathBuf::from(&doc.path);
-        let full_path = if disk_path.is_absolute() { disk_path } else { vault.join(&doc.path) };
+        let full_path = resolve_in_vault(&vault, &doc.path)?;
         drop(vault);
         let _ = write_to_disk(&full_path, &doc.content);
 
@@ -2552,8 +3125,7 @@ impl Database {
         }
 
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let disk_path = std::path::PathBuf::from(&doc.path);
-        let full_path = if disk_path.is_absolute() { disk_path } else { vault.join(&doc.path) };
+        let full_path = resolve_in_vault(&vault, &doc.path)?;
         drop(vault);
 
         write_to_disk(&full_path, body)?;
@@ -3081,3 +3653,281 @@ trait Pipe {
 }
 
 impl<T> Pipe for Vec<T> {}
+
+#[cfg(test)]
+mod entity_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn test_db(name: &str) -> Database {
+        // sqlite-vec is registered by run() in prod; tests register it here.
+        unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+        let vault = std::env::temp_dir().join(format!("jwe-ent-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&vault).unwrap();
+        let db = Database::new(Connection::open_in_memory().unwrap(), vault);
+        db.initialize().unwrap();
+        db
+    }
+
+    fn mk_doc(db: &Database, title: &str) -> String {
+        db.create_doc(CreateDocRequest {
+            workspace: "novel".into(),
+            kind: "scene".into(),
+            title: title.into(),
+            parent_id: None,
+            content: Some(String::new()),
+            frontmatter_json: None,
+        })
+        .unwrap()
+        .id
+    }
+
+    fn set_content(db: &Database, id: &str, content: &str) {
+        db.save_doc(SaveDocRequest {
+            id: id.into(),
+            title: None,
+            content: Some(content.into()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn capitalized_runs_indexed_with_valid_spans() {
+        let db = test_db("runs");
+        let id = mk_doc(&db, "Ch1");
+        let text = "Jon Snow walked with Arya Stark. The King watched.";
+        set_content(&db, &id, text);
+        let list = db.entity_list().unwrap();
+        let norms: Vec<&str> = list.iter().map(|e| e.entity_norm.as_str()).collect();
+        assert!(norms.contains(&"jon snow"), "{norms:?}");
+        assert!(norms.contains(&"arya stark"), "{norms:?}");
+        assert!(!norms.iter().any(|n| n.starts_with("the king")), "{norms:?}");
+        let hits = db.entity_occurrences("jon snow").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&text[hits[0].span_start as usize..hits[0].span_end as usize], "Jon Snow");
+    }
+
+    #[test]
+    fn gazetteer_wins_kind_and_spans() {
+        let db = test_db("gaz");
+        let id = mk_doc(&db, "Ch1");
+        db.bible_upsert_fact(&id, "world_characters", "Elena", "protagonist").unwrap();
+        set_content(&db, &id, "Elena met Jon Snow at Grey Harbor.");
+        let list = db.entity_list().unwrap();
+        let elena = list.iter().find(|e| e.entity_norm == "elena").unwrap();
+        assert_eq!(elena.kind, "person");
+        assert_eq!(elena.display, "Elena");
+    }
+
+    #[test]
+    fn implicit_links_survive_other_wikilinks() {
+        // Regression: the old whole-doc `!wiki_re.is_match` guard dropped
+        // EVERY implicit edge when ANY [[link]] existed in the doc.
+        let db = test_db("impl");
+        let _harbor = mk_doc(&db, "Grey Harbor");
+        let id = mk_doc(&db, "Ch1");
+        set_content(&db, &id, "See [[Jon Snow]] for details. They sailed from Grey Harbor.");
+        let implicit = db.get_implicit_links(&id).unwrap();
+        assert!(
+            implicit.iter().any(|l| l.target_id == _harbor),
+            "bare 'Grey Harbor' must link despite [[Jon Snow]]: {implicit:?}"
+        );
+    }
+
+    #[test]
+    fn backfill_indexes_older_docs() {
+        let db = test_db("backfill");
+        let id = mk_doc(&db, "Old");
+        // Bypass save_doc's hook with a direct content write, simulating a
+        // pre-index doc, then backfill.
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("UPDATE docs SET content = ?1 WHERE id = ?2", params!["Jon Snow rides.", id])
+                .unwrap();
+        }
+        assert!(db.entity_list().unwrap().is_empty());
+        assert_eq!(db.entities_backfill().unwrap(), 1);
+        assert!(db.entity_list().unwrap().iter().any(|e| e.entity_norm == "jon snow"));
+    }
+
+    #[test]
+    fn snippets_never_split_chars() {
+        let db = test_db("snip");
+        let id = mk_doc(&db, "Ch1");
+        // Multibyte em-dashes hug the snippet window edges.
+        let text = format!("{}Jon Snow{}", "—".repeat(58), "—".repeat(58));
+        set_content(&db, &id, &text);
+        let hits = db.entity_occurrences("jon snow").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("Jon Snow"));
+    }
+
+    #[test]
+    fn memory_requires_confirmation_and_recomputes_only_the_changed_scene() {
+        let db = test_db("memory-delta");
+        let project = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "project".into(), title: "Book".into(),
+            parent_id: None, content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        let scene_one = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "scene".into(), title: "One".into(),
+            parent_id: Some(project.clone()), content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        let scene_two = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "scene".into(), title: "Two".into(),
+            parent_id: Some(project.clone()), content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        db.bible_upsert_fact(&project, "world_characters", "Elena", "protagonist").unwrap();
+
+        let first_text = "Elena wore a blue coat. Mara waited by the gate.";
+        let first = db.bible_replace_scene_memory(&project, &scene_one, first_text, None, &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a blue coat.".into(), attribute_key: Some("coat".into()), attribute_value: Some("blue".into()) },
+            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara waited by the gate.".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        assert_eq!(first.matched, 1);
+        assert_eq!(first.suggested, 1);
+        assert_eq!(db.bible_get_facts(&project).unwrap().len(), 1, "unmatched names must stay suggestions");
+        assert_eq!(db.bible_get_mentions(&project).unwrap().len(), 1);
+
+        let second_text = "Elena wore a red coat at dawn.";
+        db.bible_replace_scene_memory(&project, &scene_two, second_text, None, &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a red coat at dawn.".into(), attribute_key: Some("coat".into()), attribute_value: Some("red".into()) },
+        ]).unwrap();
+        let mentions = db.bible_get_mentions(&project).unwrap();
+        assert_eq!(mentions.len(), 2);
+        let values = mentions.iter().filter(|m| m.doc_id == scene_two).filter_map(|m| m.attribute_value.clone()).collect::<Vec<_>>();
+        assert_eq!(values, vec!["red".to_string()]);
+
+        let updated_text = "Elena waited beneath the arch.";
+        db.bible_replace_scene_memory(&project, &scene_two, updated_text, None, &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena waited beneath the arch.".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        let mentions = db.bible_get_mentions(&project).unwrap();
+        assert_eq!(mentions.iter().filter(|m| m.doc_id == scene_one).count(), 1);
+        assert_eq!(mentions.iter().filter(|m| m.doc_id == scene_two).count(), 1);
+        assert_eq!(db.bible_get_suggestions(&project).unwrap().len(), 1);
+        let suggestion = db.bible_get_suggestions(&project).unwrap().into_iter().find(|s| s.key == "Mara").unwrap();
+        db.bible_reject_suggestion(&project, &suggestion.id).unwrap();
+        db.bible_replace_scene_memory(&project, &scene_one, "Mara waited by the river.", None, &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a blue coat.".into(), attribute_key: Some("coat".into()), attribute_value: Some("blue".into()) },
+            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara waited by the river.".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        assert!(db.bible_get_suggestions(&project).unwrap().is_empty(), "rejected suggestions must stay rejected");
+        let scene_three = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "scene".into(), title: "Three".into(),
+            parent_id: Some(project.clone()), content: Some("Elena waited.".into()), frontmatter_json: None,
+        }).unwrap().id;
+        db.bible_replace_scene_memory(&project, &scene_three, "Elena waited.", None, &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena waited.".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        assert_eq!(db.bible_get_mentions(&project).unwrap().iter().filter(|m| m.doc_id == scene_three).count(), 1);
+        db.save_doc(SaveDocRequest { id: scene_three.clone(), title: None, content: Some("Mara arrived.".into()), status: None, frontmatter_json: None, parent_id: None }).unwrap();
+        db.bible_replace_scene_memory(&project, &scene_three, "Mara arrived.", None, &[
+            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara arrived.".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        let suggestion = db.bible_get_suggestions(&project).unwrap().into_iter().find(|s| s.key == "Mara").unwrap();
+        let fact = db.bible_confirm_suggestion(&project, &suggestion.id).unwrap();
+        assert_eq!(fact.key, "Mara");
+        assert!(db.bible_get_suggestions(&project).unwrap().is_empty());
+        assert!(db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_three && m.fact_key == "Mara"));
+        db.save_doc(SaveDocRequest { id: scene_three.clone(), title: None, content: Some(String::new()), status: None, frontmatter_json: None, parent_id: None }).unwrap();
+        db.bible_replace_scene_memory(&project, &scene_three, "", None, &[]).unwrap();
+        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_three), "empty content must clear scene memory");
+        db.set_locked(&scene_one, true).unwrap();
+        assert!(!db.bible_source_allowed(&scene_one).unwrap());
+        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_one));
+    }
+}
+
+#[cfg(test)]
+mod vault_confinement_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn test_db(name: &str) -> Database {
+        unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+        let vault = std::env::temp_dir().join(format!("jwe-conf-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&vault);
+        std::fs::create_dir_all(&vault).unwrap();
+        let db = Database::new(Connection::open_in_memory().unwrap(), vault);
+        db.initialize().unwrap();
+        db
+    }
+
+    #[test]
+    fn inside_vault_paths_resolve() {
+        let db = test_db("inside");
+        let vault = db.vault_path.lock().unwrap().clone();
+        let resolved = resolve_in_vault(&vault, "novels/Book/chapter.md").unwrap();
+        assert!(resolved.starts_with(&vault), "{resolved:?} left {vault:?}");
+    }
+
+    #[test]
+    fn traversal_and_absolute_escapes_are_refused() {
+        let db = test_db("escape");
+        let vault = db.vault_path.lock().unwrap().clone();
+        for evil in [
+            "../escaped.md",
+            "novels/../../escaped.md",
+            r"C:\Windows\System32\drivers\etc\hosts",
+            r"\\server\share\evil.md",
+        ] {
+            assert!(
+                resolve_in_vault(&vault, evil).is_err(),
+                "must refuse {evil}"
+            );
+        }
+    }
+
+    #[test]
+    fn dot_titles_stay_inside_the_workspace() {
+        let vault = std::env::temp_dir().join("jwe-conf-titles");
+        for title in ["..", ".", "..."] {
+            let path = compute_disk_path(&vault, "novel", "scene", title, "doc1");
+            assert!(
+                path.starts_with(&vault.join("novels")),
+                "{title} escaped into {path:?}"
+            );
+        }
+        // An unknown workspace can only ever be one folder inside the vault.
+        let weird = compute_disk_path(&vault, "../../etc", "note", "T", "doc2");
+        assert!(weird.starts_with(&vault), "{weird:?}");
+    }
+
+    #[test]
+    fn move_to_a_path_outside_the_vault_fails() {
+        let db = test_db("move");
+        let id = db
+            .create_doc(CreateDocRequest {
+                workspace: "write".into(),
+                kind: "doc".into(),
+                title: "Keep".into(),
+                parent_id: None,
+                content: Some("hi".into()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        let before = db.get_doc(&id).unwrap().path;
+        let err = db.move_doc(MoveDocRequest {
+            id: id.clone(),
+            new_parent_id: None,
+            new_path: Some("../escaped.md".into()),
+        });
+        assert!(err.is_err(), "move outside the vault must fail");
+        // The row must be untouched.
+        let after = db.get_doc(&id).unwrap().path;
+        assert_eq!(before, after, "path changed after a refused move");
+    }
+}

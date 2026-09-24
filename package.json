@@ -34,7 +34,9 @@
     "test:entities": "node tests/entities-unit.mjs",
     "test:wstoggles": "node tests/ws-toggles.mjs",
     "test:settings": "node tests/settings-validate.mjs",
+    "test:mobile": "node tests/mobile-parity.mjs",
     "test:widget": "node tests/widget-invariants.mjs",
+    "test:os": "node tests/os-integration.mjs",
     "test:widget-proof": "node tests/window-constraint-proof.mjs"
   },
   "dependencies": {
@@ -47,8 +49,8 @@
     "@codemirror/view": "^6.33.0",
     "@lezer/highlight": "^1.2.0",
     "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.11.0",
     "codemirror": "^6.0.0",
     "d3-dispatch": "^3.0.1",

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-memory-record-metric"
+description = "Enables the memory_record_metric command without any pre-configured scope."
+commands.allow = ["memory_record_metric"]
+
+[[permission]]
+identifier = "deny-memory-record-metric"
+description = "Denies the memory_record_metric command without any pre-configured scope."
+commands.deny = ["memory_record_metric"]

@@ -63,12 +63,7 @@
     padding: 2px 4px;
   }
 
-  .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
+  /* .status-dot lives in app.css (shared with Novel headers). */
 
   .column-count {
     margin-left: auto;
