@@ -3,6 +3,7 @@
   import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { dashboardStats, refreshDashboardStats } from "$lib/stores/dashboard";
   import Icon from "./Icon.svelte";
+  import { domainError } from "$lib/errors";
 
   // Data state — derived from the shared dashboard store (single truth:
   // Home cards read the same cache, commands underneath unchanged).
@@ -20,7 +21,7 @@
       loading = true;
       refreshDashboardStats()
         .catch((e) => {
-          console.error("Failed to load usage memory data:", e);
+          domainError("Memory", "couldn't load usage data", e);
         })
         .finally(() => {
           loading = false;
@@ -33,7 +34,7 @@
       $currentDoc = d;
       $currentWorkspace = d.workspace;
       openTabs.update((tabs) => (tabs.find((t) => t.id === d.id) ? tabs : [d, ...tabs]));
-    }).catch(() => {});
+    }).catch((e) => domainError("Memory", "couldn't reopen document", e));
   }
 
   let maxWords = $derived(streakHeatmap.reduce((m, d) => Math.max(m, d.words), 0));

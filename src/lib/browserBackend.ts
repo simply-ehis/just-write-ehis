@@ -6,7 +6,7 @@
  * preview companion so every workspace is explorable in a browser.
  */
 
-import { browserStore, countWords, type BrowserCanvasNode, type BrowserDoc } from "$lib/browserStore";
+import { getBrowserStore, countWords, type BrowserCanvasNode, type BrowserDoc } from "$lib/browserStore";
 import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } from "$lib/aiRequest";
 import { markdownToHtmlFragment } from "$lib/markdown";
 
@@ -167,7 +167,7 @@ function toBase64(bytes: Uint8Array): string {
  * (md/txt/html) — pandoc formats need the desktop app.
  */
 function previewLookup(title: string): string | null {
-  const hit = browserStore.docs.find((d) => d.title.toLowerCase() === title.trim().toLowerCase());
+  const hit = getBrowserStore().docs.find((d) => d.title.toLowerCase() === title.trim().toLowerCase());
   if (!hit || hit.locked) return null;
   return hit.content;
 }
@@ -263,7 +263,7 @@ export function craftStats(content: string): { dialogue: number; avgSentence: nu
 
 /** Every Tauri command the frontend can invoke, implemented for the browser. */
 export async function browserInvoke<T>(cmd: string, payload: Record<string, unknown>): Promise<T> {
-  const store = browserStore;
+  const store = getBrowserStore();
   const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
   const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 
@@ -504,11 +504,11 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       const byCreated = (a: BrowserDoc, b: BrowserDoc): number => +new Date(a.created_at) - +new Date(b.created_at);
       const nodes = chapters.map(toNode);
       // Board arrangement = compile order (same sort as the Rust backend).
-      const acts = nodes.filter((n) => n.act !== null && n.sequence === null)
+      const acts = nodes.filter((n) => n.doc.kind === "act")
         .sort((a, b) => fmOrder(a.doc) - fmOrder(b.doc) || byCreated(a.doc, b.doc));
-      const sequences = nodes.filter((n) => n.sequence !== null)
+      const sequences = nodes.filter((n) => n.doc.kind === "sequence")
         .sort((a, b) => (a.act ?? 0) - (b.act ?? 0) || fmOrder(a.doc) - fmOrder(b.doc) || byCreated(a.doc, b.doc));
-      const scenes = nodes.filter((n) => n.act === null && n.sequence === null)
+      const scenes = nodes.filter((n) => n.doc.kind === "scene")
         .sort((a, b) => fmOrder(a.doc) - fmOrder(b.doc) || byCreated(a.doc, b.doc));
       return { acts, sequences, scenes } as T;
     }
@@ -526,14 +526,14 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
         return typeof v === "number" ? v : null;
       };
       const byCreated = (a: BrowserDoc, b: BrowserDoc): number => +new Date(a.created_at) - +new Date(b.created_at);
-      const acts = chapters.filter((d) => fmNum(d, "act") !== null && fmNum(d, "sequence") === null)
+      const acts = chapters.filter((d) => d.kind === "act")
         .sort((a, b) => fmOrder(a) - fmOrder(b) || byCreated(a, b));
       let out = "";
       if (acts.length > 0) {
         for (const act of acts) {
-          const actN = fmNum(act, "act");
           out += `${act.title}\n\n`;
-          const seqs = chapters.filter((d) => fmNum(d, "sequence") !== null && fmNum(d, "act") === actN)
+          const actN = fmNum(act, "act");
+          const seqs = chapters.filter((d) => d.kind === "sequence" && fmNum(d, "act") === actN)
             .sort((a, b) => fmOrder(a) - fmOrder(b) || byCreated(a, b));
           for (const seq of seqs) {
             out += `  ${seq.title}\n`;

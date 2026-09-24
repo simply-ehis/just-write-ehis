@@ -15,6 +15,8 @@
   import { readImportFile, contentHash } from '$lib/importFile';
   import { statusColor } from '$lib/status';
   import { rebuildStoryMemory } from '$lib/storyMemory';
+  import { domainError, warnOnce } from '$lib/errors';
+  import WorkspaceError from './WorkspaceError.svelte';
   let splitMode = $state<'chapters' | 'scenes'>('chapters');
   let castEntities = $state<EntitySummary[]>([]);
   let castLoading = $state(false);
@@ -87,7 +89,7 @@
         viewMode = 'board';
         selectBeat(scene);
       }
-      await api.usageRecord(doc.id, "open").catch(() => {});
+      await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Novel usage telemetry", e));
     } catch (e) {
       showToast(`Couldn't open: ${e instanceof Error ? e.message : e}`, "error");
     }
@@ -332,7 +334,7 @@
       const docId = doc.id;
       void api.bibleScopeId(docId).then((pid) => {
         if ($currentDoc?.id === docId && pid !== projectId) projectId = pid;
-      }).catch(() => {});
+      }).catch((e) => warnOnce("Novel project scope", e));
     }
   });
 
@@ -353,11 +355,14 @@
 
   let projectDoc = $derived(projectId ? board.acts[0]?.doc ?? board.scenes[0]?.doc : null);
 
+  // Visible load failure for the board: a tab must never sit blank.
+  let projectLoadError = $state<string | null>(null);
   async function loadProject() {
     if (!projectId) return;
     const requestedProjectId = projectId;
     const loadToken = ++projectLoadToken;
     loading = true;
+    projectLoadError = null;
     try {
       const nextBoard = await api.novelGetBeatBoard(requestedProjectId);
       if (loadToken !== projectLoadToken || projectId !== requestedProjectId) return;
@@ -373,7 +378,10 @@
       bibleSuggestions = suggestions;
       loadGhostCounts();
     } catch (e) {
-      if (loadToken === projectLoadToken && projectId === requestedProjectId) console.error('Failed to load novel project:', e);
+      if (loadToken === projectLoadToken && projectId === requestedProjectId) {
+        projectLoadError = e instanceof Error ? e.message : String(e);
+        domainError('Novel', "couldn't load project", e);
+      }
     } finally {
       if (loadToken === projectLoadToken && projectId === requestedProjectId) loading = false;
     }
@@ -428,7 +436,7 @@
       else if (kind === 'sequence') board.sequences.push(beat);
       else board.scenes.push(beat);
     } catch (e) {
-      console.error('Failed to add beat:', e);
+      domainError('Novel', "couldn't add beat", e);
     }
   }
 
@@ -444,7 +452,7 @@
         compilePandoc = false;
       }
     } catch (e) {
-      console.error('Compile failed:', e);
+      domainError('Novel', "couldn't compile manuscript", e);
     }
   }
 
@@ -817,7 +825,10 @@
         </div>
       {/if}
       {#if viewMode === 'board' && !boardCollapsed}
-      {#if !loading && board.acts.length === 0 && board.sequences.length === 0 && board.scenes.length === 0}
+      {#if projectLoadError && !loading}
+        <WorkspaceError message={`Novel — couldn't load project: ${projectLoadError}`} onRetry={() => loadProject()} />
+      {/if}
+      {#if !loading && !projectLoadError && board.acts.length === 0 && board.sequences.length === 0 && board.scenes.length === 0}
         <div class="empty-board" role="status">
           <p>This project has no scenes yet — nothing to write in.</p>
           <button class="create-btn" onclick={startWriting} disabled={startingWriting} aria-label="Start writing">

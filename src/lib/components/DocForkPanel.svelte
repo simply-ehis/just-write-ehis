@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type Doc } from "$lib/api";
   import Icon from "./Icon.svelte";
+  import { domainError } from "$lib/errors";
 
   let {
     forkId,
@@ -31,7 +32,7 @@
       fork = g;
       changedWords = computeWordDiff(o.content, g.content);
     } catch (e) {
-      console.error("Failed to load fork data:", e);
+      domainError("Workspace", "couldn't load fork comparison", e);
     }
     loading = false;
   }
@@ -57,7 +58,7 @@
       onMerged?.();
       onClose();
     } catch (e) {
-      console.error("Failed to merge fork:", e);
+      domainError("Workspace", "couldn't merge fork", e);
     }
   }
 
@@ -66,7 +67,7 @@
       await api.ghostDismiss(forkId);
       onClose();
     } catch (e) {
-      console.error("Failed to dismiss fork:", e);
+      domainError("Workspace", "couldn't dismiss fork", e);
     }
   }
 </script>

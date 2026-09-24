@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis atlas direction: chart the novel, notes, and reading as connected territory.">
+  <title>Just Write ehis — Atlas Map</title>
+  <style>
+    :root { --parchment:#efe8d3; --card:#f8f2df; --ink:#23302b; --muted:#66736a; --line:#23302b; --sea:#2f6f6a; --route:#1749d6; --mono:"Cascadia Mono",Consolas,monospace; --sans:"Avenir Next","Segoe UI",Verdana,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--parchment); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 28px; border-bottom:2px solid var(--line); background:var(--card); }
+    .brand img { display:block; width:148px; height:auto; }
+    .top nav { display:flex; gap:22px; font:11px var(--mono); text-transform:uppercase; }
+    .hero { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; display:grid; grid-template-columns:.9fr 1.1fr; gap:34px; align-items:stretch; }
+    .kicker { color:var(--sea); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:16px 0; font-size:clamp(3rem,6.4vw,5.8rem); line-height:.88; letter-spacing:-.07em; }
+    .lede { max-width:520px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .actions { display:flex; gap:10px; margin-top:28px; }
+    .button { min-height:46px; display:inline-flex; align-items:center; padding:0 16px; border:2px solid var(--line); background:var(--ink); color:var(--parchment); font:11px var(--mono); text-transform:uppercase; }
+    .button.secondary { background:transparent; color:var(--ink); }
+    .map { position:relative; overflow:hidden; min-height:480px; border:2px solid var(--line); background:radial-gradient(circle at 20% 20%, rgba(47,111,106,.18), transparent 34%), radial-gradient(circle at 78% 68%, rgba(23,73,214,.16), transparent 38%), var(--card); }
+    .map svg { position:absolute; inset:0; width:100%; height:100%; }
+    .node { position:absolute; width:190px; padding:12px; border:2px solid var(--line); background:var(--card); font-size:13px; }
+    .node b { display:block; }
+    .node span { display:block; margin-top:8px; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    .node.write { left:6%; top:12%; }
+    .node.novel { right:7%; top:20%; background:var(--ink); color:var(--parchment); }
+    .node.novel span { color:#b9c4b8; }
+    .node.reader { left:12%; bottom:12%; }
+    .node.canvas { right:10%; bottom:9%; background:var(--sea); color:#fff; border-color:#1d4a46; }
+    .node.canvas span { color:#d3e2d4; }
+    .legend { position:absolute; left:16px; bottom:16px; display:flex; gap:14px; padding:10px 12px; border:2px solid var(--line); background:var(--card); font:10px var(--mono); text-transform:uppercase; }
+    .legend i { display:inline-block; width:18px; height:4px; margin-right:7px; background:var(--route); vertical-align:middle; }
+    .index { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; display:grid; grid-template-columns:1fr 1fr 1fr; border:2px solid var(--line); background:var(--card); }
+    .index div { padding:26px; border-right:2px solid var(--line); }
+    .index div:last-child { border-right:0; background:var(--ink); color:var(--parchment); }
+    .index div:last-child p { color:#b9c4b8; }
+    .index h2 { margin:0 0 12px; font-size:26px; letter-spacing:-.05em; }
+    .index p { margin:0; color:var(--muted); line-height:1.6; }
+    .download { width:min(1240px,calc(100% - 56px)); margin:34px auto 70px; display:grid; grid-template-columns:1.2fr .8fr; gap:28px; align-items:center; padding:34px; border:2px solid var(--line); background:var(--card); }
+    footer { width:min(1240px,calc(100% - 56px)); margin:0 auto 36px; display:flex; justify-content:space-between; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:920px) { .hero, .download { grid-template-columns:1fr; } .index { grid-template-columns:1fr; } .index div { border-right:0; border-top:2px solid var(--line); } .index div:first-child { border-top:0; } .map { min-height:560px; } .node { width:160px; } .top nav { display:none; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis"></a>
+    <nav><a href="#territory">Territory</a><a href="#legend">Legend</a><a href="#download">Download</a></nav>
+  </header>
+  <section class="hero" id="territory">
+    <div>
+      <div class="kicker">12 / Atlas map</div>
+      <h1>Chart the work, then walk it.</h1>
+      <p class="lede">Novels, notes, maps, reading, and canvas fragments share one surveyed vault. See the route before you revise the terrain.</p>
+      <div class="actions"><a class="button" href="#download">Download for Windows</a><a class="button secondary" href="#legend">Read the legend</a></div>
+    </div>
+    <div class="map" aria-label="Vault map">
+      <svg viewBox="0 0 800 500" preserveAspectRatio="none" aria-hidden="true"><path d="M120 110 C 260 80, 340 180, 470 170 S 660 120, 700 160" fill="none" stroke="#1749d6" stroke-width="5" stroke-dasharray="14 12"/><path d="M150 390 C 280 340, 360 420, 500 370 S 640 400, 680 340" fill="none" stroke="#2f6f6a" stroke-width="4"/><circle cx="120" cy="110" r="8" fill="#23302b"/><circle cx="700" cy="160" r="8" fill="#23302b"/><circle cx="150" cy="390" r="8" fill="#23302b"/><circle cx="680" cy="340" r="8" fill="#23302b"/></svg>
+      <div class="node write"><b>Write</b><span>base camp · autosaved</span></div>
+      <div class="node novel"><b>Novel ridge</b><span>chapter 04 · linked bible</span></div>
+      <div class="node reader"><b>Reader inlet</b><span>position kept</span></div>
+      <div class="node canvas"><b>Canvas drift</b><span>5 unfiled fragments</span></div>
+      <div class="legend" id="legend"><span><i></i>story route</span><span><i style="background:var(--sea)"></i>reference route</span></div>
+    </div>
+  </section>
+  <section class="index" aria-label="Atlas index">
+    <div><h2>Survey</h2><p>One vault holds every mode. The map is drawn from real files, not a separate database you must maintain.</p></div>
+    <div><h2>Route</h2><p>Follow open threads across chapters, notes, and reading. Leave markers where the next expedition begins.</p></div>
+    <div><h2>Harbor</h2><p>Windows opens .txt and .md into the waiting session. Exports carry the work safely out of harbor.</p></div>
+  </section>
+  <section class="download" id="download"><div><div class="kicker">Harbor supply</div><h2 style="margin:12px 0 10px;font-size:clamp(2rem,4vw,3.6rem);line-height:.92;letter-spacing:-.06em">Take the chart with you.</h2><p style="margin:0;color:var(--muted);line-height:1.6">Your files remain yours. The map is only useful because the territory is real.</p></div><a class="button" href="#">Download for Windows</a></section>
+  <footer><span>Just Write ehis / prototype 12</span><span>Atlas / surveyed / local-first</span></footer>
+</body>
+</html>

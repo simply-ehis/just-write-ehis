@@ -1,5 +1,6 @@
 import { writable, get } from "svelte/store";
 import { EditorView } from "@codemirror/view";
+import { domainError } from "$lib/errors";
 
 export type WriteBackAction = "insert" | "replace" | "append" | "copy";
 
@@ -59,7 +60,8 @@ function createWriteBackStore() {
 
     /** Copy text to clipboard (handled by AiPanel directly, but available here for consistency) */
     copy(content: string) {
-      navigator.clipboard.writeText(content).catch(() => {});
+      // A failed copy that looks successful pastes stale text — say so.
+      navigator.clipboard.writeText(content).catch((e) => domainError("AI", "couldn't copy to clipboard", e));
     },
 
     /** Clear the processed head event, advancing to the next queued one */

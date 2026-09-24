@@ -10,6 +10,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import { openDailyNote } from '$lib/dailyNote';
   import { untrack } from 'svelte';
+  import { domainError } from '$lib/errors';
 
   let open = $state(false);
   let query = $state('');
@@ -151,7 +152,7 @@
       // Stale-response guard: a newer keystroke wins, never an older reply.
       if (query.trim() === asked) results = found;
     } catch (e) {
-      console.error('Search failed:', e);
+      domainError('Palette', "couldn't search", e);
     }
   }
 
@@ -180,7 +181,7 @@
       $currentDoc = doc;
       $openTabs = [doc, ...$openTabs];
     } catch (e) {
-      console.error('Failed to create doc:', e);
+      domainError('Palette', "couldn't create document", e);
     }
   }
 
@@ -189,7 +190,7 @@
     try {
       await api.docSave($currentDoc.id);
     } catch (e) {
-      console.error('Failed to save:', e);
+      domainError('Palette', "couldn't save document", e);
     }
   }
 

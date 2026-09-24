@@ -9,6 +9,8 @@
   import Icon from '$lib/components/Icon.svelte';
   import { downloadConvertOutput, downloadFountain } from '$lib/download';
   import { readImportFile } from '$lib/importFile';
+  import { domainError } from '$lib/errors';
+  import WorkspaceError from './WorkspaceError.svelte';
 
   let scripts = $state<Doc[]>([]);
   let selectedScript = $state<Doc | null>(null);
@@ -87,12 +89,16 @@
     raw: string;
   }
 
+  // Visible load failure for the list: never a fake-empty shelf.
+  let scriptsLoadError = $state<string | null>(null);
   async function loadScripts() {
     loading = true;
+    scriptsLoadError = null;
     try {
       scripts = await api.docListByWorkspace('script');
     } catch (e) {
-      console.error('Failed to load scripts:', e);
+      scriptsLoadError = e instanceof Error ? e.message : String(e);
+      domainError('Script', "couldn't load scripts", e);
     } finally {
       loading = false;
     }
@@ -104,7 +110,7 @@
       try {
         await api.docSave(selectedScript.id, undefined, rawContent);
       } catch (e) {
-        console.error('Failed to save outgoing script:', e);
+        domainError('Script', "couldn't save outgoing script", e);
       }
     }
     selectedScript = doc;
@@ -150,7 +156,7 @@
       roles = [...roles, res.role];
       newRoleName = '';
     } catch (e) {
-      console.error('Failed to add role:', e);
+      domainError('Script', "couldn't add role", e);
     }
   }
 
@@ -160,7 +166,7 @@
       await api.scriptRoleAssign(selectedScript.id, roleId, assignedTo);
       roles = roles.map((r) => (r.id === roleId ? { ...r, assignedTo } : r));
     } catch (e) {
-      console.error('Failed to assign role:', e);
+      domainError('Script', "couldn't assign role", e);
     }
   }
 
@@ -170,7 +176,7 @@
       await api.scriptRoleDelete(selectedScript.id, roleId);
       roles = roles.filter((r) => r.id !== roleId);
     } catch (e) {
-      console.error('Failed to delete role:', e);
+      domainError('Script', "couldn't delete role", e);
     }
   }
 
@@ -288,7 +294,7 @@
     try {
       await api.docSave(selectedScript.id, undefined, rawContent);
     } catch (e) {
-      console.error('Failed to save script:', e);
+      domainError('Script', "couldn't save script", e);
     }
   }
 
@@ -298,7 +304,7 @@
       scripts.unshift(doc);
       selectScript(doc);
     } catch (e) {
-      console.error('Failed to create script:', e);
+      domainError('Script', "couldn't create script", e);
     }
   }
 
@@ -349,6 +355,8 @@
       </div>
       {#if loading}
         <div class="empty-msg">Loading...</div>
+      {:else if scriptsLoadError}
+        <WorkspaceError message={`Script — couldn't load scripts: ${scriptsLoadError}`} onRetry={() => loadScripts()} />
       {:else if scripts.length === 0}
         <div class="empty-msg">No scripts yet. Create one to get started.</div>
       {:else}

@@ -5,6 +5,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import RhythmHeatmap from "$lib/components/RhythmHeatmap.svelte";
   import { settings } from "$lib/stores/settings";
+  import { warnOnce } from "$lib/errors";
 
   let wordCount = $derived($currentDoc?.word_count ?? 0);
   let stats = $state<{ totalDocs: number; totalWords: number; totalBacklinks: number } | null>(null);
@@ -18,7 +19,7 @@
       streak = await api.memoryGetStreak();
       rhythm = await api.dashboardTodayRhythm();
     } catch (e) {
-      console.error('Failed to load stats:', e);
+      warnOnce("Status bar stats", e);
     }
   }
 

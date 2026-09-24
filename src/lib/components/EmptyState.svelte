@@ -2,6 +2,7 @@
   import { currentWorkspace, currentDoc, openTabs } from "$lib/stores/app";
   import { api } from "$lib/api";
   import Icon from "$lib/components/Icon.svelte";
+  import { domainError } from "$lib/errors";
 
   const workspaceHints: Record<string, { icon: string; message: string; hint: string }> = {
     logs: { icon: "calendar", message: "No logs yet", hint: "Your daily notes will appear here" },
@@ -21,7 +22,7 @@
       $currentDoc = doc;
       $openTabs = [doc, ...$openTabs];
     } catch (e) {
-      console.error("Failed to create doc:", e);
+      domainError("Workspace", "couldn't create document", e);
     }
   }
 </script>

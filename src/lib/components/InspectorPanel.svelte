@@ -4,6 +4,7 @@
   import { currentDoc, openTabs, inspectorOpen } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
+  import { domainError, warnOnce } from "$lib/errors";
 
   let backlinks = $state<Backlink[]>([]);
   let outgoingBacklinks = $state<Backlink[]>([]);
@@ -103,7 +104,7 @@
     if (!$currentDoc) return;
     // Dispatch event for EditorPane to scroll to line
     window.dispatchEvent(new CustomEvent("editor-scroll-to-line", { detail: { line } }));
-    await api.usageRecord($currentDoc.id, "open").catch(() => {});
+    await api.usageRecord($currentDoc.id, "open").catch((e) => warnOnce("Inspector usage telemetry", e));
   }
 
   async function openBacklink(sourceId: string) {
@@ -113,9 +114,9 @@
       if (!$openTabs.find(t => t.id === doc.id)) {
         $openTabs = [doc, ...$openTabs];
       }
-      await api.usageRecord(doc.id, "open");
+      await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Inspector usage telemetry", e));
     } catch (e) {
-      console.error("Failed to open backlink:", e);
+      domainError("Inspector", "couldn't open backlink", e);
     }
   }
 

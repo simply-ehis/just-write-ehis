@@ -15,7 +15,8 @@
   import { sidebarOrder, sidebarAutoSort, reorderSidebar, recordWorkspaceVisit, lastWorkspaceVisit } from "$lib/stores/uiState";
   import { groupOfWorkspace, groupRankOf } from "$lib/workspaceGroups";
   import Icon from "$lib/components/Icon.svelte";
-import { formatRelativeTime } from "$lib/text";
+  import { formatRelativeTime } from "$lib/text";
+  import { domainError } from "$lib/errors";
 
   // Ehis pen mark — nib crop for the 20px home icon, full wordmark for
   // the sidebar header. Theme-aware: dark ink on paper, paper ink on dark/glass.
@@ -152,8 +153,17 @@ import { formatRelativeTime } from "$lib/text";
   function selectWorkspace(id: string) {
     $currentWorkspace = id;
     $showSettings = false;
+    showMoreWorkspaces = false;
     recordWorkspaceVisit(id);
   }
+
+  // Overflow menu: workspaces hidden from the sidebar (Inbox + Canvas by
+  // default, plus anything the user hides in Settings) stay one tap away
+  // at the bottom of the tab list. "files" is virtual (Library owns it).
+  let showMoreWorkspaces = $state(false);
+  let hiddenWorkspaces = $derived(
+    workspaces.filter((w) => w.id !== "files" && effectiveHidden.includes(w.id))
+  );
 
   function toggleSettings() {
     $showSettings = !$showSettings;
@@ -170,7 +180,7 @@ import { formatRelativeTime } from "$lib/text";
       $openTabs = [doc, ...$openTabs];
       $showSettings = false;
     } catch (e) {
-      console.error("Failed to create doc:", e);
+      domainError("Sidebar", "couldn't create document", e);
     }
   }
 
@@ -272,6 +282,41 @@ import { formatRelativeTime } from "$lib/text";
         {/if}
       </button>
     {/each}
+    {#if hiddenWorkspaces.length > 0}
+      <button
+        class="nav-item more-btn"
+        class:active={showMoreWorkspaces}
+        onclick={() => (showMoreWorkspaces = !showMoreWorkspaces)}
+        title="More workspaces"
+        aria-label="More workspaces"
+        aria-expanded={showMoreWorkspaces}
+        aria-haspopup="menu"
+      >
+        <span class="nav-icon"><Icon name="dots" size={17} /></span>
+        <span>More</span>
+      </button>
+      {#if showMoreWorkspaces}
+        <div class="more-pop" role="menu" aria-label="Hidden workspaces">
+          {#each hiddenWorkspaces as ws}
+            <button
+              class="nav-item more-item"
+              class:active={$currentWorkspace === ws.id && !$showSettings}
+              role="menuitem"
+              data-ws={ws.id}
+              onclick={() => selectWorkspace(ws.id)}
+              title={`${ws.label} — hidden from the tab list`}
+              aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
+            >
+              <span class="nav-icon"><Icon name={wsIcons[ws.id] ?? "files"} size={17} /></span>
+              <span>{ws.label}</span>
+              {#if ws.id === "inbox" && inboxCount != null && inboxCount > 0}
+                <span class="nav-badge" aria-hidden="true">{inboxCount > 99 ? "99+" : inboxCount}</span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
+    {/if}
     <button
       class="nav-item"
       class:active={$showSettings}
@@ -365,6 +410,17 @@ import { formatRelativeTime } from "$lib/text";
     padding-bottom: 6px;
     border-bottom: 1px solid var(--border-subtle);
     margin-bottom: 2px;
+  }
+
+  /* More overflow: hidden workspaces expand in-flow at the bottom of the
+    tab list (never an overlay, so the scrolling nav can't clip it). */
+  .more-pop {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 2px 0 2px 14px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-subtle);
   }
 
   .nav-badge {

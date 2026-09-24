@@ -14,10 +14,11 @@
       {
         "label": "main",
         "title": "Just Write ehis",
-        "width": 1280,
-        "height": 800,
+        "width": 1240,
+        "height": 740,
         "minWidth": 900,
         "minHeight": 600,
+        "center": true,
         "decorations": true,
         "resizable": true
       },
@@ -57,6 +58,7 @@
     "windows": {
       "nsis": {
         "installMode": "both",
+        "installerIcon": "icons/icon.ico",
         "headerImage": "installer-assets/header.bmp",
         "sidebarImage": "installer-assets/sidebar.bmp"
       }

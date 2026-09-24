@@ -8,6 +8,7 @@
   import { globalLoading } from "$lib/stores/loading";
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
+  import { warnOnce } from "$lib/errors";
   import { isBrowserPreview } from "$lib/api";
   import { ensureHarness } from "$lib/memorySidecar";
   import { testProvider } from "$lib/providerTest";
@@ -539,9 +540,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       const aiMsg = await api.conversationAddMessage(conversation.id, "assistant", full);
       messages = messages.map((m) => (m.id === placeholder.id ? aiMsg : m));
 
-      // Learn from the exchange for future recall (best-effort, silent).
+      // Learn from the exchange for future recall (best-effort).
       if (!blankMode && $settings.aiMemoryEnabled) {
-        api.memoryLearn(`User: ${userContent}\nAssistant: ${full.slice(0, 1000)}`).catch(() => {});
+        api.memoryLearn(`User: ${userContent}\nAssistant: ${full.slice(0, 1000)}`).catch((e) => warnOnce("AI memory learn", e));
       }
     } catch (e) {
       const friendly = friendlyEndpointError(e);

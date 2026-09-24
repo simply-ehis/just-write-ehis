@@ -203,7 +203,9 @@ function loadTemplates(): Template[] {
   try {
     const stored = localStorage.getItem(TEMPLATES_KEY);
     if (stored) return JSON.parse(stored);
-  } catch { }
+  } catch (e) {
+    console.warn("Templates: stored data unreadable, using builtins:", e);
+  }
   return builtinTemplates;
 }
 
@@ -211,7 +213,9 @@ function loadSnippets(): Snippet[] {
   try {
     const stored = localStorage.getItem(SNIPPETS_KEY);
     if (stored) return JSON.parse(stored);
-  } catch { }
+  } catch (e) {
+    console.warn("Templates: stored snippets unreadable, using builtins:", e);
+  }
   return builtinSnippets;
 }
 

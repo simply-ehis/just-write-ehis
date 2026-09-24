@@ -5,6 +5,7 @@
   import { openSettingsAt } from "$lib/stores/settings";
   import { smartTasks, openTasks, addTask, toggleTask, removeTask } from "$lib/stores/uiState";
   import Icon from "$lib/components/Icon.svelte";
+  import { domainError, warnOnce } from "$lib/errors";
 
   let recentDocs: [string, string, string][] = $state([]);
   let workspaceCounts: [string, number][] = $state([]);
@@ -29,7 +30,7 @@
     $currentDoc = doc;
     if (!$openTabs.find((t) => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
     $currentWorkspace = doc.workspace;
-    await api.usageRecord(doc.id, "open").catch(() => {});
+    await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Home usage telemetry", e));
   }
 
   onMount(async () => {
@@ -269,7 +270,7 @@
                   if (!$openTabs.find(t => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
                   $currentWorkspace = doc.workspace;
                 } catch (e) {
-                  console.warn(`Failed to open recent doc ${id}:`, e);
+                  domainError("Home", "couldn't open recent document", e);
                 }
               }}>
                 <span class="recent-title">{title}</span>

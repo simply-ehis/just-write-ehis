@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import Icon from "./Icon.svelte";
+  import { warnOnce } from "$lib/errors";
 
   /**
    * PdfViewer — faithful page rendering via the already-bundled pdf.js
@@ -88,7 +89,7 @@
 
   onDestroy(() => {
     renderSeq++;
-    if (pdfDoc) pdfDoc.destroy().catch(() => {});
+    if (pdfDoc) pdfDoc.destroy().catch((e) => warnOnce("Reader PDF teardown", e));
     pdfDoc = null;
   });
 </script>

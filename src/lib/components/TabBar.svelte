@@ -8,6 +8,7 @@
   import { settings } from "$lib/stores/settings";
   import { hasPin, isUnlocked, markLocked } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
+  import { warnOnce } from "$lib/errors";
   import { onMount } from "svelte";
 
   // Tab underlines track the app theme (see --ws-* in app.css).
@@ -39,7 +40,7 @@
 
   function selectTab(doc: Doc) {
     $currentDoc = doc;
-    api.usageRecord(doc.id, "open").catch(console.error);
+    api.usageRecord(doc.id, "open").catch((e) => warnOnce("Tabs usage telemetry", e));
   }
 
   function closeTab(doc: Doc, event?: Event) {

@@ -70,14 +70,14 @@
 }
 
 :root[data-theme="dark"] {
-  /* dark — ink well (explicit Settings → General → Dark) */
-  --bg: #1B1A15;
-  --surface: #221F19;
-  --surface-2: #2A2721;
-  --surface-elevated: #2E2A22;
+  /* dark — near-black ink well (explicit Settings → General → Dark) */
+  --bg: #100E0B;
+  --surface: #171411;
+  --surface-2: #1C1815;
+  --surface-elevated: #211C17;
   --ink: #ECE7D8;
   --ink-muted: #9C9686;
-  --border: #332F26;
+  --border: #2A231B;
   --accent: #8FC7A9;
   --accent-soft: #263229;
   --accent-ink: #16211B;
@@ -104,8 +104,8 @@
   --text-muted: var(--ink-muted);
   --text-on-accent: var(--accent-ink);
 
-  --border-strong: #4A4436;
-  --border-subtle: #29251E;
+  --border-strong: #3A3126;
+  --border-subtle: #1B1611;
 
   --accent-hover: #A5D6BC;
   --accent-primary: var(--accent);
@@ -347,6 +347,19 @@ html, body, #app {
   color: var(--text-primary);
   background: var(--bg-primary);
   -webkit-font-smoothing: antialiased;
+}
+
+/* App background texture: a faint pen-and-ink doodle tile over the theme
+   background (WhatsApp-style), baked at low opacity so it reads on both
+   paper and near-black themes. pointer-events-safe, zero layout impact. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cg fill='none' stroke='%238a8778' stroke-width='1.5'%3E%3Cpath d='M20 84 L100 84'/%3E%3Ccircle cx='30' cy='30' r='9'/%3E%3Cpath d='M78 22 L86 38 L94 22 L86 30 Z'/%3E%3Cpath d='M24 100 l6 -6 M96 96 l6 6'/%3E%3Ccircle cx='88' cy='66' r='2.5' fill='%238a8778' stroke='none'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 ::selection {

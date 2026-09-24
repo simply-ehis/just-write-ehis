@@ -22,7 +22,7 @@ categories; do not add new ones (fix roles/labels at the source).
 
 ## 3. `npm run test:e2e` — behavior without a shell
 
-`tests/e2e-browser.mjs` (zero dependencies) currently asserts ~60 checks:
+`tests/e2e-browser.mjs` (zero dependencies) currently asserts ~190 checks:
 
 - serves `dist/` over HTTP (page + bundle + logo/manifest/assets),
 - bundle contains every workspace's UI markers,
@@ -44,7 +44,18 @@ error/warning. The dirty run also proves the seed purge keeps real docs.
 jsdom gaps (canvas 2d, layout geometry) are polyfilled in the harness and
 documented there — never in app code.
 
-## 5. In-app self-test — behavior with a backend
+## 5. Functional tabs (`npm run test:tabs`) — every tab does its job
+
+`tests/tabs-functional.mjs` boots the built app once in jsdom and drives
+all 12 tabs past mounting: Write empty-state → New Document → editor,
+Home greeting, Logs today view, Inbox capture → item (via palette, since
+inbox hides from the sidebar by default), Novel studio, Script create →
+open, Map canvas mount, Reader shelf, Projects create, Library views,
+Canvas board (via palette), Settings theme switch + persist. Zero console
+errors required (the jsdom canvas-`getContext` notice is allowlisted —
+no canvas package in the harness, never in app code).
+
+## 6. In-app self-test — behavior with a backend
 
 Settings → About → **Run Feature Self-Test**: create/save/search/link/
 snapshot/restore/graph/log/lock-exclusion/pinned/metrics/rhythm/export/

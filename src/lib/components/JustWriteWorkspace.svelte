@@ -17,7 +17,8 @@
   import { showToast } from "$lib/stores/notifications";
 import MicButton from "./MicButton.svelte";
 import ReadAloudButton from "./ReadAloudButton.svelte";
-import VersionHistory from "./VersionHistory.svelte";
+  import VersionHistory from "./VersionHistory.svelte";
+  import { domainError, warnOnce } from "$lib/errors";
   import FormatToolbar from "./FormatToolbar.svelte";
   import Icon from "./Icon.svelte";
   import { craftStats } from "$lib/browserBackend";
@@ -92,7 +93,8 @@ import VersionHistory from "./VersionHistory.svelte";
       .then((w) => {
         bibleWords = w;
       })
-      .catch(() => {
+      .catch((e) => {
+        warnOnce("Write story-bible vocab", e);
         bibleWords = new Set();
       });
   }
@@ -477,16 +479,17 @@ import VersionHistory from "./VersionHistory.svelte";
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
-          api.usageRecord(editingDocId, "write").catch(() => {});
+          api.usageRecord(editingDocId, "write").catch((e) => warnOnce("Write usage telemetry", e));
           if ($settings.craftProfilingEnabled) {
             const stats = craftStats(content);
-            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch(() => {});
-            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch(() => {});
-            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch((e) => warnOnce("Write craft telemetry", e));
+            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch((e) => warnOnce("Write craft telemetry", e));
+            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch((e) => warnOnce("Write craft telemetry", e));
           }
         }
       } catch (e) {
-        console.error("Failed to save:", e);
+        // Data-loss risk: the user must see this, not just the console.
+        domainError("Write", "couldn't save document", e);
       }
     });
   }
@@ -643,9 +646,9 @@ import VersionHistory from "./VersionHistory.svelte";
              splitDoc = { ...splitDoc, word_count: words };
            }
            $openTabs = $openTabs.map((t) => (t.id === docId ? { ...t, word_count: words } : t));
-         } catch (e) {
-           console.error("Failed to save split doc:", e);
-         }
+          } catch (e) {
+            domainError("Write", "couldn't save split document", e);
+          }
        });
      }, 500);
   }
@@ -753,11 +756,12 @@ import VersionHistory from "./VersionHistory.svelte";
             splitTarget.set({ id: d.id, title: d.title });
             createSplitEditor(d);
           })
-          .catch(() => {
+          .catch((e) => {
             if (splitDocId === id) {
               splitDocId = null;
               splitDoc = null;
               splitTarget.set(null);
+              domainError("Write", "couldn't reopen split document", e);
             }
           });
       });

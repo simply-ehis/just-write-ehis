@@ -19,8 +19,10 @@ Svelte components → stores → api.ts ─┬─ Tauri shell? ── invoke →
 backend under Tauri and the localStorage mirror in a plain browser. The
 mirror implements the **same command surface** (CRUD, search, graph,
 snapshots, RAG-keyword, dashboards, canvas, export md/txt/html, …).
-Anything needing native binaries (pandoc formats, voice sidecars, updater,
-file watcher) fails in preview with a message saying so — never silently.
+Anything needing native binaries (pandoc formats, updater, file watcher)
+fails in preview with a message saying so — never silently. Voice is the
+exception: preview uses the browser's built-in speech recognition and
+synthesis instead of the desktop Moonshine/Kokoro sidecars.
 
 Rule: **a new Tauri command is not done** until `api.ts` + `browserBackend.ts`
 + `lib.rs` handler registration all exist. `tests/e2e-browser.mjs` asserts

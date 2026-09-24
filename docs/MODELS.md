@@ -19,6 +19,8 @@ UPDATED: 2026-09-23
 
 Swapping is paste-a-path: model names/ids/repos are strings end to end.
 Restart the sidecar (toggle the feature or restart the app) after a voice swap.
+Web exception: the browser build uses built-in speech recognition/synthesis,
+so STT/TTS model fields only affect the desktop sidecars.
 
 Changeability contract (every pick below must satisfy all three, verified):
 1. paste the name/id/repo into its Settings field — no code change;

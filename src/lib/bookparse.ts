@@ -247,7 +247,9 @@ export async function parsePdf(data: Uint8Array, workerSrc?: string, password?: 
   }
   const destroyable = pdf as unknown as { destroy?: () => Promise<void> };
   if (typeof destroyable.destroy === "function") {
-    await destroyable.destroy().catch(() => {});
+    // Cleanup best-effort (a failed destroy only leaks a worker), but never
+    // silent. No $lib imports here by contract (node harness) — plain warn.
+    await destroyable.destroy().catch((e) => console.warn("Reader PDF teardown:", e));
   }
   if (pages.length === 0) throw new Error("PDF contains no extractable text (scanned images need OCR).");
   return { title, author: null, text: pages.join("\n\n") };

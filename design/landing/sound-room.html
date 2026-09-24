@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis sound room direction: dictation and read-aloud built into the writing surface.">
+  <title>Just Write ehis — Sound Room</title>
+  <style>
+    :root { --paper:#f4efe1; --card:#fbf7ea; --ink:#22201b; --muted:#6f6758; --line:#22201b; --brick:#b04a2f; --mono:"Cascadia Mono",Consolas,monospace; --sans:"Avenir Next","Segoe UI",Verdana,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 28px; border-bottom:2px solid var(--line); background:var(--card); }
+    .brand img { display:block; width:148px; height:auto; }
+    .top nav { display:flex; gap:22px; font:11px var(--mono); text-transform:uppercase; }
+    .hero { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; display:grid; grid-template-columns:1fr 1fr; gap:36px; align-items:stretch; }
+    .kicker { color:var(--brick); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:16px 0; font-size:clamp(3rem,6.4vw,5.8rem); line-height:.88; letter-spacing:-.07em; }
+    .lede { max-width:520px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .actions { display:flex; gap:10px; margin-top:28px; }
+    .button { min-height:46px; display:inline-flex; align-items:center; padding:0 16px; border:2px solid var(--line); background:var(--brick); color:#fff; font:11px var(--mono); text-transform:uppercase; }
+    .button.secondary { background:var(--card); color:var(--ink); }
+    .console { border:2px solid var(--line); background:var(--ink); color:var(--paper); box-shadow:12px 12px 0 rgba(176,74,47,.35); }
+    .console-head { display:flex; justify-content:space-between; padding:14px 18px; border-bottom:2px solid rgba(244,239,225,.25); font:11px var(--mono); text-transform:uppercase; }
+    .live { color:#ffb199; }
+    .waves { display:flex; align-items:end; gap:8px; height:180px; padding:28px 24px; }
+    .waves span { flex:1; background:var(--paper); transform-origin:bottom; animation:wave 1.8s ease-in-out infinite; }
+    .waves span:nth-child(3n) { background:var(--brick); animation-duration:1.2s; }
+    .waves span:nth-child(4n) { animation-duration:2.3s; }
+    @keyframes wave { 0%,100% { transform:scaleY(.18); } 50% { transform:scaleY(1); } }
+    .transcript { padding:22px 24px 26px; border-top:2px solid rgba(244,239,225,.25); }
+    .transcript p { margin:0; font-size:19px; line-height:1.6; }
+    .transcript small { display:block; margin-top:14px; color:#b8ad94; font:10px var(--mono); text-transform:uppercase; }
+    .duo { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; display:grid; grid-template-columns:1fr 1fr; border:2px solid var(--line); background:var(--card); }
+    .duo div { padding:36px; }
+    .duo div + div { border-left:2px solid var(--line); background:var(--brick); color:#fff; }
+    .duo div + div p { color:#f6d8cb; }
+    .duo h2 { margin:0 0 12px; font-size:32px; letter-spacing:-.05em; }
+    .duo p { margin:0; color:var(--muted); line-height:1.6; }
+    .download { width:min(1240px,calc(100% - 56px)); margin:34px auto 70px; display:flex; justify-content:space-between; gap:24px; align-items:center; padding:28px; border:2px solid var(--line); background:var(--card); }
+    footer { width:min(1240px,calc(100% - 56px)); margin:0 auto 36px; display:flex; justify-content:space-between; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (prefers-reduced-motion:reduce) { .waves span { animation:none; transform:scaleY(.55); } }
+    @media (max-width:920px) { .hero, .duo { grid-template-columns:1fr; } .duo div + div { border-left:0; border-top:2px solid var(--line); } .download { display:block; } .download .button { margin-top:20px; } .top nav { display:none; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis"></a>
+    <nav><a href="#voice">Voice</a><a href="#privacy">Privacy</a><a href="#download">Download</a></nav>
+  </header>
+  <section class="hero" id="voice">
+    <div>
+      <div class="kicker">13 / Sound room</div>
+      <h1>Talk when typing is slow.</h1>
+      <p class="lede">Dictate the messy middle, then hear the draft back. Voice lives beside the cursor on desktop and in the browser, not in a separate app.</p>
+      <div class="actions"><a class="button" href="#download">Download for Windows</a><a class="button secondary" href="#privacy">How voice stays yours</a></div>
+    </div>
+    <div class="console" aria-label="Voice console">
+      <div class="console-head"><span class="live">● Listening</span><span>16 kHz / local path</span></div>
+      <div class="waves" aria-hidden="true"><span style="height:38%"></span><span style="height:72%"></span><span style="height:54%"></span><span style="height:88%"></span><span style="height:44%"></span><span style="height:66%"></span><span style="height:92%"></span><span style="height:50%"></span><span style="height:74%"></span><span style="height:36%"></span><span style="height:80%"></span><span style="height:58%"></span></div>
+      <div class="transcript"><p>“The crossing needs weather before it needs dialogue.”</p><small>Dictated → inserted at cursor · read-aloud ready</small></div>
+    </div>
+  </section>
+  <section class="duo" id="privacy">
+    <div><h2>Dictation is explicit.</h2><p>Press, speak, stop. The transcript lands where the cursor already is. No ambient listening, no mystery upload.</p></div>
+    <div><h2>Read-aloud respects the draft.</h2><p>Selections read first. Reader sections read in order, with the current passage highlighted as it speaks.</p></div>
+  </section>
+  <section class="download" id="download"><div><div class="kicker">Windows installer</div><h2 style="margin:12px 0 8px;font-size:30px;letter-spacing:-.05em">Bring your voice to the vault.</h2><p style="margin:0;color:var(--muted)">Desktop sidecars stay local. Browser voices stay in the browser.</p></div><a class="button" href="#">Download for Windows</a></section>
+  <footer><span>Just Write ehis / prototype 13</span><span>Voice / explicit / local-first</span></footer>
+</body>
+</html>

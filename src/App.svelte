@@ -34,6 +34,7 @@
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import BottomBar from "$lib/components/BottomBar.svelte";
   import LockScreen from "$lib/components/LockScreen.svelte";
+import BootLoader from "$lib/components/BootLoader.svelte";
   import { unlockedDocs } from "$lib/stores/lock";
   import HelpOverlay from "$lib/components/HelpOverlay.svelte";
   import { showConflict } from "$lib/stores/conflict";
@@ -69,9 +70,6 @@
   );
 
   let ready = $state(false);
-  // Boot splash logo follows the saved theme (settings load synchronously
-  // from localStorage, so this is correct on first paint).
-  let bootLogo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
   let isMobile = $state(false);
   let sidebarVisible = $state(false);
   // Typing focus: tab bar + breadcrumb collapse while prose is flowing,
@@ -111,15 +109,37 @@
       const saved = await api.tabsGet("global");
       const ids = saved?.tab_stack_json ? JSON.parse(saved.tab_stack_json) : [];
       if (!Array.isArray(ids) || ids.length === 0) return;
-      const settled = await Promise.all(
-        ids.slice(0, 30).map((id: string) => api.docGet(id).catch(() => null))
-      );
-      const docs = settled.filter((d): d is Doc => d !== null);
-      if (docs.length === 0) return;
-      $openTabs = docs;
-      $currentDoc = (saved?.active_id && docs.find((d) => d.id === saved.active_id)) || docs[0];
-      // Open on the active doc's workspace, not a bare home shell.
-      if ($currentDoc) $currentWorkspace = $currentDoc.workspace;
+      const wanted = ids.slice(0, 30);
+      const getDoc = (id: string) => api.docGet(id).catch(() => null);
+      // Active doc first for instant paint; the rest of the strip streams
+      // in behind it in batches of 8 so cold SQLite never faces a 30-wide
+      // fan-out before the shell is useful.
+      const activeId = saved?.active_id;
+      const rest = activeId ? wanted.filter((id: string) => id !== activeId) : wanted;
+      if (activeId) {
+        const first = await getDoc(activeId);
+        if (first) {
+          $openTabs = [first];
+          $currentDoc = first;
+          $currentWorkspace = first.workspace;
+        }
+      }
+      const seen = new Set(($openTabs as Doc[]).map((d) => d.id));
+      for (let i = 0; i < rest.length; i += 8) {
+        const batch = await Promise.all(rest.slice(i, i + 8).map(getDoc));
+        const fresh = batch.filter((d): d is Doc => d !== null && !seen.has(d.id));
+        if (fresh.length === 0) continue;
+        fresh.forEach((d) => seen.add(d.id));
+        $openTabs = [...$openTabs, ...fresh];
+        if (!$currentDoc) {
+          $currentDoc = fresh[0];
+          $currentWorkspace = fresh[0].workspace;
+        }
+      }
+      // Restore the saved strip order once everything resolved.
+      const byId = new Map(($openTabs as Doc[]).map((d) => [d.id, d]));
+      const ordered = wanted.map((id: string) => byId.get(id)).filter((d): d is Doc => !!d);
+      if (ordered.length > 0) $openTabs = ordered;
     } catch {
       /* corrupted state or backend hiccup: start clean */
     } finally {
@@ -132,6 +152,64 @@
   // debounce so tabs never persist.
   const tabSaveTimerBox: { id: ReturnType<typeof setTimeout> | null } = { id: null };
 
+  /**
+   * Boot resilience: every awaited startup step races a timeout so a single
+   * hung call (event listener, watcher, restore) can never trap the app on
+   * the splash screen. Returns null on timeout/failure and records the step
+   * in localStorage (`jwe-boot-step`) for diagnosis.
+   */
+  let bootSlowSteps: string[] = [];
+  function markBootStep(step: string): void {
+    try {
+      localStorage.setItem("jwe-boot-step", step);
+    } catch {
+      /* storage unavailable: keep booting */
+    }
+  }
+  /** Report navigation-start → interactive-shell milliseconds once. */
+  let bootReported = false;
+  function reportBootMs(): void {
+    if (bootReported) return;
+    bootReported = true;
+    try {
+      const t0 = (window as unknown as { __jweBootT0?: number }).__jweBootT0;
+      if (typeof t0 === "number") {
+        const ms = Math.round(performance.now() - t0);
+        console.info(`[boot] shell interactive in ${ms}ms${bootSlowSteps.length > 0 ? ` (slow steps: ${bootSlowSteps.join(", ")})` : ""}`);
+        localStorage.setItem("jwe-boot-ms", String(ms));
+      }
+      localStorage.removeItem("jwe-boot-step");
+    } catch {
+      /* timing unavailable: boot continues */
+    }
+  }
+  async function bootStep<T>(step: string, ms: number, fn: () => Promise<T>): Promise<T | null> {
+    markBootStep(step);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const result = await Promise.race([
+        fn(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), ms);
+        }),
+      ]);
+      if (result === null && timer !== null) {
+        // fn() is still pending — stop waiting, keep booting.
+        bootSlowSteps.push(step);
+        console.warn(`Boot step "${step}" timed out after ${ms}ms — continuing without it.`);
+      }
+      return result;
+    } catch (e) {
+      console.warn(`Boot step "${step}" failed:`, e);
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  // Tab persist failure would silently lose the strip on next launch —
+  // warn once per session instead of every 800ms.
+  let tabPersistWarned = false;
   $effect(() => {
     const tabs = $openTabs;
     const activeId = $currentDoc?.id ?? null;
@@ -145,7 +223,13 @@
           active_id: activeId,
           cursor: null,
           scroll: null,
-        }).catch(() => {});
+        }).catch((e) => {
+          warnOnce("Tabs persist", e);
+          if (!tabPersistWarned) {
+            tabPersistWarned = true;
+            showToast("Tabs — couldn't save tab strip: reopened tabs may be lost on restart", "warning");
+          }
+        });
       }, 800);
     });
   });
@@ -228,7 +312,8 @@
         $currentDoc = d;
         if (!$openTabs.find((t) => t.id === d.id)) $openTabs = [d, ...$openTabs];
       })
-      .catch(() => {
+      .catch((e) => {
+        warnOnce("Tabs last-place", e);
         forgetPlace(ws, id);
       });
   });
@@ -240,6 +325,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { checkForUpdate } from "$lib/updates";
   import { showBanner, showToast } from "$lib/stores/notifications";
+  import { warnOnce } from "$lib/errors";
   import { forgetPlace, placeFor, rememberPlace, pushNavHistory } from "$lib/stores/lastPlace";
 
   const DAY_MS = 86400000;
@@ -314,42 +400,50 @@
     const replayOnboarding = () => { showOnboarding = true; };
     window.addEventListener('replay-onboarding', replayOnboarding);
 
-    // Async init (fire and forget)
+    // Async init (fire and forget) — with an absolute failsafe: the
+    // splash screen must never trap the user, even if every step hangs.
+    const bootFailsafe = setTimeout(() => {
+      if (!ready) {
+        console.warn("Boot failsafe fired — showing the shell anyway.");
+        try {
+          showBanner("Startup took too long — some services may still be starting.", "warning");
+        } catch {
+          /* banners unavailable: shell still shows */
+        }
+        ready = true;
+        reportBootMs();
+      }
+    }, 20000);
     (async () => {
+    try {
       // File watching only exists under the Tauri shell; the browser
       // preview persists to localStorage instead.
       if (!isBrowserPreview()) {
-        try {
-          disposeWidgetBridge = await initializeMainWindowBridge();
-        } catch (e) {
-          console.warn("Failed to initialize companion window bridge:", e);
-        }
-        try {
-          disposeNativeFileListener = await listenForNativeFileOpen();
-        } catch (e) {
-          console.warn("Failed to listen for native file opens:", e);
-        }
-        try {
-          await api.setupFileWatcher();
-          await listen<string>("file-changed", (event) => {
+        // Independent subscriptions boot concurrently: one slow IPC must
+        // not serialize the rest (previously sequential awaits).
+        const [bridge, nativeFile] = await Promise.all([
+          bootStep("widget-bridge", 8000, () => initializeMainWindowBridge()),
+          bootStep("native-file-listener", 8000, () => listenForNativeFileOpen()),
+          bootStep("file-watcher", 8000, () => api.setupFileWatcher()),
+          bootStep("file-changed-listener", 8000, () => listen<string>("file-changed", (event) => {
             const changedPath = event.payload;
             // If the changed file matches the current doc, show conflict banner
             if ($currentDoc && changedPath.includes($currentDoc.id)) {
               showConflict($currentDoc.id, changedPath, new Date().toISOString());
             }
-          });
+          })),
           // System-tray "Quick capture to Inbox" (§4.8): surface the window
           // on the inbox and focus its capture box.
-          await listen("tray-capture", () => {
+          bootStep("tray-capture-listener", 8000, () => listen("tray-capture", () => {
             $showSettings = false;
             $currentWorkspace = "inbox";
             setTimeout(() => {
               document.querySelector<HTMLInputElement>(".quick-capture input")?.focus();
             }, 350);
-          });
-        } catch (e) {
-          console.warn("Failed to register tray-capture listener:", e);
-        }
+          })),
+        ]);
+        disposeWidgetBridge = bridge;
+        disposeNativeFileListener = nativeFile;
       }
 
       // Onboarding: explicit versioned flag. Veterans (pre-flag settings
@@ -379,28 +473,38 @@
           });
       }
 
-    // Reminders + automatic backup live here so the toggles in
-    // Settings → Capture and Vaults actually do something.
-    runStartupMaintenance().catch(() => {});
+    // Reminders + automatic backup + activity decay are heavy post-boot
+    // work (whole-vault zip, full-table update, inbox scans). They wait for
+    // an idle moment so they never contend first paint or the tab restore.
+    const runPostBoot = () => {
+      // Reminders + automatic backup live here so the toggles in
+      // Settings → Capture and Vaults actually do something.
+      runStartupMaintenance().catch(() => {});
 
-    // Activity decay (powers smart-tab ranking): at most once a day —
-    // the engine damps stale docs 5% per run, so every launch would over-decay.
-    try {
-      const todayKey = new Date().toISOString().slice(0, 10);
-      if (localStorage.getItem("jwe-last-decay") !== todayKey) {
-        api.memoryDecayActivity().then(
-          () => {
-            try {
-              localStorage.setItem("jwe-last-decay", todayKey);
-            } catch (e) {
-              console.warn("Failed to record decay key:", e);
-            }
-          },
-          () => {}
-        );
+      // Activity decay (powers smart-tab ranking): at most once a day —
+      // the engine damps stale docs 5% per run, so every launch would over-decay.
+      try {
+        const todayKey = new Date().toISOString().slice(0, 10);
+        if (localStorage.getItem("jwe-last-decay") !== todayKey) {
+          api.memoryDecayActivity().then(
+            () => {
+              try {
+                localStorage.setItem("jwe-last-decay", todayKey);
+              } catch (e) {
+                console.warn("Failed to record decay key:", e);
+              }
+            },
+            () => {}
+          );
+        }
+      } catch (e) {
+        console.warn("Activity decay check failed:", e);
       }
-    } catch (e) {
-      console.warn("Activity decay check failed:", e);
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(() => runPostBoot(), { timeout: 8000 });
+    } else {
+      setTimeout(runPostBoot, 5000);
     }
 
       // Landing workspace (onboarding choice, default "home"): applies
@@ -409,23 +513,28 @@
       $currentWorkspace = $settings.defaultWorkspace || "home";
 
       // Restore pre-restart tabs before first paint of the shell.
-      await restoreTabs();
+      await bootStep("restore-tabs", 15000, () => restoreTabs());
 
       // PWA entry points (share target, shortcuts, notification taps) win
       // over the restore: a launch intent is an explicit user action.
       // SW → app message bridge for shares while already open.
        setupLaunchBridge();
        try {
-         await consumeLaunchParams();
+         await bootStep("launch-params", 8000, () => consumeLaunchParams());
        } catch {
          /* boot URL unreadable: normal startup continues */
        }
-        await consumeNativeLaunchFile();
+        await bootStep("native-launch-file", 8000, () => consumeNativeLaunchFile());
 
+        markBootStep("done");
         ready = true;
-
-
-
+        reportBootMs();
+      } finally {
+        clearTimeout(bootFailsafe);
+        // ready is set even if a step threw outside bootStep.
+        ready = true;
+        reportBootMs();
+      }
     })();
 
     return () => {
@@ -554,8 +663,7 @@
   </div>
 {:else}
   <div class="empty-state">
-    <img class="boot-logo" src={bootLogo} alt="Just Write ehis — pen wrote 'this' with E-tick" />
-    <div class="message">Loading...</div>
+    <BootLoader />
   </div>
 {/if}
 
@@ -611,8 +719,4 @@
     border-bottom: 1px solid var(--border-subtle);
   }
 
-  .boot-logo {
-    height: 64px;
-    width: auto;
-  }
 </style>

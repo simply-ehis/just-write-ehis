@@ -13,6 +13,7 @@
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import Icon from "$lib/components/Icon.svelte";
+  import { warnOnce } from "$lib/errors";
 
   const COLLAPSED_SIZE = 56;
   const EXPANDED_WIDTH = 520;
@@ -109,7 +110,7 @@
       if (doc && !doc.locked) {
         currentDoc.set(doc);
         openTabs.set([doc]);
-        await api.usageRecord(doc.id, "open").catch(() => {});
+        await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Widget usage telemetry", e));
       } else {
         currentDoc.set(null);
         openTabs.set([]);

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="wxTitle wxDesc">
+  <title id="wxTitle">Paper weather, super artistic loop</title>
+  <desc id="wxDesc">Layered paper collage with drifting moons, breathing sun field, drawing ink routes, and falling paper leaves.</desc>
+  <defs>
+    <pattern id="wxPaper" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M0 36L36 0" stroke="#1c1c18" stroke-opacity=".06"/>
+      <circle cx="9" cy="11" r="1" fill="#1c1c18" fill-opacity=".08"/>
+      <circle cx="27" cy="25" r="1" fill="#1c1c18" fill-opacity=".06"/>
+    </pattern>
+    <radialGradient id="wxMoonGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#2c5f77" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#2c5f77" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wxSunWash" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#d68b42"/>
+      <stop offset="55%" stop-color="#e0a63c"/>
+      <stop offset="100%" stop-color="#b04a2f"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .wx-moon-a { animation: wx-drift-a 14s ease-in-out infinite; }
+    .wx-moon-b { animation: wx-drift-b 19s ease-in-out infinite; }
+    .wx-halo { animation: wx-breathe 7s ease-in-out infinite; transform-origin: 1180px 360px; }
+    .wx-sun { animation: wx-breathe 9s ease-in-out infinite; }
+    .wx-route-a { stroke-dasharray: 100; stroke-dashoffset: 100; animation: wx-draw 8s linear infinite; }
+    .wx-route-b { stroke-dasharray: 100; stroke-dashoffset: 100; animation: wx-draw 12s linear infinite; }
+    .wx-leaf { animation: wx-fall 11s linear infinite; }
+    .wx-leaf.two { animation-duration: 15s; }
+    .wx-leaf.three { animation-duration: 18s; }
+    @keyframes wx-drift-a { 50% { transform: translate(18px, -22px); } }
+    @keyframes wx-drift-b { 50% { transform: translate(-26px, 16px); } }
+    @keyframes wx-breathe { 50% { opacity: .3; } }
+    @keyframes wx-draw { to { stroke-dashoffset: 0; } }
+    @keyframes wx-fall {
+      0% { transform: translate(0, -80px) rotate(0deg); opacity: 0; }
+      12% { opacity: .9; }
+      100% { transform: translate(-180px, 980px) rotate(-160deg); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .wx-moon-a, .wx-moon-b, .wx-halo, .wx-sun, .wx-route-a, .wx-route-b, .wx-leaf { animation: none; }
+      .wx-route-a, .wx-route-b { stroke-dashoffset: 0; }
+      .wx-leaf { opacity: 0; }
+    }
+  </style>
+  <rect width="1600" height="900" fill="#e9e3d2"/>
+  <rect width="1600" height="900" fill="url(#wxPaper)"/>
+  <path d="M120 -40h380v700H120z" fill="#88a679" opacity=".8"/>
+  <path d="M520 -40h430L820 430H520z" fill="#2c5f77" opacity=".78"/>
+  <path d="M-40 140L360 -40v230L-40 370z" fill="#d68b42"/>
+  <path d="M1240 -40h420v520h-420z" fill="#214c61" opacity=".28"/>
+  <circle cx="1180" cy="360" r="360" fill="url(#wxMoonGlow)"/>
+  <g class="wx-moon-a">
+    <circle cx="1180" cy="360" r="270" fill="#2c5f77"/>
+    <circle cx="1180" cy="360" r="208" fill="#e9e3d2"/>
+    <circle cx="1180" cy="360" r="146" fill="#2c5f77"/>
+    <circle cx="1120" cy="300" r="26" fill="#e9e3d2" opacity=".8"/>
+    <circle cx="1245" cy="430" r="14" fill="#e9e3d2" opacity=".7"/>
+  </g>
+  <g class="wx-moon-b">
+    <circle cx="330" cy="200" r="86" fill="none" stroke="#1c1c18" stroke-width="12"/>
+    <circle cx="330" cy="200" r="86" fill="#e9e3d2" opacity=".18"/>
+    <circle cx="1420" cy="150" r="34" fill="#d68b42"/>
+  </g>
+  <circle class="wx-halo" cx="1180" cy="360" r="318" fill="none" stroke="#2c5f77" stroke-width="3" opacity=".6"/>
+  <rect class="wx-sun" y="640" width="960" height="260" fill="url(#wxSunWash)"/>
+  <circle cx="330" cy="730" r="104" fill="#2c5f77"/>
+  <circle cx="330" cy="730" r="104" fill="none" stroke="#e9e3d2" stroke-width="3" stroke-dasharray="10 18" opacity=".7"/>
+  <path class="wx-route-a" d="M70 780 C 300 710, 430 830, 680 750 S 1060 700, 1330 770" pathLength="100" fill="none" stroke="#1c1c18" stroke-width="11" stroke-linecap="round"/>
+  <path class="wx-route-b" d="M120 830 C 420 860, 700 800, 980 840 S 1280 860, 1500 820" pathLength="100" fill="none" stroke="#214c61" stroke-width="5" stroke-linecap="round" opacity=".8"/>
+  <g fill="#1c1c18">
+    <rect class="wx-leaf" x="1250" y="0" width="34" height="48" transform="rotate(18 1267 24)"/>
+    <rect class="wx-leaf two" x="1450" y="-40" width="26" height="38" fill="#214c61" transform="rotate(-14 1463 -21)"/>
+    <rect class="wx-leaf three" x="1080" y="-20" width="22" height="32" fill="#b04a2f" transform="rotate(28 1091 -4)"/>
+  </g>
+  <path d="M880 650h720" stroke="#1c1c18" stroke-width="10"/>
+  <path d="M880 680h510" stroke="#1c1c18" stroke-width="4"/>
+  <text x="960" y="770" fill="#e9e3d2" font-family="monospace" font-size="24" letter-spacing="6">PAPER WEATHER / SUPER LOOP</text>
+</svg>

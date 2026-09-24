@@ -3,6 +3,8 @@
   import { api, type Doc, type BookshelfEntry } from '$lib/api';
   import { currentDoc, openTabs } from '$lib/stores/app';
   import { showToast } from '$lib/stores/notifications';
+  import { domainError } from '$lib/errors';
+  import WorkspaceError from './WorkspaceError.svelte';
   import { settings } from '$lib/stores/settings';
   import { processTransclusions } from '$lib/transclude';
   import { readImportFile } from '$lib/importFile';
@@ -186,13 +188,17 @@
     }
   }
 
+  // Visible load failure for the shelf: never a fake-empty bookshelf.
+  let booksLoadError = $state<string | null>(null);
   async function loadBooks() {
     loading = true;
+    booksLoadError = null;
     try {
       const filter = shelfFilter === 'all' ? undefined : shelfFilter;
       books = await api.readerGetBookshelf(filter);
     } catch (e) {
-      console.error('Failed to load bookshelf:', e);
+      booksLoadError = e instanceof Error ? e.message : String(e);
+      domainError('Reader', "couldn't load bookshelf", e);
     } finally {
       loading = false;
     }
@@ -420,8 +426,7 @@
       books.unshift(entry);
       showToast(`Imported "${res.title}"`, 'success');
     } catch (err) {
-      console.error('Import failed:', err);
-      showToast(`Import failed: ${err instanceof Error ? err.message : err}`, 'error');
+      domainError('Reader', "couldn't import book", err);
     }
 
     if (importInput) importInput.value = '';
@@ -484,8 +489,7 @@
       await importBookBytes('pdf', pdfPreview.name, pdfPreview.data);
       pdfPreview = null;
     } catch (err) {
-      console.error('Import failed:', err);
-      showToast(`Import failed: ${err instanceof Error ? err.message : err}`, 'error');
+      domainError('Reader', "couldn't import book", err);
     }
   }
 
@@ -540,6 +544,8 @@
 
       {#if loading}
         <div class="shelf-empty">Loading...</div>
+      {:else if booksLoadError}
+        <WorkspaceError message={`Reader — couldn't load bookshelf: ${booksLoadError}`} onRetry={() => loadBooks()} />
       {:else if books.length === 0}
         <div class="shelf-empty">
           <p>Your bookshelf is empty.</p>

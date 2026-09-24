@@ -5,6 +5,7 @@
   import { settings } from "$lib/stores/settings";
   import { fetchPlaceStamp } from "$lib/stamp";
   import { showToast } from "$lib/stores/notifications";
+  import { domainError, warnOnce } from "$lib/errors";
   import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
   import EditorPane from "$lib/components/EditorPane.svelte";
   import DeleteButton from "$lib/components/DeleteButton.svelte";
@@ -54,9 +55,9 @@
       if (!$openTabs.find((t) => t.id === doc.id)) {
         $openTabs = [doc, ...$openTabs];
       }
-      await api.usageRecord(doc.id, "open");
+      await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Logs usage telemetry", e));
     } catch (e) {
-      console.error("Failed to open doc:", e);
+      domainError("Logs", "couldn't open document", e);
     }
   }
 
@@ -127,9 +128,9 @@
       // logGetOrCreate may have minted the day — keep dots + list + footer fresh.
       await refreshEntries();
       await loadTouchedToday();
-      stampFreshLog(doc, dateStr).catch(() => {});
+      stampFreshLog(doc, dateStr).catch((e) => warnOnce("Logs stamp", e));
     } catch (e) {
-      console.error("Failed to open log:", e);
+      domainError("Logs", "couldn't open log", e);
     }
     loading = false;
   }
@@ -165,7 +166,7 @@
       await refreshEntries();
       await loadTouchedToday();
     } catch (e) {
-      console.error("Quick capture failed:", e);
+      domainError("Logs", "couldn't save capture", e);
     }
   }
 

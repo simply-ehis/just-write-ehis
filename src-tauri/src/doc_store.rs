@@ -2565,7 +2565,9 @@ impl Database {
     }
 
     pub fn backup_create(&self) -> Result<String, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        // Filesystem work happens OUTSIDE the conn mutex: holding it across
+        // directory creation + a full VACUUM copy would stall every other
+        // command on a large vault.
         let backup_dir = dirs::data_local_dir()
             .unwrap_or_default()
             .join("writing-app")
@@ -2576,6 +2578,7 @@ impl Database {
         let backup_path = backup_dir.join(format!("backup_{}.db", timestamp));
 
         // Use VACUUM INTO for backup (SQLite 3.27.0+)
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute_batch(&format!("VACUUM INTO '{}';", backup_path.to_string_lossy()))
             .map_err(|e| e.to_string())?;
 
@@ -3840,6 +3843,17 @@ mod entity_tests {
         db.save_doc(SaveDocRequest { id: scene_three.clone(), title: None, content: Some(String::new()), status: None, frontmatter_json: None, parent_id: None }).unwrap();
         db.bible_replace_scene_memory(&project, &scene_three, "", None, &[]).unwrap();
         assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_three), "empty content must clear scene memory");
+        let stale = db.bible_replace_scene_memory(&project, &scene_two, "stale", Some("not the saved content"), &[
+            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "stale".into(), attribute_key: None, attribute_value: None },
+        ]).unwrap();
+        assert!(stale.skipped && db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_two));
+        let project_two = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "project".into(), title: "Other Book".into(),
+            parent_id: None, content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        db.move_doc(MoveDocRequest { id: scene_two.clone(), new_parent_id: Some(project_two.clone()), new_path: None }).unwrap();
+        assert_eq!(db.bible_scope_id(&scene_two).unwrap(), project_two);
+        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_two));
         db.set_locked(&scene_one, true).unwrap();
         assert!(!db.bible_source_allowed(&scene_one).unwrap());
         assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_one));

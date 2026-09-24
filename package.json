@@ -19,6 +19,7 @@
     "test:novel": "node tests/novel-surface.mjs",
     "test:shell": "node tests/shell-nav.mjs",
     "test:themes": "node tests/theme-sweep.mjs",
+    "test:tabs": "node tests/tabs-functional.mjs",
     "test:ai": "node tests/ai-request-unit.mjs",
     "test:writeback": "node tests/writeback-queue.mjs",
     "test:aierror": "node tests/ai-error-probe.mjs",

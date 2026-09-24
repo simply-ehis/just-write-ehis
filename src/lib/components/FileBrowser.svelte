@@ -3,6 +3,7 @@
   import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
+  import { domainError } from "$lib/errors";
 
   let { onSelect }: { onSelect?: (path: string, isDir: boolean) => void } = $props();
 
@@ -35,7 +36,7 @@
         try { localStorage.setItem("vault-path", p); } catch (e) { console.warn("Failed to save vault path:", e); }
         navigateTo(p);
       }
-    }).catch(() => {});
+    }).catch((e) => domainError("Files", "couldn't locate vault", e));
   });
 
   async function navigateTo(path: string) {
@@ -44,7 +45,7 @@
       currentPath = path;
       pathInput = path;
     } catch (e) {
-      console.error("Failed to list dir:", e);
+      domainError("Files", "couldn't list folder", e);
     }
   }
 

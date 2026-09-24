@@ -3,6 +3,7 @@
   import { workspaces } from "$lib/stores/app";
   import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
+  import { domainError } from "$lib/errors";
   import { isWindowsRuntime } from "$lib/widgetAutostart";
   import Icon from "$lib/components/Icon.svelte";
 
@@ -103,7 +104,7 @@ Delete this doc whenever you're ready. Happy writing.
         $settings = { ...$settings, templates: [...$settings.templates, sample] };
       }
     } catch (e) {
-      console.warn("Starter seed failed (vault may be unwritable):", e instanceof Error ? e.message : e);
+      domainError("Setup", "couldn't create welcome document (vault may be unwritable)", e);
     }
   }
 

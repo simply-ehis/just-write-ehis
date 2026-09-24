@@ -21,6 +21,7 @@
   import RhythmPanel from "./RhythmPanel.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
   import MicButton from "./MicButton.svelte";
+  import { domainError, warnOnce } from "$lib/errors";
   import ReadAloudButton from "./ReadAloudButton.svelte";
   import Icon from "./Icon.svelte";
   import { downloadConvertOutput, downloadFountain } from "$lib/download";
@@ -226,7 +227,8 @@ import { countWords } from "$lib/text";
         previewPos = { x: e.clientX, y: e.clientY };
         previewVisible = true;
       }
-    }).catch(() => {
+    }).catch((e) => {
+      warnOnce("Write link preview", e);
       previewVisible = false;
     });
   }
@@ -296,7 +298,8 @@ import { countWords } from "$lib/text";
       .then((w) => {
         bibleWords = w;
       })
-      .catch(() => {
+      .catch((e) => {
+        warnOnce("Write story-bible vocab", e);
         bibleWords = new Set();
       });
   }
@@ -585,16 +588,17 @@ import { countWords } from "$lib/text";
         const now = Date.now();
         if (now - lastMetricAt > 60000) {
           lastMetricAt = now;
-          api.usageRecord(editingDocId, "write").catch(() => {});
+          api.usageRecord(editingDocId, "write").catch((e) => warnOnce("Write usage telemetry", e));
           if (!companionMode && $settings.craftProfilingEnabled) {
             const stats = craftStats(content);
-            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch(() => {});
-            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch(() => {});
-            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch(() => {});
+            api.memoryRecordMetric(editingDocId, "filter_words", stats.filterWords).catch((e) => warnOnce("Write craft telemetry", e));
+            api.memoryRecordMetric(editingDocId, "dialogue_ratio", stats.dialogue).catch((e) => warnOnce("Write craft telemetry", e));
+            api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch((e) => warnOnce("Write craft telemetry", e));
           }
         }
       } catch (e) {
-        console.error("Failed to save:", e);
+        // Data-loss risk: the user must see this, not just the console.
+        domainError("Write", "couldn't save document", e);
       }
     });
   }
@@ -618,7 +622,7 @@ import { countWords } from "$lib/text";
         try {
           await api.atomicSave(editingDocId, content);
         } catch (e) {
-          console.error("Failed to flush to disk:", e);
+          domainError("Write", "couldn't flush document to disk", e);
         }
       });
     }, 5000);
@@ -825,7 +829,7 @@ import { countWords } from "$lib/text";
       dialogueTrend = d;
       sentenceTrend = s;
     } catch (e) {
-      console.warn("Craft metrics trend load failed:", e);
+      warnOnce("Write craft trends", e);
     }
   }
 

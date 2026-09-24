@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * MicButton — Moonshine STT.
+   * MicButton — Moonshine STT on desktop, browser dictation on web.
    * Press to record → press again to stop → transcribe → insert at cursor.
    * Captures real 16 kHz mono WAV via WebAudio (ScriptProcessor, muted tap)
    * and posts it to the transcribe.cpp STT sidecar.
@@ -17,6 +17,7 @@ import {
   STT_FETCH_HINT,
 } from '$lib/stores/audio';
 import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
+import { isBrowserPreview } from '$lib/api';
 
   let {
     onTranscribe = (text: string) => {},
@@ -32,8 +33,12 @@ import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
   let offerBrowserVoice = $state(false);
   let browserVoiceOn = $state(false);
   let browserHandle = $state<VoiceHandle | null>(null);
+  // Web has no STT sidecar: use browser dictation directly instead of
+  // probing Moonshine and failing first.
+  const browserMode = isBrowserPreview();
+  let unsupportedBrowserVoice = $state(browserMode && !voiceSupported());
   // Gated only after a probe attempt: never disabled on cold boot.
-  let gated = $derived($sttProbed && !$sttModelLoaded);
+  let gated = $derived(browserMode ? unsupportedBrowserVoice : $sttProbed && !$sttModelLoaded);
   // WebAudio capture chain — produces real 16 kHz mono WAV for the STT server.
   let audioCtx: AudioContext | null = null;
   let micStream: MediaStream | null = null;
@@ -54,6 +59,15 @@ import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
   }
 
   async function startRecording() {
+    if (browserMode) {
+      offerBrowserVoice = false;
+      if (voiceSupported()) {
+        startBrowserDictation();
+        return;
+      }
+      $sttError = "Voice input not supported in this browser.";
+      return;
+    }
     // Lazy-load sidecar on first tap
     offerBrowserVoice = false;
     const ready = await ensureStt();
@@ -254,8 +268,8 @@ import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
     }
     void handleToggle();
   }}
-  title={gated ? STT_FETCH_HINT : recording ? 'Stop recording' : 'Record (Moonshine Voice STT)'}
-  aria-label={gated ? 'Voice model not loaded' : recording ? 'Stop recording' : 'Start voice recording'}
+  title={gated ? (browserMode ? 'Voice input not supported in this browser' : STT_FETCH_HINT) : recording || browserVoiceOn ? 'Stop recording' : browserMode ? 'Dictate (browser voice)' : 'Record (Moonshine Voice STT)'}
+  aria-label={gated ? 'Voice input unavailable' : recording || browserVoiceOn ? 'Stop recording' : browserMode ? 'Start browser dictation' : 'Start voice recording'}
 >
   {#if processing}
     <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">

@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * ReadAloudButton — Kokoro-82M TTS.
+   * ReadAloudButton — Kokoro-82M TTS on desktop, browser voice on web.
    * Reads selected text (or entire doc) aloud.
    * Lazy-loads TTS sidecar on first tap (A7.6).
    */
@@ -16,7 +16,11 @@ import {
   ttsStarting,
   TTS_FETCH_HINT,
 } from '$lib/stores/audio';
-import { chunkText } from '$lib/readerSections';
+import { chunkText, stripForTts } from '$lib/readerSections';
+import { isBrowserPreview } from '$lib/api';
+import { speakBrowserText, stopBrowserSpeech, ttsSupported } from '$lib/voice';
+import { settings } from '$lib/stores/settings';
+import { get } from 'svelte/store';
 
   let {
     getText = () => '',
@@ -35,14 +39,48 @@ import { chunkText } from '$lib/readerSections';
   let playing = $state(false);
   let loading = $state(false);
   let cancelled = false;
+  // Web has no TTS sidecar: use the browser voice directly instead of
+  // probing Kokoro and failing first.
+  const browserMode = isBrowserPreview();
+  let usingBrowser = $state(false);
   // Gated only after a probe attempt: never disabled on cold boot.
-  let gated = $derived($ttsProbed && !$ttsModelLoaded);
+  let gated = $derived(browserMode ? false : $ttsProbed && !$ttsModelLoaded);
 
   async function handleToggle() {
     if (playing || loading) {
       stopPlayback();
     } else {
       await startPlayback();
+    }
+  }
+
+  /** Speak one browser chunk; false when cancelled or failed. */
+  async function playBrowserChunk(text: string): Promise<boolean> {
+    if (cancelled) return false;
+    const voice = get(settings);
+    usingBrowser = true;
+    playing = true;
+    $ttsPlaying = true;
+    try {
+      await speakBrowserText(text, { langCode: voice.ttsLangCode, rate: voice.ttsSpeed });
+    } catch (e) {
+      if (!cancelled) $ttsError = e instanceof Error ? e.message : `TTS failed: ${e}`;
+      return false;
+    } finally {
+      playing = false;
+      $ttsPlaying = false;
+      usingBrowser = false;
+    }
+    return !cancelled;
+  }
+
+  /** Speak markdown-free chunks sequentially; false when cancelled. */
+  async function playBrowserTexts(texts: string[]): Promise<void> {
+    for (const text of texts) {
+      if (cancelled) break;
+      for (const chunk of chunkText(stripForTts(text))) {
+        if (!(await playBrowserChunk(chunk))) break;
+      }
     }
   }
 
@@ -63,6 +101,47 @@ import { chunkText } from '$lib/readerSections';
   }
 
   async function startPlayback() {
+    // A live selection always wins (read exactly what is selected).
+    const selected = getSelection();
+    const selText = selected.trim();
+
+    if (browserMode) {
+      if (!ttsSupported()) {
+        $ttsError = "Read-aloud is not supported in this browser.";
+        return;
+      }
+      cancelled = false;
+      loading = true;
+      $ttsError = null;
+      try {
+        // Section flow (Reader): one utterance per section with highlight —
+        // never the whole book in one giant call.
+        const sections = !selText && getSections ? getSections().filter((s) => s.text.trim()) : null;
+        if (sections && sections.length > 0) {
+          for (let i = 0; i < sections.length; i++) {
+            if (cancelled) break;
+            onSection?.(i);
+            await playBrowserTexts([sections[i].text]);
+          }
+          onSection?.(null);
+        } else {
+          // Legacy single-shot path (editors without sections).
+          const text = selText || getText();
+          if (!text.trim()) return;
+          loading = false;
+          await playBrowserTexts([text]);
+        }
+      } catch (e) {
+        if (!cancelled) $ttsError = e instanceof Error ? e.message : `TTS failed: ${e}`;
+      } finally {
+        loading = false;
+        playing = false;
+        $ttsPlaying = false;
+        onSection?.(null);
+      }
+      return;
+    }
+
     // Lazy-load sidecar on first tap
     const ready = await ensureTts();
     if (!ready) return;
@@ -70,12 +149,7 @@ import { chunkText } from '$lib/readerSections';
       $ttsError = TTS_FETCH_HINT;
       return;
     }
-
-    // A live selection always wins (read exactly what is selected).
-    const selected = getSelection();
-    const selText = selected.trim();
-    // Section flow (Reader): one call per section with highlight —
-    // never the whole book in one giant call.
+    // Section flow (Reader): one call per section with highlight.
     const sections = !selText && getSections ? getSections().filter((s) => s.text.trim()) : null;
 
     cancelled = false;
@@ -112,7 +186,8 @@ import { chunkText } from '$lib/readerSections';
   function stopPlayback() {
     cancelled = true;
     onSection?.(null);
-    void stopTtsPlayback();
+    if (usingBrowser) stopBrowserSpeech();
+    else void stopTtsPlayback();
     loading = false;
     playing = false;
     $ttsPlaying = false;
@@ -125,8 +200,8 @@ import { chunkText } from '$lib/readerSections';
   class:loading
   disabled={gated}
   onclick={handleToggle}
-  title={gated ? TTS_FETCH_HINT : playing || loading ? 'Stop reading aloud' : 'Read aloud (Kokoro TTS)'}
-  aria-label={gated ? 'Voice model not loaded' : playing || loading ? 'Stop reading aloud' : 'Read text aloud'}
+  title={gated ? TTS_FETCH_HINT : playing || loading ? 'Stop reading aloud' : browserMode ? 'Read aloud (browser voice)' : 'Read aloud (Kokoro TTS)'}
+  aria-label={gated ? 'Voice model not loaded' : playing || loading ? 'Stop reading aloud' : browserMode ? 'Read text aloud with the browser voice' : 'Read text aloud'}
 >
   {#if playing}
     <!-- Stop icon (audio live; spinner shows while fetching instead) -->

@@ -1,11 +1,9 @@
 /**
- * voice — Web Speech API dictation for capture surfaces.
+ * voice — browser speech for web capture and read-aloud surfaces.
  *
- * The STT sidecar (MicButton) needs the desktop app beside it; on a phone
- * PWA there is no sidecar, so capture falls back to the platform speech
- * recognizer (on-device on Android Chrome / Samsung Internet / Edge).
- * Feature-detected: `voiceSupported()` is false on desktop Firefox etc.,
- * and those surfaces simply don't render the mic button.
+ * The desktop app keeps using its local Moonshine/Kokoro sidecars. The web
+ * build has no sidecars, so it uses the browser's built-in speech
+ * recognition and synthesis instead. Both paths are feature-detected.
  */
 
 export function voiceSupported(): boolean {
@@ -126,4 +124,76 @@ export function startDictation(
       }
     },
   };
+}
+
+/** Settings language codes mapped to browser speech locales. */
+const TTS_LANG_LOCALES: Record<string, string> = {
+  a: "en-US",
+  b: "en-GB",
+  j: "ja-JP",
+  z: "zh-CN",
+  e: "es-ES",
+  f: "fr-FR",
+  h: "hi-IN",
+  i: "it-IT",
+  p: "pt-PT",
+};
+
+/** Browser locale for read-aloud, falling back to the browser language. */
+export function browserTtsLocale(langCode?: string): string {
+  if (langCode && TTS_LANG_LOCALES[langCode]) return TTS_LANG_LOCALES[langCode];
+  try {
+    return navigator.language || "en-US";
+  } catch {
+    return "en-US";
+  }
+}
+
+/** True when the browser exposes built-in speech synthesis. */
+export function ttsSupported(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(window.speechSynthesis) && typeof SpeechSynthesisUtterance !== "undefined";
+}
+
+export interface BrowserSpeechOptions {
+  langCode?: string;
+  rate?: number;
+}
+
+function clampSpeechRate(rate: number): number {
+  if (!Number.isFinite(rate)) return 1;
+  return Math.min(2, Math.max(0.5, rate));
+}
+
+/**
+ * Speak text with the browser's built-in voice. Empty text resolves
+ * immediately; unsupported browsers reject with a human-readable error.
+ */
+export function speakBrowserText(text: string, options: BrowserSpeechOptions = {}): Promise<void> {
+  const cleaned = text.trim();
+  if (!cleaned) return Promise.resolve();
+  if (!ttsSupported()) {
+    return Promise.reject(new Error("Read-aloud is not supported in this browser."));
+  }
+  return new Promise((resolve, reject) => {
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    utterance.lang = browserTtsLocale(options.langCode);
+    utterance.rate = clampSpeechRate(options.rate ?? 1);
+    utterance.onend = () => resolve();
+    utterance.onerror = (event) => {
+      reject(new Error(`Browser speech failed (${event?.error || "unknown error"}).`));
+    };
+    // One utterance at a time: a fresh call replaces any live speech.
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+/** Stop browser read-aloud. Safe to call when nothing is speaking. */
+export function stopBrowserSpeech(): void {
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    /* already stopped */
+  }
 }

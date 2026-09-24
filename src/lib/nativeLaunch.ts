@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api, isBrowserPreview } from "$lib/api";
+import { warnOnce } from "$lib/errors";
 import { currentDoc, currentWorkspace, openTabs, showSettings } from "$lib/stores/app";
 import { showToast } from "$lib/stores/notifications";
 
@@ -11,7 +12,7 @@ export async function openNativeFile(path: string): Promise<void> {
     currentWorkspace.set(doc.workspace);
     showSettings.set(false);
     openTabs.update((tabs) => tabs.some((tab) => tab.id === doc.id) ? tabs : [doc, ...tabs]);
-    await api.usageRecord(doc.id, "open").catch(() => {});
+    await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Launch usage telemetry", e));
   } catch (e) {
     showToast(`Couldn't open ${path}: ${e instanceof Error ? e.message : e}`, "error");
   }

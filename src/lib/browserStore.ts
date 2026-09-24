@@ -856,4 +856,13 @@ class BrowserStore {
   }
 }
 
-export const browserStore = new BrowserStore();
+/**
+ * Lazy singleton: constructing the store does ~15 sync localStorage reads
+ * plus a full entity reindex. It backs the web preview only, so desktop
+ * boot must never pay for it at import time — first preview call builds it.
+ */
+let _browserStore: BrowserStore | null = null;
+export function getBrowserStore(): BrowserStore {
+  if (!_browserStore) _browserStore = new BrowserStore();
+  return _browserStore;
+}

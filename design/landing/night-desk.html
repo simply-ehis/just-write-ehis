@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis night desk direction: a warm late-hours writing room with local files and memory.">
+  <title>Just Write ehis — Night Desk</title>
+  <style>
+    :root { --bg:#191410; --panel:#221a14; --panel-2:#2b2118; --ink:#f2e7d5; --muted:#b8a88f; --line:rgba(242,231,213,.22); --amber:#e4a33c; --amber-deep:#8a5f22; --mono:"Cascadia Mono",Consolas,monospace; --sans:"Avenir Next","Segoe UI",Verdana,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(1200px 620px at 18% 0%, rgba(228,163,60,.22), transparent 60%), var(--bg); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 30px; border-bottom:1px solid var(--line); }
+    .brand img { display:block; width:150px; height:auto; filter:invert(1); }
+    .top nav { display:flex; gap:24px; color:var(--muted); font-size:13px; }
+    .hero { width:min(1240px,calc(100% - 60px)); margin:auto; display:grid; grid-template-columns:.95fr 1.05fr; gap:60px; align-items:center; padding:76px 0 84px; }
+    .kicker { color:var(--amber); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:18px 0; font-size:clamp(3.2rem,6.5vw,6.2rem); line-height:.88; letter-spacing:-.07em; }
+    .lede { max-width:520px; margin:0; color:var(--muted); font-size:18px; line-height:1.6; }
+    .actions { display:flex; gap:10px; margin-top:30px; }
+    .button { min-height:46px; display:inline-flex; align-items:center; padding:0 16px; border:1px solid var(--amber); background:var(--amber); color:#241708; font-size:13px; font-weight:700; }
+    .button.ghost { background:transparent; color:var(--ink); border-color:var(--line); }
+    .desk { position:relative; border:1px solid var(--line); background:linear-gradient(180deg,rgba(228,163,60,.16),transparent 42%), var(--panel); box-shadow:0 30px 80px rgba(0,0,0,.45); }
+    .lamp { height:10px; background:linear-gradient(90deg,transparent,var(--amber),transparent); opacity:.8; }
+    .desk-head { display:flex; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--line); color:var(--muted); font:11px var(--mono); text-transform:uppercase; }
+    .manuscript { padding:30px 32px 34px; }
+    .manuscript h2 { margin:0 0 14px; font-size:34px; letter-spacing:-.05em; }
+    .manuscript p { max-width:480px; margin:0; color:#d9c9ac; font-size:17px; line-height:1.75; }
+    .meter { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; margin-top:28px; border:1px solid var(--line); background:var(--line); }
+    .meter div { padding:14px; background:var(--panel-2); }
+    .meter b { display:block; font-size:20px; }
+    .meter span { color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    .section { width:min(1240px,calc(100% - 60px)); margin:auto; padding:72px 0; border-top:1px solid var(--line); }
+    .rooms { display:grid; grid-template-columns:1.1fr .9fr; gap:1px; border:1px solid var(--line); background:var(--line); }
+    .rooms article { padding:30px; background:var(--panel); }
+    .rooms article:first-child { background:var(--amber); color:#241708; }
+    .rooms article:first-child p { color:#4d3a18; }
+    .rooms h3 { margin:0 0 12px; font-size:30px; letter-spacing:-.05em; }
+    .rooms p { margin:0; color:var(--muted); line-height:1.65; }
+    .night { display:grid; grid-template-columns:1fr 1fr; gap:48px; align-items:end; }
+    .night h2 { margin:0 0 14px; font-size:clamp(2.2rem,4.5vw,4rem); line-height:.92; letter-spacing:-.06em; }
+    .night p { margin:0; color:var(--muted); font-size:17px; line-height:1.6; }
+    footer { width:min(1240px,calc(100% - 60px)); margin:auto; display:flex; justify-content:space-between; padding:26px 0 38px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    @media (max-width:920px) { .hero, .rooms, .night { grid-template-columns:1fr; } .rooms article:first-child { order:-1; } .top nav { display:none; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis"></a>
+    <nav><a href="#rooms">Rooms</a><a href="#night">Ownership</a><a href="#download">Download</a></nav>
+    <a class="button" href="#download">Download for Windows</a>
+  </header>
+  <section class="hero">
+    <div>
+      <div class="kicker">10 / Night desk</div>
+      <h1>Stay late. Keep everything.</h1>
+      <p class="lede">A warm, focused room for the hours when the work finally talks back. Local files, story memory, and quiet tools that do not interrupt.</p>
+      <div class="actions"><a class="button" href="#download">Download for Windows</a><a class="button ghost" href="#rooms">Tour the rooms</a></div>
+    </div>
+    <div class="desk" aria-label="Night manuscript">
+      <div class="lamp" aria-hidden="true"></div>
+      <div class="desk-head"><span>Chapter 04 / scene 12</span><span>saved locally · 23:41</span></div>
+      <div class="manuscript"><h2>The lamp stays on.</h2><p>The draft, the map, the bible, and the next scene stay within reach. Nothing uploads itself while you are thinking.</p><div class="meter"><div><b>2,418</b><span>words tonight</span></div><div><b>12</b><span>scenes linked</span></div><div><b>01</b><span>vault awake</span></div></div></div>
+    </div>
+  </section>
+  <main>
+    <section class="section" id="rooms"><div class="rooms"><article><h3>Write first.</h3><p>A calm editor with autosave, local history, and optional assistance that waits to be asked.</p></article><article><h3>Remember everything.</h3><p>Names, facts, contradictions, and open threads stay attached to the scenes that created them.</p></article></div></section>
+    <section class="section" id="night"><div class="night"><div><h2>Night work deserves a vault, not a tab.</h2><p>Windows opens .txt and .md into the waiting session. Snapshots and exports keep the morning safe from the night’s courage.</p></div><div id="download"><a class="button" href="#">Download for Windows</a><p style="margin-top:16px;color:var(--muted)">One installer. Your files stay readable without us.</p></div></div></section>
+  </main>
+  <footer><span>Just Write ehis / prototype 10</span><span>Night desk / warm / local-first</span></footer>
+</body>
+</html>

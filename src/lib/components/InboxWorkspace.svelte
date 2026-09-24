@@ -8,6 +8,7 @@
   import DocDetail from "$lib/components/DocDetail.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
 import { formatRelativeTime } from "$lib/text";
+  import { domainError } from "$lib/errors";
 
   let inboxItems = $state<Doc[]>([]);
   let loading = $state(false);
@@ -31,7 +32,7 @@ import { formatRelativeTime } from "$lib/text";
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
     } catch (e) {
-      console.error("Failed to load inbox:", e);
+      domainError("Inbox", "couldn't load captures", e);
     }
     loading = false;
   }
@@ -43,7 +44,7 @@ import { formatRelativeTime } from "$lib/text";
       inboxItems = [doc, ...inboxItems];
       quickCapture = "";
     } catch (e) {
-      console.error("Quick capture failed:", e);
+      domainError("Inbox", "couldn't save capture", e);
     }
   }
 
@@ -75,7 +76,7 @@ import { formatRelativeTime } from "$lib/text";
       if ($currentDoc?.id === item.id) $currentDoc = newDoc;
       if (!$openTabs.find((t) => t.id === newDoc.id)) $openTabs = [newDoc, ...$openTabs];
     } catch (e) {
-      console.error("Failed to move item:", e);
+      domainError("Inbox", "couldn't move capture", e);
     }
   }
 
@@ -93,7 +94,7 @@ import { formatRelativeTime } from "$lib/text";
         $currentDoc = $openTabs[0] ?? null;
       }
     } catch (e) {
-      console.error("Failed to delete item:", e);
+      domainError("Inbox", "couldn't delete capture", e);
     }
   }
 

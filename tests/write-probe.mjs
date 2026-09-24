@@ -62,6 +62,14 @@ if (dom.window.Range) {
 }
 if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+const appendChild = dom.window.document.head.appendChild.bind(dom.window.document.head);
+dom.window.document.head.appendChild = (node) => {
+  const result = appendChild(node);
+  if (node.tagName === "LINK" && node.rel === "stylesheet") {
+    setTimeout(() => node.dispatchEvent(new dom.window.Event("load")), 0);
+  }
+  return result;
+};
 globalThis.window.innerWidth = 1280;
 globalThis.window.innerHeight = 800;
 globalThis.devicePixelRatio = 1;

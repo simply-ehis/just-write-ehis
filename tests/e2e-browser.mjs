@@ -168,7 +168,7 @@ async function updaterWiring() {
     check(`main window grants ${perm}`, mainGrants.has(perm));
   }
   const cargo = await readFile(join(root, "src-tauri/Cargo.toml"), "utf8");
-  check("Cargo wires tauri-plugin-updater", cargo.includes('tauri-plugin-updater = "2"'));
+  check("Cargo wires tauri-plugin-updater", cargo.includes('tauri-plugin-updater = "2"') || cargo.includes('tauri-plugin-updater = "=2.'));
   check("Cargo wires tauri-plugin-process", cargo.includes('tauri-plugin-process = "2"'));
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
@@ -401,10 +401,13 @@ async function auditBatchWiring() {
   check("model gates + real TTS stop", audio.includes("sttProbed") && audio.includes("stopWavPlayback") && audio.includes("Decode caveat"));
   const mic = await readFile(join(root, "src/lib/components/MicButton.svelte"), "utf8");
   check("mic gate + failover + touch size", mic.includes("STT_FETCH_HINT") && mic.includes("offerBrowserVoice") && mic.includes("44px"));
+  check("web mic uses browser dictation first", mic.includes("browserMode") && mic.includes("startBrowserDictation") && mic.includes("Dictate (browser voice)"));
   const tts = await readFile(join(root, "src/lib/components/ReadAloudButton.svelte"), "utf8");
   check("tts loading + gate + touch size", tts.includes("loading") && tts.includes("TTS_FETCH_HINT") && tts.includes("44px") && !tts.includes("playWavBase64('')"));
+  check("web read-aloud uses browser voice", tts.includes("speakBrowserText") && tts.includes("stopBrowserSpeech") && tts.includes("stripForTts") && tts.includes("Read aloud (browser voice)"));
   const vlib = await readFile(join(root, "src/lib/voice.ts"), "utf8");
   check("web speech error reasons", vlib.includes("voiceErrorReason") && vlib.includes("not-allowed"));
+  check("browser speech synthesis helpers", vlib.includes("ttsSupported") && vlib.includes("speakBrowserText") && vlib.includes("stopBrowserSpeech") && vlib.includes("browserTtsLocale"));
   const spane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
   check("settings voice validation", spane.includes("probePythonPath") && spane.includes("validateSttModel") && spane.includes("sidecarPythonProbe"));
   check("python probe wired end to end", (await readFile(join(root, "src/lib/api.ts"), "utf8")).includes("sidecarPythonProbe") && (await readFile(join(root, "src/lib/browserBackend.ts"), "utf8")).includes("sidecar_python_probe"));
@@ -569,7 +572,7 @@ async function recentWiring() {
   // Split editors in Write.
   const jw = await readFile(join(root, "src/lib/components/JustWriteWorkspace.svelte"), "utf8");
   check("write splits side-by-side", jw.includes("openSplit") && jw.includes("closeSplit") && jw.includes("split-picker"));
-  check("split pane autosaves", jw.includes("handleSplitChange") && jw.includes("Failed to save split doc"));
+  check("split pane autosaves", jw.includes("handleSplitChange") && jw.includes("couldn't save split document"));
   // Typing auto-hide chrome.
   check("auto-hide setting exists", settings.includes("autoHideChrome"));
   check("shell hides chrome while typing", app.includes("typing-focus") && app.includes("editor-typing"));

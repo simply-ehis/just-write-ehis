@@ -32,7 +32,7 @@ const PALETTES: Record<string, EditorPalette> = {
     radius: "6px",
   },
   dark: {
-    bg: "#1B1A15", fg: "#ECE7D8", muted: "#9C9686", overlay: "#2A2721",
+    bg: "#100E0B", fg: "#ECE7D8", muted: "#9C9686", overlay: "#1C1815",
     accent: "#8FC7A9",
     sel: "#8FC7A930", selFocus: "#8FC7A940",
     match: "#8FC7A940", matchSel: "#8FC7A980",

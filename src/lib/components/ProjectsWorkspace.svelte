@@ -11,6 +11,8 @@
   import DockSplit from "./DockSplit.svelte";
   import BoardColumn from "./BoardColumn.svelte";
   import { statusColor, BOARD_STATUSES } from "$lib/status";
+  import { domainError, warnOnce } from "$lib/errors";
+  import WorkspaceError from "./WorkspaceError.svelte";
 
   let projects = $state<Doc[]>([]);
   let selectedProject = $state<Doc | null>(null);
@@ -30,7 +32,7 @@
     if (!$openTabs.find((t) => t.id === doc.id)) {
       $openTabs = [doc, ...$openTabs];
     }
-    api.usageRecord(doc.id, "open").catch(() => {});
+    api.usageRecord(doc.id, "open").catch((e) => warnOnce("Projects usage telemetry", e));
   }
 
   function closeDetail() {
@@ -47,11 +49,15 @@
 
   const statusOrder = BOARD_STATUSES;
 
+  // Visible load failure for the list: never a fake-empty board.
+  let projectsLoadError = $state<string | null>(null);
   async function loadProjects() {
+    projectsLoadError = null;
     try {
       projects = await api.docListByWorkspace("projects");
     } catch (e) {
-      console.error("Failed to load projects:", e);
+      projectsLoadError = e instanceof Error ? e.message : String(e);
+      domainError("Projects", "couldn't load projects", e);
     }
   }
 
@@ -82,9 +88,9 @@
       if (!$openTabs.find(t => t.id === project.id)) {
         $openTabs = [project, ...$openTabs];
       }
-      await api.usageRecord(project.id, "open");
+      await api.usageRecord(project.id, "open").catch((e) => warnOnce("Projects usage telemetry", e));
     } catch (e) {
-      console.error("Failed to load project details:", e);
+      domainError("Projects", "couldn't load project details", e);
     }
     loading = false;
   }
@@ -99,7 +105,7 @@
       if (!boardColumns[status]) boardColumns[status] = [];
       boardColumns[status].push(doc);
     } catch (e) {
-      console.error("Failed to add task:", e);
+      domainError("Projects", "couldn't add task", e);
     }
   }
 
@@ -110,7 +116,7 @@
       projects = [...projects, doc];
       await selectProject(doc);
     } catch (e) {
-      console.error("Failed to create project:", e);
+      domainError("Projects", "couldn't create project", e);
     }
   }
 
@@ -126,7 +132,7 @@
       if (!boardColumns[newStatus]) boardColumns[newStatus] = [];
       boardColumns[newStatus].push(doc);
     } catch (e) {
-      console.error("Failed to move task:", e);
+      domainError("Projects", "couldn't move task", e);
     }
   }
 
@@ -178,6 +184,9 @@
       </span>
     </div>
     <div class="project-list">
+      {#if projectsLoadError}
+        <WorkspaceError message={`Projects — couldn't load projects: ${projectsLoadError}`} onRetry={() => loadProjects()} />
+      {/if}
       {#each projects as project}
         <button
           class="project-item"

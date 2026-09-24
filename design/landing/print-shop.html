@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis print shop direction: the writing app as a letterpress edition.">
+  <title>Just Write ehis — Print Shop</title>
+  <style>
+    :root { --paper:#efe7d3; --card:#f7f1dd; --ink:#1e1c16; --muted:#6d675a; --line:#1e1c16; --brick:#a83c26; --serif:Georgia,"Times New Roman",serif; --mono:"Cascadia Mono",Consolas,monospace; --sans:"Avenir Next","Segoe UI",Verdana,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 28px; border-bottom:2px solid var(--line); background:var(--card); }
+    .brand img { display:block; width:150px; height:auto; }
+    .top nav { display:flex; gap:22px; font:11px var(--mono); text-transform:uppercase; }
+    .poster { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; border:2px solid var(--line); background:var(--card); }
+    .poster-head { display:flex; justify-content:space-between; padding:14px 24px; border-bottom:2px solid var(--line); font:11px var(--mono); text-transform:uppercase; }
+    .poster-body { padding:56px 48px 48px; text-align:left; }
+    .kicker { color:var(--brick); font:11px var(--mono); letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:20px 0; font-family:var(--serif); font-size:clamp(3.6rem,9vw,8.6rem); line-height:.86; letter-spacing:-.04em; }
+    h1 em { color:var(--brick); }
+    .lede { max-width:560px; margin:0; color:var(--muted); font-size:19px; line-height:1.55; }
+    .press { display:grid; grid-template-columns:1.2fr .8fr; gap:0; margin-top:48px; border:2px solid var(--line); }
+    .press div { padding:30px; }
+    .press div + div { border-left:2px solid var(--line); background:var(--ink); color:var(--paper); }
+    .press div + div p { color:#b9b09a; }
+    .press h2 { margin:0 0 12px; font-family:var(--serif); font-size:38px; line-height:1; }
+    .press p { margin:0; color:var(--muted); line-height:1.6; }
+    .proof { width:min(1240px,calc(100% - 56px)); margin:34px auto 0; display:grid; grid-template-columns:1fr 1fr; border:2px solid var(--line); background:var(--card); }
+    .proof article { padding:36px; }
+    .proof article + article { border-left:2px solid var(--line); }
+    .proof h3 { margin:0 0 12px; font-family:var(--serif); font-size:32px; }
+    .proof p { margin:0; color:var(--muted); line-height:1.6; }
+    .ticket { width:min(1240px,calc(100% - 56px)); margin:34px auto 70px; display:grid; grid-template-columns:1fr auto; gap:28px; align-items:center; padding:8px; border:2px solid var(--line); background:var(--brick); color:#fff; }
+    .ticket-inner { display:grid; grid-template-columns:1fr auto; gap:28px; align-items:center; margin:8px; padding:28px; border:2px dashed rgba(255,255,255,.7); }
+    .ticket h2 { margin:0 0 10px; font-family:var(--serif); font-size:clamp(2rem,4vw,3.4rem); line-height:1; }
+    .ticket p { margin:0; color:#f4d4c5; }
+    .button { min-height:48px; display:inline-flex; align-items:center; padding:0 18px; background:#fff; color:var(--ink); font:12px var(--mono); text-transform:uppercase; }
+    footer { width:min(1240px,calc(100% - 56px)); margin:0 auto 36px; display:flex; justify-content:space-between; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:920px) { .press, .proof, .ticket-inner { grid-template-columns:1fr; } .press div + div, .proof article + article { border-left:0; border-top:2px solid var(--line); } .ticket { grid-template-columns:1fr; } .top nav { display:none; } .poster-body { padding:40px 26px; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis"></a>
+    <nav><a href="#press">Press</a><a href="#edition">Edition</a><a href="#download">Download</a></nav>
+  </header>
+  <section class="poster" id="press">
+    <div class="poster-head"><span>Edition 14 / local-first</span><span>set by hand, kept by file</span></div>
+    <div class="poster-body">
+      <div class="kicker">14 / Print shop</div>
+      <h1>Write it like <em>it will last.</em></h1>
+      <p class="lede">A writing room with the patience of print: novels, notes, scripts, maps, and reading, pulled together in one vault you own.</p>
+      <div class="press">
+        <div><h2>The press is the vault.</h2><p>Local Markdown and text files carry every impression. No subscription ink fades them.</p></div>
+        <div><h2>The edition is yours.</h2><p>Snapshots, version history, and exports preserve each state worth keeping.</p></div>
+      </div>
+    </div>
+  </section>
+  <section class="proof" id="edition" aria-label="Proofs">
+    <article><h3>First proof: structure.</h3><p>Chapters, scenes, beats, and story bible entries stay registered to the same page.</p></article>
+    <article><h3>Second proof: custody.</h3><p>Windows opens .txt and .md through the installer. Your files remain readable without us.</p></article>
+  </section>
+  <section class="ticket" id="download"><div class="ticket-inner"><div><h2>Admit one writing room.</h2><p>Windows installer · local vault · no account required to begin.</p></div><a class="button" href="#">Download for Windows</a></div></section>
+  <footer><span>Just Write ehis / prototype 14</span><span>Letterpress / edition / local-first</span></footer>
+</body>
+</html>

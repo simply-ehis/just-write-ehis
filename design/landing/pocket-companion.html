@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Just Write ehis pocket companion direction: a mobile-first capture room that syncs back to the vault.">
+  <title>Just Write ehis — Pocket Companion</title>
+  <style>
+    :root { --paper:#eef0ec; --card:#ffffff; --ink:#1d242b; --muted:#5f6b76; --line:#1d242b; --persimmon:#d95f2e; --fog:#d9dee1; --mono:"Cascadia Mono",Consolas,monospace; --sans:"Avenir Next","Segoe UI",Verdana,sans-serif; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
+    a { color:inherit; text-decoration:none; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:2px solid var(--line); background:var(--card); }
+    .brand img { display:block; width:142px; height:auto; }
+    .button { min-height:48px; display:inline-flex; align-items:center; justify-content:center; padding:0 18px; border:2px solid var(--line); background:var(--persimmon); color:#fff; font:12px var(--mono); text-transform:uppercase; }
+    .hero { width:min(1120px,calc(100% - 48px)); margin:30px auto 0; display:grid; grid-template-columns:1fr 380px; gap:40px; align-items:start; }
+    .kicker { color:var(--persimmon); font:11px var(--mono); letter-spacing:.14em; text-transform:uppercase; }
+    h1 { margin:16px 0; font-size:clamp(2.8rem,6vw,5rem); line-height:.9; letter-spacing:-.07em; }
+    .lede { max-width:520px; margin:0; color:var(--muted); font-size:18px; line-height:1.55; }
+    .thumb { display:grid; gap:10px; margin-top:28px; }
+    .thumb .button { width:100%; }
+    .fine { color:var(--muted); font:11px var(--mono); text-transform:uppercase; }
+    .phone { border:2px solid var(--line); border-radius:34px; background:var(--ink); padding:14px; box-shadow:14px 14px 0 rgba(29,36,43,.18); }
+    .screen { border-radius:22px; background:var(--card); overflow:hidden; }
+    .screen-head { display:flex; justify-content:space-between; padding:14px 16px; background:var(--persimmon); color:#fff; font:11px var(--mono); text-transform:uppercase; }
+    .ticket { padding:16px; border-bottom:2px solid var(--line); }
+    .ticket:last-child { border-bottom:0; }
+    .ticket b { display:block; font-size:16px; }
+    .ticket p { margin:8px 0 0; color:var(--muted); font-size:14px; line-height:1.55; }
+    .ticket span { display:inline-block; margin-top:12px; padding:5px 8px; background:var(--fog); font:10px var(--mono); text-transform:uppercase; }
+    .flow { width:min(1120px,calc(100% - 48px)); margin:30px auto 0; display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+    .flow article { padding:22px; border:2px solid var(--line); background:var(--card); }
+    .flow article:nth-child(2) { background:var(--ink); color:#fff; }
+    .flow article:nth-child(2) p { color:#b8c2cb; }
+    .flow b { display:block; margin-bottom:24px; font-size:42px; letter-spacing:-.06em; }
+    .flow h2 { margin:0 0 10px; font-size:20px; }
+    .flow p { margin:0; color:var(--muted); line-height:1.55; }
+    .offline { width:min(1120px,calc(100% - 48px)); margin:30px auto 70px; padding:26px; border:2px solid var(--line); background:var(--card); display:grid; grid-template-columns:1fr auto; gap:24px; align-items:center; }
+    footer { width:min(1120px,calc(100% - 48px)); margin:0 auto 36px; display:flex; justify-content:space-between; color:var(--muted); font:10px var(--mono); text-transform:uppercase; }
+    @media (max-width:920px) { .hero { grid-template-columns:1fr; } .phone { max-width:380px; } .flow { grid-template-columns:1fr; } .offline { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./index.html"><img src="../../public/ehis-logo-dark.svg" alt="Just Write ehis"></a>
+    <a class="button" href="#download">Download for Windows</a>
+  </header>
+  <section class="hero">
+    <div>
+      <div class="kicker">16 / Pocket companion</div>
+      <h1>Capture out there. Finish in here.</h1>
+      <p class="lede">The companion is thumb-first: inbox captures, dictated fragments, and reading notes that land in the vault instead of evaporating.</p>
+      <div class="thumb"><a class="button" href="#download">Download for Windows</a><span class="fine">Large tap target · one intent · no desktop required to capture</span></div>
+    </div>
+    <div class="phone" aria-label="Companion capture">
+      <div class="screen">
+        <div class="screen-head"><span>Inbox</span><span>3 waiting</span></div>
+        <div class="ticket"><b>Dictated bridge line</b><p>“Weather before dialogue.” Insert at cursor when home.</p><span>voice · explicit</span></div>
+        <div class="ticket"><b>Margin thought</b><p>Keep the crossing expensive. Someone should pay for it.</p><span>reader · kept</span></div>
+        <div class="ticket"><b>Unfiled spark</b><p>Companion dock as a person? No. As a doorway? Maybe.</p><span>canvas · unfiled</span></div>
+      </div>
+    </div>
+  </section>
+  <section class="flow" aria-label="Companion flow">
+    <article><b>01</b><h2>Capture</h2><p>Enter saves to Inbox. Dictation is one explicit tap, never ambient.</p></article>
+    <article><b>02</b><h2>Land</h2><p>Fragments arrive filed, linked, or deliberately unfiled. Nothing evaporates.</p></article>
+    <article><b>03</b><h2>Finish</h2><p>Open the vault on Windows. The work is already where you left it.</p></article>
+  </section>
+  <section class="offline" id="download"><div><div class="kicker">No signal required</div><h2 style="margin:10px 0 8px;font-size:30px;letter-spacing:-.05em">Offline capture, vault finish.</h2><p style="margin:0;color:var(--muted)">The desktop remains the source of truth. The pocket is the net.</p></div><a class="button" href="#">Download for Windows</a></section>
+  <footer><span>Just Write ehis / prototype 16</span><span>Pocket / thumb-first / vault-bound</span></footer>
+</body>
+</html>

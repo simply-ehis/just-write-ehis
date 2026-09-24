@@ -17,6 +17,7 @@
   import { pinCaptureNotification } from "$lib/launch";
   import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
   import { MIN_PIN_LENGTH } from "$lib/stores/lock";
+  import { domainError, warnOnce } from "$lib/errors";
 
   // Export setup probe (Settings → About): surfaces pandoc presence +
   // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
@@ -261,13 +262,15 @@
       settings.update((current) => ({ ...current, companionWidgetVisible: previous }));
       const widget = await WebviewWindow.getByLabel("widget").catch(() => null);
       if (widget) {
+        // Rollback ops: the outer catch already toasted the failure —
+        // these only log once for diagnosis.
         if (previous) {
-          await widget.show().catch(() => {});
-          await widget.emit("widget-show", {}).catch(() => {});
-          await widget.setFocus().catch(() => {});
+          await widget.show().catch((e) => warnOnce("Widget rollback show", e));
+          await widget.emit("widget-show", {}).catch((e) => warnOnce("Widget rollback emit", e));
+          await widget.setFocus().catch((e) => warnOnce("Widget rollback focus", e));
         } else {
-          await widget.emit("widget-hide", {}).catch(() => {});
-          await widget.hide().catch(() => {});
+          await widget.emit("widget-hide", {}).catch((e) => warnOnce("Widget rollback emit", e));
+          await widget.hide().catch((e) => warnOnce("Widget rollback hide", e));
         }
       }
       showToast(`Companion widget failed: ${e instanceof Error ? e.message : e}`, "error");
@@ -366,7 +369,7 @@
       const results = await api.perfBenchmark();
       benchResults = results;
     } catch (e) {
-      console.error("Benchmark failed:", e);
+      domainError("Settings", "couldn't run benchmark", e);
       benchResults = null;
     } finally {
       benchRunning = false;
@@ -780,7 +783,7 @@
 
       <div class="settings-section">
         <h3>Voice — STT & TTS</h3>
-        <p class="setting-desc">Moonshine-base GGUF via transcribe.cpp for speech-to-text, Kokoro v1.0 (sherpa-onnx) for text-to-speech. Models lazy-load on first use. Torch-free, fully offline.</p>
+        <p class="setting-desc">Desktop uses Moonshine-base GGUF via transcribe.cpp for speech-to-text and Kokoro v1.0 (sherpa-onnx) for text-to-speech. The web build uses the browser's built-in dictation and read-aloud voices instead. Desktop models lazy-load on first use. Torch-free, fully offline.</p>
 
         <h4>Speech-to-Text (Moonshine-base GGUF)</h4>
         <div class="setting-row">

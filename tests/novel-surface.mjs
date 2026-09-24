@@ -55,6 +55,14 @@ if (dom.window.Range) {
 }
 if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+const appendChild = dom.window.document.head.appendChild.bind(dom.window.document.head);
+dom.window.document.head.appendChild = (node) => {
+  const result = appendChild(node);
+  if (node.tagName === "LINK" && node.rel === "stylesheet") {
+    setTimeout(() => node.dispatchEvent(new dom.window.Event("load")), 0);
+  }
+  return result;
+};
 globalThis.window.innerWidth = 1280;
 globalThis.window.innerHeight = 800;
 globalThis.devicePixelRatio = 1;
@@ -78,7 +86,7 @@ dom.window.localStorage.setItem("jwe-browser-docs-v1", JSON.stringify([
   mkDoc("nproj-full", "project", "Full Novel", null, "", null),
   mkDoc("nact-1", "act", "Act 1", "nproj-full", "", { status: "draft", act: 1, order: 1024 }),
   mkDoc("nseq-1", "sequence", "Sequence 1", "nproj-full", "", { status: "draft", act: 1, sequence: 1, order: 1536 }),
-  mkDoc("nscene-1", "scene", "Probe Chapter", "nproj-full", "Elena stared at the harbor.", { status: "draft", act: 1, sequence: 1, order: 2048 }),
+  mkDoc("nscene-1", "scene", "Probe Chapter", "nproj-full", "Mira watched the lighthouse.", { status: "draft", act: 1, sequence: 1, order: 2048 }),
   mkDoc("nproj-empty", "project", "Empty Novel", null, "", null),
 ]));
 dom.window.localStorage.setItem("jwe-browser-tabs-v1", JSON.stringify({
@@ -160,7 +168,7 @@ card?.click();
 await sleep(1000);
 let view = liveEditor();
 check("clicking a scene card opens an editor", !!view);
-check("editor shows the scene content", !!view && view.state.doc.toString().includes("Elena stared at the harbor"));
+check("editor shows the scene content", !!view && view.state.doc.toString().includes("Mira watched the lighthouse"));
 
 // ── Phase 3: "+ New" project auto-opens a fresh editor ───────────────
 const newBtn = q('.novel-workspace button[aria-label="New novel project"]');

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
+  import { domainError } from "$lib/errors";
 
   let { open = false, onClose }: { open: boolean; onClose: () => void } = $props();
 
@@ -31,8 +32,7 @@
       showToast(`Renamed across ${preview.length} document${preview.length !== 1 ? 's' : ''}`, 'success');
       setTimeout(() => { renamed = false; onClose(); }, 1500);
     } catch (e) {
-      console.error("Vault rename failed:", e);
-      showToast(`Rename failed: ${e instanceof Error ? e.message : e}`, "error");
+      domainError("Vault", "couldn't rename", e);
     }
     loading = false;
   }

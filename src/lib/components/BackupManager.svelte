@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api';
   import { settings } from '$lib/stores/settings';
+  import { domainError } from '$lib/errors';
 
   let backups = $state<[string, string, number][]>([]);
   let loading = $state(false);
@@ -12,7 +13,7 @@
     try {
       backups = await api.backupList();
     } catch (e) {
-      console.error('Failed to load backups:', e);
+      domainError('Backup', "couldn't list backups", e);
     } finally {
       loading = false;
     }

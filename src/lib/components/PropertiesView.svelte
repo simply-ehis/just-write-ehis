@@ -4,6 +4,8 @@
   import { currentDoc, openTabs } from "$lib/stores/app";
   import { settings, type SavedView } from "$lib/stores/settings";
   import { showToast } from "$lib/stores/notifications";
+  import { domainError, warnOnce } from "$lib/errors";
+  import WorkspaceError from "./WorkspaceError.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
   import BoardColumn from "$lib/components/BoardColumn.svelte";
@@ -82,8 +84,12 @@
 
   const statuses: readonly string[] = STATUSES;
 
+  // Workspaces whose list failed: a partially-loaded library says so
+  // instead of silently hiding workspaces. Full failure gets a retry box.
+  let failedWorkspaces = $state<string[]>([]);
   async function loadDocs() {
     loading = true;
+    failedWorkspaces = [];
     try {
       // Load docs from all workspaces
       const workspaces = ['logs', 'write', 'novel', 'script', 'projects', 'reader', 'inbox'];
@@ -93,13 +99,17 @@
           const docs = await api.docListByWorkspace(ws);
           results.push(...docs);
         } catch (e) {
-          console.warn(`Failed to list docs in workspace ${ws}:`, e);
+          warnOnce(`Library list (${ws})`, e);
+          if (!failedWorkspaces.includes(ws)) failedWorkspaces = [...failedWorkspaces, ws];
         }
       }
       allDocs = results;
       applyFilters();
+      if (failedWorkspaces.length > 0) {
+        domainError("Library", `couldn't list ${failedWorkspaces.join(", ")}`, new Error("workspace list failed"));
+      }
     } catch (e) {
-      console.error("Failed to load docs:", e);
+      domainError("Library", "couldn't load documents", e);
     }
     loading = false;
   }
@@ -236,6 +246,9 @@
       </button>
     </div>
   </div>
+  {#if !loading && allDocs.length === 0 && failedWorkspaces.length > 0}
+    <WorkspaceError message={`Library — couldn't list ${failedWorkspaces.join(", ")}`} onRetry={() => loadDocs()} />
+  {/if}
 
   <div class="pv-toolbar">
     <input

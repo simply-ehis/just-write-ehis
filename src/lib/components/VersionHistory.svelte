@@ -3,6 +3,7 @@
   import { currentDoc } from '$lib/stores/app';
   import { showToast } from '$lib/stores/notifications';
   import Icon from '$lib/components/Icon.svelte';
+  import { domainError } from '$lib/errors';
 
   let snapshots = $state<Snapshot[]>([]);
   let selectedSnapshot = $state<Snapshot | null>(null);
@@ -16,7 +17,7 @@
     try {
       snapshots = await api.snapshotList($currentDoc.id);
     } catch (e) {
-      console.error('Failed to load snapshots:', e);
+      domainError('History', "couldn't load versions", e);
     } finally {
       loading = false;
     }
@@ -39,7 +40,7 @@
       const snap = await api.snapshotCreate($currentDoc.id);
       snapshots.unshift(snap);
     } catch (e) {
-      console.error('Failed to create snapshot:', e);
+      domainError('History', "couldn't save version", e);
     }
   }
 
@@ -56,8 +57,7 @@
       showToast('Version restored', 'success');
       closePanel();
     } catch (e) {
-      console.error('Failed to restore snapshot:', e);
-      showToast('Failed to restore version', 'error');
+      domainError('History', "couldn't restore version", e);
     }
   }
 

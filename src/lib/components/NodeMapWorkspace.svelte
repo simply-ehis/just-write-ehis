@@ -5,6 +5,8 @@
   import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import Icon from "$lib/components/Icon.svelte";
+  import { domainError, warnOnce } from "$lib/errors";
+  import WorkspaceError from "./WorkspaceError.svelte";
 
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -334,9 +336,9 @@
       if (!$openTabs.find((t) => t.id === doc.id)) {
         $openTabs = [doc, ...$openTabs];
       }
-      await api.usageRecord(doc.id, "open");
+      await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Map usage telemetry", e));
     } catch (e) {
-      console.error("Failed to open doc:", e);
+      domainError("Map", "couldn't open document", e);
     }
   }
 
@@ -363,8 +365,11 @@
     };
   }
 
+  // Visible load failure for the graph: never a fake-empty canvas.
+  let graphLoadError = $state<string | null>(null);
   async function loadGraph() {
     loading = true;
+    graphLoadError = null;
     try {
       const full = await api.graphQuery({ workspace: filterWorkspace, tags: filterTags });
       // Cap the force layout past NODE_CAP (highest degree first) — the
@@ -387,7 +392,8 @@
       }
       initSimulation();
     } catch (e) {
-      console.error("Failed to load graph:", e);
+      graphLoadError = e instanceof Error ? e.message : String(e);
+      domainError("Map", "couldn't load graph", e);
     }
     loading = false;
   }
@@ -474,15 +480,18 @@
   function handleResize() {
     if (!canvas) return;
     const parent = canvas.parentElement;
+    // window-guarded: bare devicePixelRatio throws where the global is
+    // undefined (workers, exotic embeds) — fall back to 1x.
+    const dpr = typeof window !== "undefined" && window.devicePixelRatio ? window.devicePixelRatio : 1;
     if (parent) {
       width = parent.clientWidth;
       height = parent.clientHeight;
-      canvas.width = width * devicePixelRatio;
-      canvas.height = height * devicePixelRatio;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       if (ctx) {
-        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       }
     }
   }
@@ -587,6 +596,8 @@
   <div class="canvas-container">
     {#if loading}
       <div class="loading">Loading graph...</div>
+    {:else if graphLoadError}
+      <WorkspaceError message={`Map — couldn't load graph: ${graphLoadError}`} onRetry={() => loadGraph()} />
     {:else if graphData && graphData.nodes.length === 0}
       <div class="empty-graph">
         <span class="icon"><Icon name="graph" size={40} /></span>

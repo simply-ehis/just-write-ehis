@@ -9,6 +9,8 @@
   import { api, type CanvasEdge, type CanvasNode, type Doc } from "$lib/api";
   import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
+  import { domainError, warnOnce } from "$lib/errors";
+  import WorkspaceError from "./WorkspaceError.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
   import { settings } from "$lib/stores/settings";
@@ -64,14 +66,18 @@
   const selectedNode = $derived(nodes.find((n) => n.id === selectedNodeId) ?? null);
   const selectedEdge = $derived(edges.find((e) => e.id === selectedEdgeId) ?? null);
 
+  // Visible load failure for the board: never a fake-empty canvas.
+  let boardLoadError = $state<string | null>(null);
   async function load() {
     loading = true;
+    boardLoadError = null;
     try {
       const [ns, es] = await api.canvasList();
       nodes = ns;
       edges = es;
     } catch (e) {
-      showToast(`Canvas failed to load: ${e instanceof Error ? e.message : e}`, "error");
+      boardLoadError = e instanceof Error ? e.message : String(e);
+      domainError("Canvas", "couldn't load board", e);
     } finally {
       loading = false;
     }
@@ -323,7 +329,7 @@
       $currentDoc = doc;
       if (!$openTabs.find((t) => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
       $currentWorkspace = doc.workspace;
-      await api.usageRecord(doc.id, "open").catch(() => {});
+      await api.usageRecord(doc.id, "open").catch((e) => warnOnce("Canvas usage telemetry", e));
     } catch (e) {
       showToast(`Couldn't open doc: ${e instanceof Error ? e.message : e}`, "error");
     }
@@ -423,6 +429,8 @@
   >
     {#if loading}
       <div class="board-msg">Loading board…</div>
+    {:else if boardLoadError}
+      <WorkspaceError message={`Canvas — couldn't load board: ${boardLoadError}`} onRetry={() => load()} />
     {:else if nodes.length === 0}
       <div class="board-msg">
         <span class="msg-icon"><Icon name="panel" size={36} /></span>
