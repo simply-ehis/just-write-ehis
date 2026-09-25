@@ -2,6 +2,7 @@
   import { currentWorkspace, currentDoc, openTabs } from "$lib/stores/app";
   import { api } from "$lib/api";
   import Icon from "$lib/components/Icon.svelte";
+  import TemplatePicker from "$lib/components/TemplatePicker.svelte";
   import { domainError } from "$lib/errors";
 
   const workspaceHints: Record<string, { icon: string; message: string; hint: string }> = {
@@ -16,6 +17,8 @@
 
   let hint = $derived(workspaceHints[$currentWorkspace] ?? workspaceHints.write);
 
+  let showTemplates = $state(false);
+
   async function handleNew() {
     try {
       const doc = await api.docCreate($currentWorkspace, "doc", "Untitled");
@@ -25,11 +28,86 @@
       domainError("Workspace", "couldn't create document", e);
     }
   }
+
+  async function handleTemplateDoc(docId: string) {
+    showTemplates = false;
+    try {
+      const doc = await api.docGet(docId);
+      $currentDoc = doc;
+      if (!$openTabs.find((t) => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
+    } catch (e) {
+      domainError("Workspace", "couldn't open templated document", e);
+    }
+  }
 </script>
 
 <div class="empty-state">
-  <div class="icon"><Icon name={hint.icon} size={44} /></div>
-  <div class="message">{hint.message}</div>
-  <div class="hint">{hint.hint}</div>
-  <button class="btn-primary" onclick={handleNew}>New Document</button>
+  <div class="empty-card">
+    <div class="empty-icon"><Icon name={hint.icon} size={40} /></div>
+    <div class="message">{hint.message}</div>
+    <div class="hint">{hint.hint}</div>
+    <div class="empty-actions">
+      <button class="btn-primary" onclick={handleNew}>New Document</button>
+      <button class="btn-secondary" onclick={() => (showTemplates = true)}>Start from template</button>
+    </div>
+  </div>
 </div>
+
+{#if showTemplates}
+  <TemplatePicker
+    workspace={$currentWorkspace}
+    onClose={() => (showTemplates = false)}
+    onCreate={handleTemplateDoc}
+  />
+{/if}
+
+<style>
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 32px;
+  }
+  .empty-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    max-width: 420px;
+    padding: 44px 40px;
+    text-align: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+  }
+  .empty-icon {
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 72px;
+    margin-bottom: 6px;
+    border-radius: var(--radius-lg);
+    background: var(--accent-soft);
+    color: var(--accent-primary);
+  }
+  .message {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+  .hint {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+  .empty-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+</style>

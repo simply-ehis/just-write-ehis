@@ -35,7 +35,7 @@
     rose: "#E11D48",
     forest: "#15803D",
   };
-  let COLORS = $derived($settings.theme === "light" ? CARD_COLORS_PAPER : CARD_COLORS_INK);
+  let COLORS = $derived($settings.themeMode === "light" ? CARD_COLORS_PAPER : CARD_COLORS_INK);
 
   let nodes = $state<CanvasNode[]>([]);
   let edges = $state<CanvasEdge[]>([]);

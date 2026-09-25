@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api } from "$lib/api";
+  import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
   import { domainError } from "$lib/errors";
@@ -313,7 +313,7 @@
       <button role="menuitem" onclick={() => { handleContextAction("open-with"); closeContext(); }}>Open</button>
       <button role="menuitem" onclick={() => { handleContextAction("rename"); closeContext(); }}>Rename</button>
       <button role="menuitem" onclick={() => { handleContextAction("move"); closeContext(); }}>Move to…</button>
-      <button role="menuitem" onclick={() => { handleContextAction("reveal"); closeContext(); }}>Reveal in Explorer</button>
+      <button role="menuitem" onclick={() => { handleContextAction("reveal"); closeContext(); }}>{isBrowserPreview() ? "Copy path" : "Reveal in Explorer"}</button>
       <button role="menuitem" class="danger" onclick={() => { handleContextAction("delete"); closeContext(); }}>Delete</button>
     </div>
   </div>

@@ -35,6 +35,7 @@
   import BottomBar from "$lib/components/BottomBar.svelte";
   import LockScreen from "$lib/components/LockScreen.svelte";
 import BootLoader from "$lib/components/BootLoader.svelte";
+import { applyAppearance } from "$lib/appearance";
   import { unlockedDocs } from "$lib/stores/lock";
   import HelpOverlay from "$lib/components/HelpOverlay.svelte";
   import { showConflict } from "$lib/stores/conflict";
@@ -281,9 +282,9 @@ import BootLoader from "$lib/components/BootLoader.svelte";
     if ($currentWorkspace) trackFeature($currentWorkspace);
   });
 
-  // Apply the Settings → General theme to the document root.
+  // Apply the Settings → General style + mode + accent to the root.
   $effect(() => {
-    document.documentElement.dataset.theme = $settings.theme;
+    applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride);
   });
 
   // Per-workspace last place: remember the open doc when leaving a

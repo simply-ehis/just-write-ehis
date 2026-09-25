@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type Doc, type BeatBoard, type BeatNode, type BibleFact, type BibleMention, type BibleSuggestion, type EntitySummary, type EntityHit } from '$lib/api';
+  import { api, isBrowserPreview, type Doc, type BeatBoard, type BeatNode, type BibleFact, type BibleMention, type BibleSuggestion, type EntitySummary, type EntityHit } from '$lib/api';
   import { currentDoc, currentWorkspace, openTabs } from '$lib/stores/app';
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
@@ -933,13 +933,17 @@
        <div class="bible-memory-header">
          <div>
            <h2>Story Bible</h2>
-           <p class="bible-memory-note">Auto memory uses the bundled local model. New names wait for your confirmation.</p>
+            {#if isBrowserPreview()}
+              <p class="bible-memory-note">Auto memory needs the desktop app's local model. New names wait for your confirmation.</p>
+            {:else}
+              <p class="bible-memory-note">Auto memory uses the bundled local model. New names wait for your confirmation.</p>
+            {/if}
          </div>
          <div class="bible-memory-actions">
            {#if bibleSuggestions.length > 0}
              <span class="suggestion-counter" aria-live="polite">{bibleSuggestions.length} suggested</span>
            {/if}
-           <button class="bible-add-btn" onclick={rebuildMemory} disabled={memoryRebuilding} title="Rebuild memory for every scene using the bundled local model">
+            <button class="bible-add-btn" onclick={rebuildMemory} disabled={memoryRebuilding} title={isBrowserPreview() ? "Rebuild memory needs the desktop app's local model" : "Rebuild memory for every scene using the bundled local model"}>
              {memoryRebuilding ? 'Rebuilding…' : 'Rebuild Memory'}
            </button>
          </div>

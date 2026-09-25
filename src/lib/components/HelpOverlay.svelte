@@ -4,6 +4,7 @@
    * Shows shortcuts + short feature blurbs. Dismissable with ? or Esc.
    */
   import { settings } from "$lib/stores/settings";
+  import { isBrowserPreview } from "$lib/api";
 
   let visible = $state(false);
 
@@ -19,7 +20,7 @@
     { keys: "Ctrl+W", desc: "Close tab" },
     { keys: "Ctrl+Tab", desc: "Next tab" },
     { keys: "Ctrl+Shift+Tab", desc: "Previous tab" },
-    { keys: "Ctrl+S", desc: "Force save to disk" },
+    { keys: "Ctrl+S", desc: isBrowserPreview() ? "Force save to browser storage" : "Force save to disk" },
     { keys: "Ctrl+Z", desc: "Undo" },
     { keys: "Ctrl+Shift+Z", desc: "Redo" },
     { keys: "M", desc: "Open Node Map" },

@@ -31,3 +31,4 @@ just-write-ehis.key
 .patchi/
 .patchi/.env
 .patchi/keys.json
+.vercel

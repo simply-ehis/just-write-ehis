@@ -140,9 +140,11 @@ check("Write empty state renders", await waitFor(() => /Start writing/.test(text
 check("nav has Home", clickNav("Home"));
 check("Home greeting renders", await waitFor(() => /Good (morning|afternoon|evening)/.test(text()), 8000));
 
-// Logs: today's log surface renders.
+// Logs: today's log surface renders. Local date like the app's formatDate
+// (toISOString is UTC — wrong near local midnight).
+const _d = new Date();
+const todayStr = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, "0")}-${String(_d.getDate()).padStart(2, "0")}`;
 check("nav has Logs", clickNav("Logs"));
-const todayStr = new Date().toISOString().slice(0, 10);
 check("Logs shows today", await waitFor(() => text().includes(todayStr), 12000));
 
 // Inbox: hidden from sidebar by default — opens via the More overflow menu.
@@ -245,22 +247,34 @@ check("Canvas board renders", await waitFor(
     || [...doc.querySelectorAll(".workspace-nav .nav-item")].find((b) => (b.getAttribute("aria-label") || "").trim() === "Settings");
   check("Settings entry present", !!settingsBtn);
   settingsBtn?.click();
-  check("Settings theme select renders", await waitFor(() => !!doc.querySelector("#setting-theme"), 15000));
+  check("Settings style select renders", await waitFor(() => !!doc.querySelector("#setting-theme"), 15000));
   {
     const sel = doc.querySelector("#setting-theme");
     if (!sel) {
-      check("theme select switches to light", false, "no select element");
-      check("theme persists to settings", false, "no select element");
+      check("style select switches to brutalist", false, "no select element");
     } else {
-    sel.value = "light";
-    sel.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    await sleep(800);
-    check("theme select switches to light", doc.documentElement.dataset.theme === "light");
-    const stored = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
-    check("theme persists to settings", stored.theme === "light");
+      sel.value = "brutalist";
+      sel.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      await sleep(500);
+      check("style select switches to brutalist", doc.documentElement.dataset.theme === "brutalist");
     }
+    const lightBtn = [...doc.querySelectorAll('[role="radio"]')].find((b) => (b.textContent || "").trim() === "Light");
+    check("mode segmented renders", !!lightBtn);
+    lightBtn?.click();
+    await sleep(500);
+    check("mode switches to light", doc.documentElement.dataset.mode === "light");
+    const accent = doc.querySelector('#setting-accent');
+    check("accent picker renders", !!accent);
+    if (accent) {
+      accent.value = "#ff8800";
+      accent.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      await sleep(500);
+      check("accent override applies", (doc.documentElement.style.getPropertyValue("--accent") || "").trim() === "#ff8800");
+    }
+    const stored = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
+    check("appearance persists to settings", stored.theme === "brutalist" && stored.themeMode === "light" && stored.accentOverride === "#ff8800");
   }
-  }
+}
 }
 
 // jsdom ships no canvas implementation — the getContext "not implemented"

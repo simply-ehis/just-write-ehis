@@ -18,6 +18,7 @@
   import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
   import { MIN_PIN_LENGTH } from "$lib/stores/lock";
   import { domainError, warnOnce } from "$lib/errors";
+  import { defaultAccentFor, ACCENT_PRESETS } from "$lib/appearance";
 
   // Export setup probe (Settings → About): surfaces pandoc presence +
   // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
@@ -102,7 +103,7 @@
   }
 
   let activeCategory = $derived($settingsCategory);
-  let aboutLogo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let aboutLogo = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   /** Workspace tabs on/off (sidebar + top bar). Null = defaults. */
   function workspaceHidden(id: string): boolean {
@@ -229,6 +230,23 @@
   function resetAllSettings() {
     resetSettings();
     showToast("Settings reset to defaults", "success");
+  }
+
+  // Danger Zone: two-step arming — the first click only arms, the second runs.
+  let dangerArmed = $state<string | null>(null);
+  function confirmResetSettings() {
+    dangerArmed = null;
+    resetAllSettings();
+  }
+  function confirmClearBrowserData() {
+    dangerArmed = null;
+    try {
+      localStorage.clear();
+    } catch (e) {
+      showToast(`Couldn't clear browser data: ${e instanceof Error ? e.message : e}`, "error");
+      return;
+    }
+    window.location.reload();
   }
 
   async function setCompanionWidgetVisible(visible: boolean) {
@@ -561,14 +579,73 @@
       <div class="settings-section">
         <h3>General</h3>
         <div class="setting-row">
-          <label for="setting-theme">Theme</label>
+          <label for="setting-theme">Theme style</label>
           <select id="setting-theme" bind:value={$settings.theme}>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
+            <option value="default">Default room</option>
             <option value="brutalist">Brutalist</option>
             <option value="glass">Glass</option>
           </select>
         </div>
+        <div class="setting-row">
+          <span id="setting-theme-mode-label">Theme mode</span>
+          <div class="segmented" role="radiogroup" aria-labelledby="setting-theme-mode-label">
+            <button
+              class:active={$settings.themeMode === "dark"}
+              role="radio"
+              aria-checked={$settings.themeMode === "dark"}
+              onclick={() => ($settings = { ...$settings, themeMode: "dark" })}
+            >Dark</button>
+            <button
+              class:active={$settings.themeMode === "light"}
+              role="radio"
+              aria-checked={$settings.themeMode === "light"}
+              onclick={() => ($settings = { ...$settings, themeMode: "light" })}
+            >Light</button>
+          </div>
+        </div>
+        <div class="setting-row accent-row-block">
+          <span class="setting-label" id="setting-accent-label">Accent color</span>
+          <div class="accent-pick" role="group" aria-labelledby="setting-accent-label">
+            <div class="swatches">
+              {#each ACCENT_PRESETS as preset}
+                <button
+                  class="swatch"
+                  class:active={$settings.accentOverride === preset.hex}
+                  style={`background: ${preset.hex}`}
+                  title={preset.name}
+                  aria-label={`Accent ${preset.name}`}
+                  aria-pressed={$settings.accentOverride === preset.hex}
+                  onclick={() => ($settings = { ...$settings, accentOverride: preset.hex })}
+                ></button>
+              {/each}
+              <label
+                class="swatch custom-swatch"
+                class:active={$settings.accentOverride !== "" && !ACCENT_PRESETS.some((p) => p.hex === $settings.accentOverride)}
+                title="Custom color"
+              >
+                <span aria-hidden="true">+</span>
+                <input
+                  id="setting-accent"
+                  type="color"
+                  value={$settings.accentOverride || defaultAccentFor($settings.theme, $settings.themeMode)}
+                  oninput={(e) => {
+                    const v = (e.target as HTMLInputElement).value;
+                    if (/^#[0-9a-fA-F]{6}$/.test(v)) $settings = { ...$settings, accentOverride: v.toLowerCase() };
+                  }}
+                  aria-label="Custom accent color"
+                />
+              </label>
+            </div>
+            {#if $settings.accentOverride}
+              <button class="link-btn" onclick={() => ($settings = { ...$settings, accentOverride: "" })}>Reset to theme accent</button>
+            {:else}
+              <span class="setting-desc">Theme default — pick a preset or any custom color.</span>
+            {/if}
+          </div>
+        </div>
+        {#if isBrowserPreview()}
+          <p class="setting-desc">The companion widget, Windows startup, and file associations are desktop-app features — they don't exist in this web build.</p>
+        {:else}
         <div class="setting-row">
           <label for="setting-companion-widget">Companion widget (show/hide)</label>
           <input
@@ -612,6 +689,7 @@
           <input id="setting-associated-extensions" type="text" value={$settings.associatedFileExtensions.join(", ")} onchange={(event) => setAssociatedFileExtensions((event.currentTarget as HTMLInputElement).value)} />
         </div>
         <p class="setting-hint">The installer registers the shipped .txt and .md associations. Editing this list changes the app preference; rebuild/reinstall to change Windows registration.</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-icon-set">Icon Set</label>
           <select id="setting-icon-set" bind:value={$settings.iconSet}>
@@ -705,6 +783,9 @@
       <div class="settings-section">
         <h3>AI & Providers</h3>
         <p class="setting-desc">Small slot: Ghost autocomplete and light tasks. Main slot: chat, Composer, Structurize.</p>
+        {#if isBrowserPreview()}
+          <p class="setting-desc">On the web both slots talk to HTTP endpoints you configure below — there is no bundled local model here. Ghost needs a reachable small slot to suggest anything.</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-small-model-endpoint">Small Model Endpoint</label>
           <input id="setting-small-model-endpoint" type="text" bind:value={$settings.smallModelEndpoint} placeholder="http://127.0.0.1:8093/v1" />
@@ -714,16 +795,22 @@
           <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="lfm2.5-350m" />
         </div>
         <p class="setting-desc">Light-task picks: the bundled local endpoint by default — or any OpenAI-compatible endpoint (OpenAI, Google, Anthropic via gateway, Custom). See docs/MODELS.md.</p>
-        <div class="setting-row">
-          <label for="setting-small-model-ctx">Small Model Context Length</label>
-          <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} onblur={() => clampSettingKey("smallModelContextLength")} />
-        </div>
-        <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Takes effect on the next sidecar start — restart the small model to apply.</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-small-model-ctx">Small Model Context Length</label>
+            <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} onblur={() => clampSettingKey("smallModelContextLength")} />
+          </div>
+          <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Takes effect on the next sidecar start — restart the small model to apply.</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-use-small-as-main">Use Small Model as Main</label>
           <input id="setting-use-small-as-main" type="checkbox" bind:checked={$settings.useSmallAsMain} />
         </div>
-        <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small model instead of the main slot. Ghost routing is unchanged (local :8093 if enabled, else small slot).</p>
+        {#if isBrowserPreview()}
+          <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small slot's HTTP endpoint instead of the main slot.</p>
+        {:else}
+          <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small model instead of the main slot. Ghost routing is unchanged (local :8093 if enabled, else small slot).</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-main-model-endpoint">Main Model Endpoint</label>
           <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="https://api.openai.com/v1" />
@@ -755,11 +842,13 @@
           <label for="setting-api-key">API Key</label>
           <input id="setting-api-key" type="password" bind:value={$settings.apiKey} placeholder="sk-..." />
         </div>
-        <div class="setting-row">
-          <label for="setting-harness-dir">Sidecar Harness Directory</label>
-          <input id="setting-harness-dir" type="text" bind:value={$settings.sidecarHarnessDir} placeholder="Directory containing the harness repo" />
-        </div>
-        <p class="setting-desc">Used by the AI panel's Small Model toggle. Needs a harness checkout exposing a <code>server</code> module — leave empty and the toggle explains instead of failing silently.</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-harness-dir">Sidecar Harness Directory</label>
+            <input id="setting-harness-dir" type="text" bind:value={$settings.sidecarHarnessDir} placeholder="Directory containing the harness repo" />
+          </div>
+          <p class="setting-desc">Used by the AI panel's Small Model toggle. Needs a harness checkout exposing a <code>server</code> module — leave empty and the toggle explains instead of failing silently.</p>
+        {/if}
         <div class="setting-row">
           <label for="setting-blank-mode-default">Blank Mode Default</label>
           <input id="setting-blank-mode-default" type="checkbox" bind:checked={$settings.blankModeDefault} />
@@ -790,28 +879,35 @@
           <label for="setting-stt-enabled">STT Enabled</label>
           <input id="setting-stt-enabled" type="checkbox" bind:checked={$settings.sttEnabled} onchange={onSttToggle} />
         </div>
-        <div class="setting-row">
-          <label for="setting-stt-model">STT Model</label>
-          <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" onblur={() => (sttModelError = validateSttModel($settings.sttModel))} />
-        </div>
-        {#if sttModelError}
-          <p class="update-error">{sttModelError}</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-stt-model">STT Model</label>
+            <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" onblur={() => (sttModelError = validateSttModel($settings.sttModel))} />
+          </div>
+          {#if sttModelError}
+            <p class="update-error">{sttModelError}</p>
+          {/if}
+          <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
         {/if}
-        <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
 
         <h4>Text-to-Speech (Kokoro-82M)</h4>
         <div class="setting-row">
           <label for="setting-tts-enabled">TTS Enabled</label>
           <input id="setting-tts-enabled" type="checkbox" bind:checked={$settings.ttsEnabled} onchange={onTtsToggle} />
         </div>
-        <div class="setting-row">
-          <label for="setting-tts-model">TTS Weights Repo</label>
-          <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" onblur={() => (ttsModelError = validateTtsModel($settings.ttsModel))} />
-        </div>
-        {#if ttsModelError}
-          <p class="update-error">{ttsModelError}</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-tts-model">TTS Weights Repo</label>
+            <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" onblur={() => (ttsModelError = validateTtsModel($settings.ttsModel))} />
+          </div>
+          {#if ttsModelError}
+            <p class="update-error">{ttsModelError}</p>
+          {/if}
+          <p class="setting-desc">Paste to swap: a local Kokoro bundle directory (model.onnx + voices.bin + tokens.txt + espeak-ng-data). Empty = vendored default. Takes effect on next sidecar start.</p>
+        {:else}
+          <p class="setting-desc">Voice and language come from your browser here — speed below still applies.</p>
         {/if}
-        <p class="setting-desc">Paste to swap: a local Kokoro bundle directory (model.onnx + voices.bin + tokens.txt + espeak-ng-data). Empty = vendored default. Takes effect on next sidecar start.</p>
+        {#if !isBrowserPreview()}
         <div class="setting-row">
           <label for="setting-tts-lang-code">Language</label>
           <select id="setting-tts-lang-code" bind:value={$settings.ttsLangCode} onchange={(e) => {
@@ -909,28 +1005,35 @@
           <input id="setting-tts-split-pattern" type="text" bind:value={$settings.ttsSplitPattern} placeholder="\\n+" />
           <p class="setting-desc">Regex for splitting text before chunking. Default: double newline.</p>
         </div>
+        {/if}
 
         <h4>Local LLM (LFM 2.5-350M via llama.cpp)</h4>
         <div class="setting-row">
           <label for="setting-llm-enabled">LLM Enabled</label>
           <input id="setting-llm-enabled" type="checkbox" bind:checked={$settings.llmEnabled} onchange={onLlmToggle} />
         </div>
-        <div class="setting-row">
-          <label for="setting-llm-model">LLM Model</label>
-          <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" onblur={() => (llmModelError = validateLlmModel($settings.llmModel))} />
-        </div>
-        {#if llmModelError}
-          <p class="update-error">{llmModelError}</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-llm-model">LLM Model</label>
+            <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" onblur={() => (llmModelError = validateLlmModel($settings.llmModel))} />
+          </div>
+          {#if llmModelError}
+            <p class="update-error">{llmModelError}</p>
+          {/if}
+          <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
+        {:else}
+          <p class="setting-desc">No bundled model on the web — point the small/main slots at reachable HTTP endpoints instead.</p>
         {/if}
-        <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
 
         <h4>System</h4>
-        <div class="setting-row">
-          <label for="setting-python-path">Python Path</label>
-          <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" onblur={probePythonPath} />
-        </div>
-        {#if pythonError}
-          <p class="update-error">{pythonError}</p>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-python-path">Python Path</label>
+            <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" onblur={probePythonPath} />
+          </div>
+          {#if pythonError}
+            <p class="update-error">{pythonError}</p>
+          {/if}
         {/if}
       </div>
 
@@ -984,6 +1087,12 @@
         </div>
         <p class="setting-desc">Off by default. When on, saves record dialogue/sentence/filter-word snapshots (max once a minute per doc) that power Craft charts and the filter-word tip.</p>
       </div>
+      {#if isBrowserPreview()}
+      <div class="settings-section">
+        <h3>AI Memory (vendored harness)</h3>
+        <p class="setting-desc">Cross-session facts and secret scrubbing run in the desktop app's local sidecar — not available in this web build.</p>
+      </div>
+      {:else}
       <div class="settings-section">
         <h3>AI Memory (vendored harness)</h3>
         <p class="setting-desc">Cross-session facts + secret scrubbing, via a local sidecar. No cloud, ever.</p>
@@ -1000,6 +1109,7 @@
           <span class="value">{memoryFactCount === null ? "…" : memoryFactCount}</span>
         </div>
       </div>
+      {/if}
       <div class="settings-section">
         <h3>Clear History</h3>
         <div class="setting-row">
@@ -1029,7 +1139,11 @@
       </div>
       <div class="settings-section">
         <h3>Per-Workspace AI Privacy</h3>
-        <p class="setting-desc">When enabled, workspace content is never sent to external API providers — local model only.</p>
+        {#if isBrowserPreview()}
+          <p class="setting-desc">When enabled, workspace content is never sent anywhere — AI stays off for it here (there is no local model on the web).</p>
+        {:else}
+          <p class="setting-desc">When enabled, workspace content is never sent to external API providers — local model only.</p>
+        {/if}
         {#each ["logs", "write", "novel", "script", "projects", "reader", "map", "inbox"] as ws}
           <div class="setting-row">
             <label for="setting-ws-privacy-{ws}">{ws.charAt(0).toUpperCase() + ws.slice(1)}</label>
@@ -1053,7 +1167,7 @@
         <h3>Vaults & Backup</h3>
         <div class="setting-row">
           <span class="setting-label">Current Vault</span>
-          <span class="value">{$settings.vaultPath}</span>
+          <span class="value">{isBrowserPreview() ? "Browser localStorage (this browser only)" : $settings.vaultPath}</span>
         </div>
         <div class="setting-row">
           <label for="setting-backup-frequency">Backup Frequency</label>
@@ -1310,6 +1424,32 @@
           <button class="secondary-btn" onclick={resetAllSettings}>Reset to defaults</button>
         </div>
       </div>
+
+      <div class="settings-section danger-zone">
+        <h3>Danger Zone</h3>
+        <p class="setting-desc">Destructive actions. Each one asks twice — nothing here runs on a single click.</p>
+        <div class="setting-row">
+          <span class="setting-label">Reset all settings</span>
+          {#if dangerArmed === "settings"}
+            <button class="danger-btn" onclick={confirmResetSettings}>Click again to confirm reset</button>
+          {:else}
+            <button class="secondary-btn" onclick={() => (dangerArmed = "settings")}>Reset…</button>
+          {/if}
+        </div>
+        {#if isBrowserPreview()}
+          <div class="setting-row">
+            <span class="setting-label">Erase this browser's data</span>
+            {#if dangerArmed === "browser-data"}
+              <button class="danger-btn" onclick={confirmClearBrowserData}>Click again to erase everything</button>
+            {:else}
+              <button class="secondary-btn" onclick={() => (dangerArmed = "browser-data")}>Erase…</button>
+            {/if}
+          </div>
+          <p class="setting-desc">Clears every document, setting, and template stored in this browser, then reloads fresh.</p>
+        {:else}
+          <p class="setting-desc">Desktop vault data lives in your vault folder and app data — uninstalling the app removes the rest. There is no remote copy to delete.</p>
+        {/if}
+      </div>
     {/if}
   </div>
 </div>
@@ -1416,6 +1556,103 @@
     flex-direction: column;
     align-items: stretch;
     gap: 4px;
+  }
+
+  /* Theme mode segmented control + accent picker row. */
+  .segmented {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .segmented button {
+    padding: 6px 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+  }
+  .segmented button + button {
+    border-left: 1px solid var(--border);
+  }
+  .segmented button.active {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+  }
+  .setting-row.accent-row-block {
+    align-items: flex-start;
+  }
+  .accent-pick {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .swatches {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 260px;
+  }
+  .swatch {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    outline: 1px solid var(--border);
+    outline-offset: 2px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .swatch:hover {
+    transform: scale(1.1);
+  }
+  .swatch.active {
+    outline: 2px solid var(--text-primary);
+  }
+  .custom-swatch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: 18px;
+    overflow: hidden;
+  }
+  .custom-swatch input[type="color"] {
+    position: absolute;
+    inset: -8px;
+    width: auto;
+    height: auto;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent-primary);
+    font-size: 12px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .danger-zone {
+    border: 1px solid var(--accent-semantic-red);
+    border-radius: var(--radius-md);
+    padding: 16px;
+  }
+  .danger-zone h3 {
+    color: var(--accent-semantic-red);
+  }
+  .danger-btn {
+    padding: 6px 16px;
+    border: 1px solid var(--accent-semantic-red);
+    border-radius: var(--radius-sm);
+    background: var(--accent-semantic-red);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
   }
 
   .setting-hint {

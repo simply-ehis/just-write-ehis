@@ -51,20 +51,29 @@ function check(name, ok, detail = "") {
 // ── CSS parsing ─────────────────────────────────────────────────────
 const css = await readFile(join(root, "src/app.css"), "utf8");
 
-/** Extract flat `selector { --a: b; }` declarations for a block opener. */
+/** Extract flat `selector { --a: b; }` declarations for a block opener.
+ * Largest match wins: combo selectors (e.g. `:root[x], :root[y]`) mention
+ * a block's opener before the real block does. */
 function blockAfter(opener) {
-  const start = css.indexOf(opener);
-  if (start === -1) return null;
-  const brace = css.indexOf("{", start);
-  let depth = 0;
-  for (let i = brace; i < css.length; i++) {
-    if (css[i] === "{") depth++;
-    else if (css[i] === "}") {
-      depth--;
-      if (depth === 0) return css.slice(brace + 1, i);
+  let best = null;
+  let start = css.indexOf(opener);
+  while (start !== -1) {
+    const brace = css.indexOf("{", start);
+    let depth = 0;
+    for (let i = brace; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          const body = css.slice(brace + 1, i);
+          if (!best || body.length > best.length) best = body;
+          break;
+        }
+      }
     }
+    start = css.indexOf(opener, start + 1);
   }
-  return null;
+  return best;
 }
 
 function parseVars(block) {
@@ -76,15 +85,30 @@ function parseVars(block) {
   return vars;
 }
 
-const THEMES = ["dark", "light", "brutalist", "glass"];
-const themeVars = {};
-for (const t of THEMES) {
-  const opener = t === "light" ? ':root, :root[data-theme="light"]' : `:root[data-theme="${t}"]`;
-  themeVars[t] = parseVars(blockAfter(opener));
-  check(`[${t}] token block parsed`, Object.keys(themeVars[t]).length > 20, `${Object.keys(themeVars[t]).length} vars`);
+const STYLES = ["default", "brutalist", "glass"];
+const MODES = ["dark", "light"];
+const COMBOS = [];
+for (const style of STYLES) for (const mode of MODES) COMBOS.push([style, mode]);
+
+// Mode bases carry the full contract; style overlays carry deltas;
+// combo fix blocks (e.g. glass-on-paper) carry a third layer.
+const modeVars = {};
+for (const mode of MODES) {
+  modeVars[mode] = parseVars(blockAfter(`:root[data-mode="${mode}"]`));
+  check(`[mode ${mode}] token block parsed`, Object.keys(modeVars[mode]).length > 20, `${Object.keys(modeVars[mode]).length} vars`);
+}
+const styleVars = { default: {} };
+for (const style of ["brutalist", "glass"]) {
+  styleVars[style] = parseVars(blockAfter(`:root[data-theme="${style}"]`));
+  check(`[style ${style}] overlay parsed`, Object.keys(styleVars[style]).length > 5, `${Object.keys(styleVars[style]).length} vars`);
+}
+const comboVars = {};
+for (const [style, mode] of COMBOS) {
+  if (style === "default") continue;
+  comboVars[`${style}-${mode}`] = parseVars(blockAfter(`:root[data-theme="${style}"][data-mode="${mode}"]`));
 }
 
-/** Resolve var(--x) chains within one theme's map. */
+/** Resolve var(--x) chains within one map. */
 function resolve(vars, value, depth = 0) {
   if (depth > 6 || !value) return value;
   const m = value.match(/^var\((--[a-zA-Z0-9-]+)\)$/);
@@ -92,7 +116,16 @@ function resolve(vars, value, depth = 0) {
   return resolve(vars, vars[m[1]], depth + 1);
 }
 
-// ── Phase B: token contract ─────────────────────────────────────────
+/** Model the real cascade for a style×mode combo: mode, then style
+ * overlay, then combo fixes. Later layers win per key. */
+function comboMap(style, mode) {
+  const merged = { ...modeVars[mode], ...(styleVars[style] || {}) };
+  const fixes = comboVars[`${style}-${mode}`];
+  if (fixes) Object.assign(merged, fixes);
+  return merged;
+}
+
+// ── Phase B: token contract (every combo resolves the full set) ────
 const WS_IDS = ["logs", "write", "map", "canvas", "novel", "script", "projects", "reader", "home", "inbox", "files", "properties"];
 const REQUIRED = [
   "--bg", "--surface", "--surface-2", "--surface-elevated",
@@ -104,12 +137,13 @@ const REQUIRED = [
   "--success", "--warning", "--error",
   ...WS_IDS.map((id) => `--ws-${id}`),
 ];
-for (const t of THEMES) {
+for (const [style, mode] of COMBOS) {
+  const vars = comboMap(style, mode);
   const missing = REQUIRED.filter((k) => {
-    const v = resolve(themeVars[t], themeVars[t][k]);
+    const v = resolve(vars, vars[k]);
     return !v || v === "";
   });
-  check(`[${t}] full token contract`, missing.length === 0, missing.join(", "));
+  check(`[${style}/${mode}] full token contract`, missing.length === 0, missing.join(", "));
 }
 
 // System fallback (pre-settings paint) carries the once-missing hues too.
@@ -119,11 +153,14 @@ for (const k of ["--ws-inbox", "--ws-files", "--ws-properties", "--surface-eleva
 }
 
 // ── Phase C: distinct personalities ─────────────────────────────────
-check("brutalist bg differs from dark", themeVars.brutalist["--bg"] !== themeVars.dark["--bg"], `${themeVars.brutalist["--bg"]} vs ${themeVars.dark["--bg"]}`);
-check("brutalist accent differs from dark", themeVars.brutalist["--accent"] !== themeVars.dark["--accent"], `${themeVars.brutalist["--accent"]} vs ${themeVars.dark["--accent"]}`);
-check("glass accent differs from dark", themeVars.glass["--accent"] !== themeVars.dark["--accent"], `${themeVars.glass["--accent"]} vs ${themeVars.dark["--accent"]}`);
-check("glass surfaces translucent", (themeVars.glass["--surface"] || "").includes("rgba"), themeVars.glass["--surface"]);
-check("brutalist radius collapses", themeVars.brutalist["--radius-md"] === "0", themeVars.brutalist["--radius-md"]);
+check("brutalist keeps amber accent both modes",
+  comboMap("brutalist", "dark")["--accent"] === "#FFB000" && comboMap("brutalist", "light")["--accent"] === "#FFB000");
+check("glass accent differs dark vs light",
+  comboMap("glass", "dark")["--accent"] !== comboMap("glass", "light")["--accent"],
+  `${comboMap("glass", "dark")["--accent"]} vs ${comboMap("glass", "light")["--accent"]}`);
+check("glass surfaces translucent", (styleVars.glass["--surface"] || "").includes("rgba"), styleVars.glass["--surface"]);
+check("brutalist radius collapses", styleVars.brutalist["--radius-md"] === "0", styleVars.brutalist["--radius-md"]);
+check("glass light fixes exist", Object.keys(comboVars["glass-light"] || {}).length > 5, `${Object.keys(comboVars["glass-light"] || {}).length} vars`);
 
 // ── Phase D: contrast (WCAG, fails loudly) ──────────────────────────
 function lum(hex) {
@@ -140,34 +177,38 @@ function ratio(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 const isHex = (v) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(v || "");
-for (const t of THEMES) {
-  const v = themeVars[t];
+for (const [style, mode] of COMBOS) {
+  const v = comboMap(style, mode);
   const text = resolve(v, v["--text-primary"]);
   const bg = resolve(v, v["--bg"]);
   const onAccent = resolve(v, v["--text-on-accent"]);
   const accent = resolve(v, v["--accent"]);
   if (![text, bg, onAccent, accent].every(isHex)) {
-    check(`[${t}] contrast pairs are hex-computable`, false, [text, bg, onAccent, accent].join(" "));
+    check(`[${style}/${mode}] contrast pairs are hex-computable`, false, [text, bg, onAccent, accent].join(" "));
     continue;
   }
   const r1 = ratio(text, bg);
   const r2 = ratio(onAccent, accent);
-  check(`[${t}] text on bg >= 4.5:1`, r1 >= 4.5, `${r1.toFixed(2)}:1`);
-  check(`[${t}] on-accent on accent >= 4.5:1`, r2 >= 4.5, `${r2.toFixed(2)}:1`);
+  check(`[${style}/${mode}] text on bg >= 4.5:1`, r1 >= 4.5, `${r1.toFixed(2)}:1`);
+  check(`[${style}/${mode}] on-accent on accent >= 4.5:1`, r2 >= 4.5, `${r2.toFixed(2)}:1`);
 }
 
 // ── Phase E: editor palette parity ──────────────────────────────────
 const { editorPalette } = await import(pathToFileURL(join(root, "src/lib/editorTheme.ts")).href);
-for (const t of THEMES) {
-  const p = editorPalette(t);
-  const cssBg = resolve(themeVars[t], themeVars[t]["--bg"]);
-  const cssAccent = resolve(themeVars[t], themeVars[t]["--accent"]);
-  // Glass editor is intentionally translucent over the same base hue.
-  const bgOk = t === "glass" ? p.bg.includes("10,10,10") : p.bg.toLowerCase() === cssBg.toLowerCase();
-  check(`[${t}] editor bg tracks theme`, bgOk, p.bg);
-  check(`[${t}] editor accent tracks theme`, p.accent.toLowerCase() === cssAccent.toLowerCase(), p.accent);
+for (const [style, mode] of COMBOS) {
+  const p = editorPalette(style, mode);
+  const v = comboMap(style, mode);
+  const cssBg = resolve(v, v["--bg"]);
+  const cssAccent = resolve(v, v["--accent"]);
+  // Glass editors are intentionally translucent over the base hue.
+  const glassy = style === "glass";
+  const bgOk = glassy
+    ? (mode === "dark" ? p.bg.includes("10,10,10") : p.bg.includes("250,249,243"))
+    : p.bg.toLowerCase() === cssBg.toLowerCase();
+  check(`[${style}/${mode}] editor bg tracks theme`, bgOk, p.bg);
+  check(`[${style}/${mode}] editor accent tracks theme`, p.accent.toLowerCase() === cssAccent.toLowerCase(), `${p.accent} vs ${cssAccent}`);
 }
-check("unknown theme falls back to dark", editorPalette("nope").bg === editorPalette("dark").bg);
+check("unknown style falls back to dark", editorPalette("nope").bg === editorPalette("default", "dark").bg);
 
 // ── Phase A: mount per theme ────────────────────────────────────────
 const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
@@ -189,6 +230,7 @@ import { pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 const root = process.argv[1];
 const theme = process.argv[2];
+const themeMode = process.argv[3];
 const KEYS = ${JSON.stringify(KEYS)};
 const dom = new JSDOM('<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>', { url: "http://localhost/", pretendToBeVisual: true });
 delete globalThis.CustomEvent;
@@ -215,7 +257,7 @@ dom.window.document.head.appendChild = (node) => {
   if (node.tagName === "LINK" && node.rel === "stylesheet") setTimeout(() => node.dispatchEvent(new dom.window.Event("load")), 0);
   return result;
 };
-dom.window.localStorage.setItem("writing-app-settings", JSON.stringify({ theme }));
+dom.window.localStorage.setItem("writing-app-settings", JSON.stringify({ theme, themeMode }));
 const errors = [];
 console.error = function () { errors.push(Array.prototype.map.call(arguments, String).join(" ").slice(0, 200)); };
 const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
@@ -230,22 +272,23 @@ console.log("ERRORS=" + errors.length);
 for (const e of errors.slice(0, 3)) console.log("ERR " + e);
 `;
 
-for (const theme of THEMES) {
+for (const [style, mode] of COMBOS) {
+  const tag = `${style}/${mode}`;
   let out = "";
   try {
-    out = execFileSync(process.execPath, ["--input-type=module", "-e", mountProbe, root, theme], { cwd: root, timeout: 90000, encoding: "utf8" });
+    out = execFileSync(process.execPath, ["--input-type=module", "-e", mountProbe, root, style, mode], { cwd: root, timeout: 120000, encoding: "utf8" });
   } catch (e) {
     const detail = String((e && e.message) || e).slice(0, 200);
-    check(`[${theme}] shell mounts`, false, detail);
-    check(`[${theme}] nav renders`, false, "mount child failed");
-    check(`[${theme}] no console errors`, false, "mount child failed");
+    check(`[${tag}] shell mounts`, false, detail);
+    check(`[${tag}] nav renders`, false, "mount child failed");
+    check(`[${tag}] no console errors`, false, "mount child failed");
     continue;
   }
-  check(`[${theme}] shell mounts`, out.includes("SHELL=1"));
-  check(`[${theme}] nav renders`, out.includes("NAV=1"));
+  check(`[${tag}] shell mounts`, out.includes("SHELL=1"));
+  check(`[${tag}] nav renders`, out.includes("NAV=1"));
   const errLine = out.split("\n").find((l) => l.startsWith("ERRORS="));
   const errDetail = out.split("\n").filter((l) => l.startsWith("ERR ")).join(" | ");
-  check(`[${theme}] no console errors`, errLine === "ERRORS=0", errDetail);
+  check(`[${tag}] no console errors`, errLine === "ERRORS=0", errDetail);
 }
 
 // ── Phase F: per-workspace boot loop (dark theme) ─────────────────────

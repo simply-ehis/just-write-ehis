@@ -18,8 +18,8 @@ function check(name, ok, detail = "") {
 }
 
 // Unknown keys are dropped, never absorbed.
-let r = v.validateSettings({ theme: "dark", notARealKey: 1, fileWatcherEnabled: true });
-check("valid passes", r.valid.theme === "dark");
+let r = v.validateSettings({ theme: "brutalist", themeMode: "light", accentOverride: "#FF8800", sidebarFooterCollapsed: true, notARealKey: 1, fileWatcherEnabled: true });
+check("valid passes", r.valid.theme === "brutalist" && r.valid.themeMode === "light" && r.valid.accentOverride === "#ff8800" && r.valid.sidebarFooterCollapsed === true);
 check("unknown rejected", r.rejected.includes("notARealKey"));
 check("removed key rejected", r.rejected.includes("fileWatcherEnabled"));
 r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs", associatedFileExtensions: ["txt", "md"], widgetAutostartPromptShown: true });
@@ -38,8 +38,12 @@ r = v.validateSettings({ theme: 42, fontSize: "big", ghostEnabled: "yes" });
 check("non-string enum rejected", r.rejected.includes("theme"));
 check("non-number rejected", r.rejected.includes("fontSize"));
 check("non-bool rejected", r.rejected.includes("ghostEnabled"));
-r = v.validateSettings({ theme: "neon", backupFrequency: "sometimes" });
+r = v.validateSettings({ theme: "neon", themeMode: "dim", accentOverride: "red", backupFrequency: "sometimes" });
 check("bad enum rejected", r.rejected.includes("theme") && r.rejected.includes("backupFrequency"));
+check("bad mode + accent rejected", r.rejected.includes("themeMode") && r.rejected.includes("accentOverride"));
+r = v.validateSettings({ theme: "dark", accentOverride: "" });
+check("legacy theme + empty accent rejected", r.rejected.includes("theme"));
+check("empty accent passes", v.validateSettings({ accentOverride: "" }).valid.accentOverride === "");
 
 // Out-of-range numbers clamped, reported, present in valid.
 r = v.validateSettings({ fontSize: 99, streakGoal: -5, ttsSpeed: 9, snapshotRetentionDays: 3 });

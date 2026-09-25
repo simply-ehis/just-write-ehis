@@ -4,7 +4,7 @@ READ-WHEN: enabling updates, cutting a release, debugging update failures
 KEY-FILES: src-tauri/tauri.conf.json (plugins.updater), src/lib/updates.ts, Settings → About → App Updates
 INVARIANTS: signing cannot be disabled; UI reports "not configured" until setup is done; Android uses store tracks
 GOTCHAS: private key via env only (.env files don't work); keep tauri.conf + Cargo versions in sync
-UPDATED: 2026-09-17
+UPDATED: 2026-09-25
 
 # UPDATES.md — App self-updates (Tauri updater)
 
@@ -19,26 +19,24 @@ with the site.
 
 ## One-time setup (maintainer)
 
-1. **Generate the signing keypair** (private key stays secret forever —
-   losing it means existing installs can never update again):
-   `npm run tauri signer generate -- -w ~/.tauri/just-write-ehis.key`
-2. **Paste the public key** into `src-tauri/tauri.conf.json` →
-   `plugins.updater.pubkey` (replace `REPLACE_WITH_UPDATER_PUBLIC_KEY`).
-3. **Point `plugins.updater.endpoints`** at your release feed (replace the
-   `YOUR_USER/YOUR_REPO` placeholder). Two supported shapes:
+1. **Signing keypair** — done. The private key lives at the repo root as
+   `just-write-ehis.key` (gitignored, never commit it). Losing it means
+   existing installs can never update again — back it up off-machine.
+2. **Public key** — set in `src-tauri/tauri.conf.json` →
+   `plugins.updater.pubkey`. Matches the root key file.
+3. **`plugins.updater.endpoints`** — set to the private repo's release
+   feed (`simply-ehis/just-write-ehis/releases/latest/download/latest.json`).
+   Two supported shapes:
    - Static `latest.json` on GitHub Releases (see format below), or
    - A dynamic server returning `204` (no update) or `200` + update JSON.
 4. **Export the private key at build time** (PowerShell — `.env` files do
-   NOT work). Most reliable: dot-source the helper (immune to stale
-   session environments):
-   `. $HOME\.tauri\just-write-ehis-env.ps1`
-   (sets `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-   from `~/.tauri/`; the password lives in `just-write-ehis.pw.txt` next
-   to the key — back both up, losing them bricks future updates).
-   Gotcha 2026-09-18: the PASSWORD var must be present and correct — an
-   absent/empty one makes tauri-cli stop for an interactive password
-   prompt and hang headless builds forever. Registry User env alone is
-   NOT enough for shells spawned before it was set.
+   NOT work):
+   `$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw just-write-ehis.key`
+   then run the build in the same session so the variable is visible.
+   Gotcha 2026-09-18: if the key ever gains a password, the
+   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` var must be present and correct —
+   an absent/empty one makes tauri-cli stop for an interactive password
+   prompt and hang headless builds forever.
 
 ## Per-release flow
 

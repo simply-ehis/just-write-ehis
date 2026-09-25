@@ -209,9 +209,9 @@ async function noNativeDialogs() {
   const ai = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
   check("no hardcoded dev paths", !ai.includes("C:\\\\Users") && !ai.includes("small-model-harness\""));
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("editor theme follows setting", editor.includes("makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme"));
+  check("editor theme follows setting", editor.includes("makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode"));
   const palette = await readFile(join(root, "src/lib/editorTheme.ts"), "utf8");
-  check("editor palettes per theme", ["light", "dark", "brutalist", "glass"].every((t) => palette.includes(`${t}:`)));
+  check("editor palettes per theme", ["light:", "dark:", "brutalist:", "brutalist-light", "glass:", "glass-light"].every((k) => palette.includes(k)));
 }
 
 async function integrityWiring() {
@@ -345,9 +345,10 @@ async function themeAndReaderWiring() {
   check("theme stylesheet loads", main.includes("./app.css"));
   const css = await readFile(join(root, "src/app.css"), "utf8");
   check("surface/type/spacing vars defined", css.includes("--surface-base:") && css.includes("--space-4:") && css.includes("--font-size-base:"));
-  check("light theme exists", css.includes('[data-theme="light"]'));
+  check("light theme exists", css.includes('[data-mode="light"]'));
+  check("style overlays exist", css.includes('[data-theme="brutalist"]') && css.includes('[data-theme="glass"]') && css.includes('[data-theme="glass"][data-mode="light"]'));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
-  check("app applies theme setting", app.includes("dataset.theme"));
+  check("app applies theme setting", app.includes("applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride)"));
 }
 
 async function auditBatchWiring() {

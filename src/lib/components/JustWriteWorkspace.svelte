@@ -236,11 +236,10 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
     return false;
   }
 
-  function makeDarkTheme(font: string, size: number, lh: number, theme = "dark") {
-    // Per-theme editor surface, in lockstep with app.css via the shared
-    // palette (brutalist gets flat amber, glass translucent mint — never
-    // dark's editor by default).
-    const p = editorPalette(theme);
+  function makeDarkTheme(font: string, size: number, lh: number, theme = "default", mode = "dark") {
+    // Per-style×mode editor surface, in lockstep with app.css via the
+    // shared palette.
+    const p = editorPalette(theme, mode);
     return EditorView.theme({
       "&": {
         backgroundColor: p.bg,
@@ -313,7 +312,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   }
 
   function currentThemeExt() {
-    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme);
+    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode);
   }
 
   function currentAutocorrectExt() {
@@ -736,7 +735,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   // silently wipe the session's undo/redo stack on every font-size tweak).
   // Same untrack rule: the reconfigure must not resubscribe to what it rewrites.
   $effect(() => {
-    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
+    void [$settings.theme, $settings.themeMode, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       reconfigureAppearance();
     });

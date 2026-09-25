@@ -329,10 +329,9 @@ import { countWords } from "$lib/text";
     await attachFiles(editorView, files);
   }
 
-  function makeDarkTheme(font: string, size: number, lh: number, theme = "dark") {
-    // Per-theme editor surface from the shared palette (never dark's
-    // editor by default for brutalist/glass). Mirrors app.css.
-    const p = editorPalette(theme);
+  function makeDarkTheme(font: string, size: number, lh: number, theme = "default", mode = "dark") {
+    // Per-style×mode editor surface from the shared palette. Mirrors app.css.
+    const p = editorPalette(theme, mode);
     return EditorView.theme({
       "&": {
         backgroundColor: p.bg,
@@ -410,7 +409,7 @@ import { countWords } from "$lib/text";
     }
 
     const content = doc?.content ?? "";
-    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme);
+    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode);
 
     // Snippet expansion plugin. The expansion dispatch is deferred past
     // the update cycle (dispatch is illegal synchronously inside
@@ -762,7 +761,7 @@ import { countWords } from "$lib/text";
   // Rebuild the editor live when theme or type settings change.
   // Same untrack rule: the rebuild must not resubscribe to what it rewrites.
   $effect(() => {
-    void [$settings.theme, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
+    void [$settings.theme, $settings.themeMode, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
     });

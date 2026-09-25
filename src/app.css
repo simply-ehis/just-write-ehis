@@ -1,5 +1,5 @@
-:root, :root[data-theme="light"] {
-  /* light — paper & pine ink */
+:root, :root[data-mode="light"] {
+  /* light mode base — paper & pine ink (under any style) */
   --bg: #F1EFE6;
   --surface: #FAF9F3;
   --surface-2: #EBE7D9;
@@ -69,8 +69,8 @@
   --shadow-md: 0 2px 8px rgba(43, 42, 37, 0.12);
 }
 
-:root[data-theme="dark"] {
-  /* dark — near-black ink well (explicit Settings → General → Dark) */
+:root[data-mode="dark"] {
+  /* dark mode base — near-black ink well (under any style) */
   --bg: #100E0B;
   --surface: #171411;
   --surface-2: #1C1815;
@@ -138,44 +138,14 @@
 }
 
 :root[data-theme="brutalist"] {
-  /* brutalist — hazard: near-black concrete, safety-amber accent.
-     Deliberately NOT dark's palette: flat fills, 0 radius, 2-3px hard
-     ink borders, offset ink shadows, amber focus/selection. */
-  --bg: #100F0D;
-  --surface: #171614;
-  --surface-2: #1E1C19;
-  --surface-elevated: #242220;
-  --ink: #F4F1E6;
-  --ink-muted: #A8A294;
-  --border: #2A2824;
+  /* brutalist style overlay — hazard identity over EITHER mode base.
+     Surfaces, ink, text, and borders inherit the light/dark mode; this
+     block owns only the amber accent, identity hues, 0 radius, and hard
+     ink shadows. Works in light mode too. */
   --accent: #FFB000;
   --accent-soft: #3A2C10;
   --accent-ink: #191100;
   --accent-on: var(--text-on-accent);
-
-  color-scheme: dark;
-
-  --bg-primary: var(--bg);
-  --bg-secondary: var(--surface);
-  --bg-tertiary: var(--surface-2);
-  --bg-surface: var(--surface);
-  --bg-hover: var(--surface-2);
-  --bg-active: var(--accent-soft);
-
-  --surface-base: var(--bg);
-  --surface-raised: var(--surface);
-  --surface-overlay: var(--surface-2);
-  --surface-pressed: var(--accent-soft);
-  --surface-hover: var(--surface-2);
-
-  --text-primary: var(--ink);
-  --text: var(--ink);
-  --text-secondary: var(--ink-muted);
-  --text-muted: var(--ink-muted);
-  --text-on-accent: var(--accent-ink);
-
-  --border-strong: #4A4436;
-  --border-subtle: #242220;
 
   --accent-hover: #FFC133;
   --accent-primary: var(--accent);
@@ -220,15 +190,31 @@
   --brutalist-radius: 0px;
 }
 
+/* Style overlays follow the mode for color-scheme (form controls,
+   scrollbars): dark base unless the light mode is active. */
+:root[data-theme="brutalist"], :root[data-theme="glass"] {
+  color-scheme: dark;
+}
+:root[data-theme="brutalist"][data-mode="light"],
+:root[data-theme="glass"][data-mode="light"] {
+  color-scheme: light;
+}
+
+/* Brutalist on paper: dark amber wash would vanish, so lighten it. */
+:root[data-theme="brutalist"][data-mode="light"] {
+  --accent-soft: #F3E2B0;
+  --accent-hover: #E69E00;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    /* dark — ink well (system fallback before Settings loads) */
-    --bg: #1B1A15;
-    --surface: #221F19;
-    --surface-2: #2A2721;
+  :root:not([data-mode]) {
+    /* dark mode base (system fallback before Settings loads) */
+    --bg: #100E0B;
+    --surface: #171411;
+    --surface-2: #1C1815;
     --ink: #ECE7D8;
     --ink-muted: #9C9686;
-    --border: #332F26;
+    --border: #2A231B;
     --accent: #8FC7A9;
     --accent-soft: #263229;
     --accent-ink: #16211B;
@@ -1293,44 +1279,26 @@ input:focus, textarea:focus, select:focus {
    ============================================ */
 
 :root[data-theme="glass"] {
-  /* Glass — abyssal glow: near-black base, real translucency, a
-     luminous mint accent. Distinct from dark's flat ink-well fills. */
-  --bg: #0a0a0a;
+  /* Glass style overlay — frosted translucency + luminous mint accent over
+     EITHER mode base. Surfaces/ink/text/borders inherit the light/dark
+     mode; this block owns translucency, blur, radius swell, and glow.
+     Dark base shown; see the light-mode fixes below the block. */
   --surface: rgba(255, 255, 255, 0.04);
   --surface-2: rgba(255, 255, 255, 0.07);
   --surface-elevated: rgba(255, 255, 255, 0.09);
-  --ink: #ECE7D8;
-  --ink-muted: #9C9686;
-  --border: rgba(255, 255, 255, 0.08);
   --accent: #A9E8C6;
   --accent-soft: rgba(143, 199, 169, 0.14);
   --accent-ink: #16211B;
   --accent-on: var(--text-on-accent);
   --accent-glow: 0 0 14px rgba(143, 199, 169, 0.35);
 
-  color-scheme: dark;
-
-  --bg-primary: var(--bg);
-  --bg-secondary: var(--surface);
-  --bg-tertiary: var(--surface-2);
-  --bg-surface: var(--surface);
   --bg-hover: rgba(255, 255, 255, 0.08);
   --bg-active: var(--accent-soft);
 
-  --surface-base: var(--bg);
   --surface-raised: rgba(255, 255, 255, 0.05);
   --surface-overlay: rgba(255, 255, 255, 0.08);
   --surface-pressed: var(--accent-soft);
   --surface-hover: rgba(255, 255, 255, 0.08);
-
-  --text-primary: var(--ink);
-  --text: var(--ink);
-  --text-secondary: var(--ink-muted);
-  --text-muted: var(--ink-muted);
-  --text-on-accent: var(--accent-ink);
-
-  --border-strong: rgba(255, 255, 255, 0.14);
-  --border-subtle: rgba(255, 255, 255, 0.06);
 
   --accent-hover: #C2F2DA;
   --accent-primary: var(--accent);
@@ -1374,6 +1342,59 @@ input:focus, textarea:focus, select:focus {
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   --glass-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Glass on paper: white translucency vanishes, so panels use ink washes
+   and the mint accent deepens to stay legible. */
+:root[data-theme="glass"][data-mode="light"] {
+  --surface: rgba(43, 42, 37, 0.05);
+  --surface-2: rgba(43, 42, 37, 0.08);
+  --surface-elevated: rgba(250, 249, 243, 0.72);
+  --bg-hover: rgba(43, 42, 37, 0.07);
+  --surface-raised: rgba(250, 249, 243, 0.6);
+  --surface-overlay: rgba(43, 42, 37, 0.09);
+  --surface-hover: rgba(43, 42, 37, 0.07);
+  --accent: #1F7A52;
+  --accent-soft: rgba(31, 122, 82, 0.14);
+  --accent-ink: #FFFFFF;
+  --accent-hover: #2A8F60;
+  --accent-glow: 0 0 14px rgba(31, 122, 82, 0.3);
+  --accent-semantic-green: #1F7A52;
+  --accent-semantic-purple: #6A5FA8;
+  --accent-semantic-red: #B54434;
+  --accent-semantic-blue: #2563EB;
+  --accent-semantic-yellow: #9A6B1A;
+  --success: #1F7A52;
+  --warning: #9A6B1A;
+  --error: #B54434;
+  --ws-logs: #9A6B1A;
+  --ws-write: #726F62;
+  --ws-map: #2E7D5B;
+  --ws-canvas: #C67C3C;
+  --ws-novel: #6A5FA8;
+  --ws-script: #B54434;
+  --ws-projects: #6B7280;
+  --ws-reader: #3F7A5E;
+  --ws-home: #1F7A52;
+  --ws-inbox: #A8622D;
+  --ws-files: #6E675C;
+  --ws-properties: #5F7052;
+  --glass-bg: rgba(43, 42, 37, 0.04);
+  --glass-bg-hover: rgba(43, 42, 37, 0.07);
+  --glass-border: rgba(43, 42, 37, 0.1);
+  --glass-border-strong: rgba(43, 42, 37, 0.18);
+  --glass-shadow: 0 8px 32px rgba(43, 42, 37, 0.18);
+  --glass-shadow-sm: 0 2px 8px rgba(43, 42, 37, 0.14);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Glass needs something to refract: a faint accent aurora behind the app.
+   Static gradients only — translucency does the moving. */
+[data-theme="glass"] body {
+  background:
+    radial-gradient(1100px 550px at 12% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    radial-gradient(900px 650px at 108% 112%, color-mix(in srgb, var(--accent-semantic-blue) 9%, transparent), transparent 60%),
+    var(--bg);
 }
 
 /* Glass — system font stack (Apple feel) */

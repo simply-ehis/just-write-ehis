@@ -29,8 +29,15 @@ export interface SavedView {
 }
 
 export interface AppSettings {
-  theme: "dark" | "light" | "brutalist" | "glass";
+  /** Visual style: default room, brutalist concrete, or glass frost. */
+  theme: "default" | "brutalist" | "glass";
+  /** Light or dark base under any style. */
+  themeMode: "dark" | "light";
+  /** Custom accent override (#rrggbb) — empty means the style's accent. */
+  accentOverride: string;
   iconSet: "phosphor" | "tabler";
+  /** Sidebar footer (Auto-sort / New Doc / AI Panel / streak) collapsed. */
+  sidebarFooterCollapsed: boolean;
   streakGoal: number;
   /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */
   compactMode: boolean;
@@ -151,8 +158,11 @@ export interface AppSettings {
 }
 
 const defaultSettings: AppSettings = {
-  theme: "dark",
+  theme: "default",
+  themeMode: "dark",
+  accentOverride: "",
   iconSet: "phosphor",
+  sidebarFooterCollapsed: false,
   streakGoal: 500,
 
   fontSize: 15,
@@ -310,6 +320,14 @@ function loadSettings(): AppSettings {
       // migrate forward (exact matches only); deliberate custom values stay.
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const raw = parsed as Record<string, unknown>;
+        // Style×mode migration (2026-09): legacy single `theme` values map
+        // onto the split fields before validation drops them as unknown.
+        if (raw.theme === "dark" || raw.theme === "light" || raw.theme === "brutalist" || raw.theme === "glass") {
+          if (raw.themeMode !== "dark" && raw.themeMode !== "light") {
+            raw.themeMode = raw.theme === "light" ? "light" : "dark";
+          }
+          raw.theme = raw.theme === "brutalist" ? "brutalist" : raw.theme === "glass" ? "glass" : "default";
+        }
         const { valid } = validateSettings(raw);
         const { patch, migrated } = migrateRetiredProviders(valid, defaultSettings);
         if (migrated.length > 0) {

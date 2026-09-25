@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type ChatMessage, type Conversation } from "$lib/api";
+  import { api, isBrowserPreview, type ChatMessage, type Conversation } from "$lib/api";
   import { currentDoc, currentWorkspace, aiPanelOpen, structurizePreset } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
   import { writeBack } from "$lib/stores/writeBack";
@@ -9,7 +9,6 @@
   import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
-  import { isBrowserPreview } from "$lib/api";
   import { ensureHarness } from "$lib/memorySidecar";
   import { testProvider } from "$lib/providerTest";
   import { friendlyEndpointError, rateLimited } from "$lib/aiRequest";
@@ -80,17 +79,29 @@
       }
     }
     if ($settings.scrubSecrets) {
-      const ok = await ensureHarness();
-      if (!ok) {
-        throw new Error("Secret scrubbing is on but the memory sidecar isn't running.");
+      // No sidecar on the web: blocking chat here would punish users who
+      // enabled scrubbing on desktop, so warn once and send as-is.
+      if (isBrowserPreview()) {
+        notices.push("secret scrubbing needs the desktop app — sent as-is");
+      } else {
+        const ok = await ensureHarness();
+        if (!ok) {
+          throw new Error("Secret scrubbing is on but the memory sidecar isn't running.");
+        }
+        nextPrompt = await api.memoryRedact(nextPrompt);
+        nextSystem = await api.memoryRedact(nextSystem);
       }
-      nextPrompt = await api.memoryRedact(nextPrompt);
-      nextSystem = await api.memoryRedact(nextSystem);
     }
     return { prompt: nextPrompt, system: nextSystem, notices };
   }
 
   async function toggleSidecar() {
+    // The small local model only exists in the desktop app — never fake
+    // the green "running" dot on the web.
+    if (isBrowserPreview()) {
+      showToast("Small local model needs the desktop app — point the small slot at an HTTP endpoint instead", "warning");
+      return;
+    }
     if (sidecarRunning) {
       await api.sidecarStop();
       sidecarRunning = false;
@@ -873,7 +884,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           <p class="ghost-status">{ghostProbe.text}</p>
         {/if}
         <p class="ghost-status">{ghostStatusText()}</p>
-        <p class="ghost-route">Routes to the local model (:8093) when enabled, else the small slot — never the main slot.</p>
+        {#if isBrowserPreview()}
+          <p class="ghost-route">Routes to the small slot's HTTP endpoint here — there is no local model on the web. Never the main slot.</p>
+        {:else}
+          <p class="ghost-route">Routes to the local model (:8093) when enabled, else the small slot — never the main slot.</p>
+        {/if}
       </div>
     </div>
   {:else}

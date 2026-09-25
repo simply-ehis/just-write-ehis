@@ -20,8 +20,8 @@
 
   // Ehis pen mark — nib crop for the 20px home icon, full wordmark for
   // the sidebar header. Theme-aware: dark ink on paper, paper ink on dark/glass.
-  let markSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
-  let logoSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let markSrc = $derived($settings.themeMode === "dark" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
+  let logoSrc = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   const wsIcons = workspaceIcons;
 
@@ -329,7 +329,18 @@
     </button>
   </nav>
 
-  <div class="sidebar-footer">
+  <div class="sidebar-footer" class:collapsed={$settings.sidebarFooterCollapsed}>
+    <button
+      class="footer-item footer-toggle"
+      onclick={() => ($settings = { ...$settings, sidebarFooterCollapsed: !$settings.sidebarFooterCollapsed })}
+      title={$settings.sidebarFooterCollapsed ? "Expand footer" : "Collapse footer"}
+      aria-label={$settings.sidebarFooterCollapsed ? "Expand sidebar footer" : "Collapse sidebar footer"}
+      aria-expanded={!$settings.sidebarFooterCollapsed}
+    >
+      <span class="nav-icon"><Icon name={$settings.sidebarFooterCollapsed ? "plus" : "minus"} size={14} /></span>
+      {#if $settings.sidebarFooterCollapsed}<span>Tools</span>{/if}
+    </button>
+    {#if !$settings.sidebarFooterCollapsed}
     <button
       class="footer-item"
       class:active={$sidebarAutoSort}
@@ -363,6 +374,7 @@
         <span class="backup-dot" class:stale={backupState.stale} aria-hidden="true"></span>
       {/if}
     </div>
+    {/if}
   </div>
 </aside>
 

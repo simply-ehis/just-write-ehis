@@ -23,7 +23,20 @@
     <script>
       try {
         var s = JSON.parse(localStorage.getItem("writing-app-settings") || "{}");
-        if (s.theme) document.documentElement.dataset.theme = s.theme;
+        // Legacy single-theme installs migrate: dark/brutalist/glass = dark
+        // base, light = light base; style defaults to the plain room.
+        var legacy = s.theme;
+        var style = (legacy === "brutalist" || legacy === "glass") ? legacy : "default";
+        var mode = s.themeMode === "light" || (s.themeMode !== "dark" && legacy === "light") ? "light" : "dark";
+        document.documentElement.dataset.theme = style;
+        document.documentElement.dataset.mode = mode;
+        if (typeof s.accentOverride === "string" && /^#[0-9a-fA-F]{6}$/.test(s.accentOverride)) {
+          var hex = s.accentOverride.toLowerCase();
+          var st = document.documentElement.style;
+          st.setProperty("--accent", hex);
+          st.setProperty("--accent-primary", hex);
+          st.setProperty("--accent-write", hex);
+        }
       } catch (e) {}
     </script>
     <script>

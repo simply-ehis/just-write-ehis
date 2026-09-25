@@ -1,12 +1,13 @@
 /**
- * editorTheme — per-theme CodeMirror palettes, mirroring app.css.
+ * editorTheme — per-style×mode CodeMirror palettes, mirroring app.css.
  *
  * Canvas (CodeMirror) can't read CSS vars through its theme objects
- * reliably across all surfaces, so each app theme gets an explicit
- * palette here: paper (light), ink-well (dark), hazard (brutalist),
- * abyssal-glow (glass). EditorPane and JustWriteWorkspace both build
- * their makeDarkTheme() from editorPalette(), which keeps the two
- * editors identical per theme. Unknown themes fall back to dark.
+ * reliably across all surfaces, so each style+mode combination gets an
+ * explicit palette here: default paper/ink-well, brutalist hazard (dark
+ * concrete + paper editions), glass abyssal-glow (dark frost + paper
+ * frost). EditorPane and JustWriteWorkspace both build their editor
+ * theme from editorPalette(), which keeps the two editors identical
+ * per combination. Unknown styles fall back to default, modes to dark.
  */
 export interface EditorPalette {
   bg: string;
@@ -39,7 +40,14 @@ const PALETTES: Record<string, EditorPalette> = {
     radius: "6px",
   },
   brutalist: {
-    bg: "#100F0D", fg: "#F4F1E6", muted: "#A8A294", overlay: "#1E1C19",
+    bg: "#100E0B", fg: "#ECE7D8", muted: "#9C9686", overlay: "#1C1815",
+    accent: "#FFB000",
+    sel: "#FFB00030", selFocus: "#FFB00040",
+    match: "#FFB00040", matchSel: "#FFB00080",
+    radius: "0",
+  },
+  "brutalist-light": {
+    bg: "#F1EFE6", fg: "#2B2A25", muted: "#5F5C50", overlay: "#EBE7D9",
     accent: "#FFB000",
     sel: "#FFB00030", selFocus: "#FFB00040",
     match: "#FFB00040", matchSel: "#FFB00080",
@@ -52,10 +60,20 @@ const PALETTES: Record<string, EditorPalette> = {
     match: "rgba(143,199,169,0.3)", matchSel: "rgba(143,199,169,0.45)",
     radius: "14px",
   },
+  "glass-light": {
+    bg: "rgba(250,249,243,0.72)", fg: "#2B2A25", muted: "#5F5C50",
+    overlay: "rgba(43,42,37,0.07)", accent: "#1F7A52",
+    sel: "rgba(31,122,82,0.18)", selFocus: "rgba(31,122,82,0.25)",
+    match: "rgba(31,122,82,0.18)", matchSel: "rgba(31,122,82,0.3)",
+    radius: "14px",
+  },
 };
 
-export function editorPalette(theme: string): EditorPalette {
-  return PALETTES[theme] ?? PALETTES.dark;
+export function editorPalette(style: string, mode = "dark"): EditorPalette {
+  if (style === "brutalist" || style === "glass") {
+    return PALETTES[mode === "light" ? `${style}-light` : style] ?? PALETTES.dark;
+  }
+  return PALETTES[mode === "light" ? "light" : "dark"];
 }
 
 /** Autocorrect suggestion underline — theme warning via CSS var. */

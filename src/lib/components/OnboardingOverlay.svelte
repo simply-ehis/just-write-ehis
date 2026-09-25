@@ -1,7 +1,7 @@
 <script lang="ts">
   import { settings, ONBOARD_VERSION, DEFAULT_HIDDEN_WORKSPACES } from "$lib/stores/settings";
   import { workspaces } from "$lib/stores/app";
-  import { api } from "$lib/api";
+  import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import { domainError } from "$lib/errors";
   import { isWindowsRuntime } from "$lib/widgetAutostart";
@@ -31,6 +31,7 @@
   let topBarDirty = $state(false);
   let hiddenIds = $state<string[]>([...DEFAULT_HIDDEN]);
   let theme = $state($settings.theme);
+  let themeMode = $state($settings.themeMode);
   let defaultWorkspace = $state("home");
   let sttOn = $state($settings.sttEnabled);
   let ttsOn = $state($settings.ttsEnabled);
@@ -47,7 +48,7 @@
   // Snapshot for change detection: the store value above may predate the
   // OS-keychain hydration, so only write back when the user edited the field.
   const initialApiKey = $settings.apiKey;
-  let logoSrc = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let logoSrc = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   function pickUseCase(id: UseCase) {
     useCase = id;
@@ -81,7 +82,25 @@
     if (step > 0) step--;
   }
 
-  const TOUR_DOC = `# Welcome to Just Write ehis ✍️
+  // Web tour tells the browser truth: ghost needs a connected model
+  // endpoint here, and docs persist to this browser's localStorage.
+  const TOUR_DOC = isBrowserPreview()
+    ? `# Welcome to Just Write ehis ✍️
+
+This is your Write tab — distraction-free, autosaved, yours. Here on the
+web, your docs persist to this browser's localStorage.
+
+**Three things to try right now:**
+1. **Just type.** Your words save automatically as you go.
+2. **Press Ctrl+K.** The command palette reaches every workspace, even hidden ones.
+3. **Press Ctrl+J.** The AI panel chats, composes, and structurizes — connect a model endpoint in Settings → AI & Providers first.
+
+Your top bar and sidebar were set up from your onboarding picks — change them
+anytime in Settings → General → Replay onboarding.
+
+Delete this doc whenever you're ready. Happy writing.
+`
+    : `# Welcome to Just Write ehis ✍️
 
 This is your Write tab — distraction-free, autosaved, yours.
 
@@ -125,6 +144,7 @@ Delete this doc whenever you're ready. Happy writing.
       topBarIds: [...topBarIds],
       hiddenIds: [...hiddenIds],
       theme,
+      themeMode,
       defaultWorkspace,
       sttEnabled: sttOn,
       ttsEnabled: ttsOn,
@@ -223,13 +243,26 @@ Delete this doc whenever you're ready. Happy writing.
       <div class="step">
         <div class="step-icon"><Icon name="sparkle" size={28} /></div>
         <h2>Make it yours</h2>
-        <p class="step-desc">Theme, landing tab, and voice. Local voice models run on-device (heavier RAM); browser voice is used on phones.</p>
+        {#if isBrowserPreview()}
+          <p class="step-desc">Theme, landing tab, and voice. Here on the web, dictation and read-aloud use your browser's built-in voices — no downloads, no extra RAM.</p>
+        {:else}
+          <p class="step-desc">Theme, landing tab, and voice. Local voice models run on-device (heavier RAM); browser voice is used on phones.</p>
+        {/if}
         <div class="input-group">
-          <span class="group-label" id="onboard-theme-label">Theme</span>
+          <span class="group-label" id="onboard-theme-label">Theme style</span>
           <div class="radio-row" role="radiogroup" aria-labelledby="onboard-theme-label">
-            {#each [["dark", "Dark"], ["light", "Light"], ["brutalist", "Brutalist"], ["glass", "Glass"]] as [v, label]}
+            {#each [["default", "Default"], ["brutalist", "Brutalist"], ["glass", "Glass"]] as [v, label]}
               <label class="radio-pill">
                 <input type="radio" name="onboard-theme" value={v} bind:group={theme} />
+                <span>{label}</span>
+              </label>
+            {/each}
+          </div>
+          <span class="group-label" id="onboard-mode-label">Light or dark</span>
+          <div class="radio-row" role="radiogroup" aria-labelledby="onboard-mode-label">
+            {#each [["dark", "Dark"], ["light", "Light"]] as [v, label]}
+              <label class="radio-pill">
+                <input type="radio" name="onboard-mode" value={v} bind:group={themeMode} />
                 <span>{label}</span>
               </label>
             {/each}
@@ -255,7 +288,11 @@ Delete this doc whenever you're ready. Happy writing.
           </label>
           <label class="check-row">
             <input type="checkbox" bind:checked={llmOn} />
-            <span>Local ghost autocomplete</span>
+            {#if isBrowserPreview()}
+              <span>Ghost autocomplete (needs a model endpoint)</span>
+            {:else}
+              <span>Local ghost autocomplete</span>
+            {/if}
           </label>
         </div>
         <div class="step-actions">
@@ -286,22 +323,28 @@ Delete this doc whenever you're ready. Happy writing.
         <div class="step-icon"><Icon name="folder" size={28} /></div>
         <h2>Vault & AI (optional)</h2>
         <p class="step-desc">Where your writing lives, plus models. Small serves ghost + light tasks; main serves chat, Composer, Structurize. Skip freely — set up later in Settings.</p>
-        <div class="input-group">
-          <label for="onboard-vault-path">Vault Path</label>
-          <input id="onboard-vault-path" type="text" bind:value={vaultPath} placeholder="~/WritingVault" />
-        </div>
+        {#if isBrowserPreview()}
+          <p class="step-desc">On the web your vault lives in this browser's localStorage, and AI slots talk to HTTP model endpoints you configure below. There are no bundled local models here — those ship with the desktop app.</p>
+        {:else}
+          <div class="input-group">
+            <label for="onboard-vault-path">Vault Path</label>
+            <input id="onboard-vault-path" type="text" bind:value={vaultPath} placeholder="~/WritingVault" />
+          </div>
+        {/if}
         <label class="check-row seed-row">
           <input type="checkbox" bind:checked={seedSample} />
           <span>Seed a guided-tour doc + starter template</span>
         </label>
-        <div class="input-group">
-          <label for="onboard-small-endpoint">Small model endpoint</label>
-          <input id="onboard-small-endpoint" type="text" bind:value={smallEndpoint} placeholder="http://127.0.0.1:8093/v1" />
-        </div>
-        <div class="input-group">
-          <label for="onboard-small-model">Small model name</label>
-          <input id="onboard-small-model" type="text" bind:value={smallModel} placeholder="lfm2.5-350m" />
-        </div>
+        {#if !isBrowserPreview()}
+          <div class="input-group">
+            <label for="onboard-small-endpoint">Small model endpoint</label>
+            <input id="onboard-small-endpoint" type="text" bind:value={smallEndpoint} placeholder="http://127.0.0.1:8093/v1" />
+          </div>
+          <div class="input-group">
+            <label for="onboard-small-model">Small model name</label>
+            <input id="onboard-small-model" type="text" bind:value={smallModel} placeholder="lfm2.5-350m" />
+          </div>
+        {/if}
         <div class="input-group">
           <label for="onboard-endpoint">Main model endpoint</label>
           <input id="onboard-endpoint" type="text" bind:value={mainEndpoint} placeholder="https://api.openai.com/v1" />

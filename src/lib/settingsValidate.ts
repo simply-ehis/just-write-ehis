@@ -24,7 +24,8 @@ type Kind =
   | "strarr"
   | "strarrnull"
   | "obj"
-  | "arr";
+  | "arr"
+  | "hexcolor";
 
 interface Rule {
   kind: Kind;
@@ -38,6 +39,8 @@ const STR: Rule = { kind: "str" };
 const STRNULL: Rule = { kind: "strnull" };
 const STRARR: Rule = { kind: "strarr" };
 const OBJ: Rule = { kind: "obj" };
+/** #rrggbb accent override — empty string means "style default". */
+const HEXCOLOR: Rule = { kind: "hexcolor" };
 const ARR: Rule = { kind: "arr" };
 const ENUM = (...values: string[]): Rule => ({ kind: "enum", values });
 const NUM = (min: number, max: number): Rule => ({ kind: "num", min, max });
@@ -45,8 +48,11 @@ const INT = (min: number, max: number): Rule => ({ kind: "int", min, max });
 
 /** Every importable/sanitizable setting this version knows. */
 const SCHEMA: Record<string, Rule> = {
-  theme: ENUM("dark", "light", "brutalist", "glass"),
+  theme: ENUM("default", "brutalist", "glass"),
+  themeMode: ENUM("dark", "light"),
+  accentOverride: HEXCOLOR,
   iconSet: ENUM("phosphor", "tabler"),
+  sidebarFooterCollapsed: BOOL,
   streakGoal: INT(0, 100000),
   compactMode: BOOL,
   autoHideChrome: BOOL,
@@ -181,6 +187,10 @@ export function validateSettings(
         break;
       case "enum":
         if (typeof v === "string" && rule.values!.includes(v)) valid[k] = v;
+        else rejected.push(k);
+        break;
+      case "hexcolor":
+        if (typeof v === "string" && (v === "" || /^#[0-9a-fA-F]{6}$/.test(v))) valid[k] = v.toLowerCase();
         else rejected.push(k);
         break;
       case "num":

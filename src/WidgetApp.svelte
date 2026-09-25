@@ -14,6 +14,7 @@
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { warnOnce } from "$lib/errors";
+  import { applyAppearance } from "$lib/appearance";
 
   const COLLAPSED_SIZE = 56;
   const EXPANDED_WIDTH = 520;
@@ -28,7 +29,7 @@
   let prepareLoading = $state(false);
   let loadRequest = 0;
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
-  let logo = $derived($settings.theme === "dark" || $settings.theme === "glass" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let logo = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   function isWorkspaceId(value: string): value is WorkspaceId {
     return workspaces.some((workspace) => workspace.id === value);
@@ -76,7 +77,7 @@
   );
 
   $effect(() => {
-    document.documentElement.dataset.theme = $settings.theme;
+    applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride);
   });
 
   $effect(() => {

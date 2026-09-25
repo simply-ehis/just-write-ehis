@@ -85,30 +85,45 @@
       logs: "#FFB000", write: "#A8A294", map: "#8FD694", novel: "#C4B5E3",
       script: "#F0857A", projects: "#9AA1AD", reader: "#7FBF9A", default: "#A8A294",
     },
+    "brutalist-light": {
+      logs: "#9A6B1A", write: "#726F62", map: "#2E7D5B", novel: "#6A5FA8",
+      script: "#B54434", projects: "#6B7280", reader: "#3F7A5E", default: "#726F62",
+    },
     glass: {
       logs: "#D9A441", write: "#9C9686", map: "#A9E8C6", novel: "#B9A8DC",
       script: "#E89A8B", projects: "#9AA1AD", reader: "#7FBF9A", default: "#9C9686",
     },
+    "glass-light": {
+      logs: "#9A6B1A", write: "#726F62", map: "#2E7D5B", novel: "#6A5FA8",
+      script: "#B54434", projects: "#6B7280", reader: "#3F7A5E", default: "#726F62",
+    },
   };
 
-  // Canvas can't use var(); track the theme instead (cheap $derived, read per draw).
-  let isDark = $derived($settings.theme !== "light");
-  // Selection/hub rings follow the theme accent + warning so they read
+  // Canvas can't use var(); track style + mode instead (cheap $derived,
+  // read per draw).
+  let isDark = $derived($settings.themeMode !== "light");
+  // Selection/hub rings follow the style accent + warning so they read
   // on paper, ink, hazard-amber, and glow-mint alike.
   let ringSelected = $derived(
-    $settings.theme === "light" ? "#3F6656"
-    : $settings.theme === "brutalist" ? "#FFB000"
-    : $settings.theme === "glass" ? "#A9E8C6"
+    $settings.theme === "brutalist" ? "#FFB000"
+    : $settings.theme === "glass" ? ($settings.themeMode === "light" ? "#1F7A52" : "#A9E8C6")
+    : $settings.themeMode === "light" ? "#3F6656"
     : "#8FC7A9"
   );
   let ringHub = $derived(
-    $settings.theme === "light" ? "#9A6B1A"
-    : $settings.theme === "brutalist" ? "#FFB000"
+    $settings.theme === "brutalist" ? "#FFB000"
+    : $settings.themeMode === "light" ? "#9A6B1A"
     : "#D9A441"
   );
 
+  function mapPaletteKey(): string {
+    const style = $settings.theme;
+    if (style === "default") return $settings.themeMode === "light" ? "light" : "dark";
+    return $settings.themeMode === "light" ? `${style}-light` : style;
+  }
+
   function getNodeColor(ws: string): string {
-    const palette = workspacePalettes[$settings.theme] ?? workspacePalettes.dark;
+    const palette = workspacePalettes[mapPaletteKey()] ?? workspacePalettes.dark;
     return palette[ws] || palette.default;
   }
 
