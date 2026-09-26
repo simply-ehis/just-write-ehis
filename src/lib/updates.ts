@@ -7,6 +7,7 @@
  */
 import { isBrowserPreview } from "$lib/api";
 import { getVersion } from "@tauri-apps/api/app";
+import { APP_VERSION } from "$lib/version";
 
 export interface UpdateInfo {
   version: string;
@@ -22,13 +23,45 @@ export type UpdateProgress =
 const PREVIEW_MSG =
   "App updates are delivered by the desktop app — this browser preview updates when the site is rebuilt.";
 
-export async function getAppVersion(fallback: string): Promise<string> {
+export async function getAppVersion(fallback: string = APP_VERSION): Promise<string> {
   if (isBrowserPreview()) return fallback;
   try {
     return await getVersion();
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Honest update-check failures. A private repo, an unpublished release, a
+ * missing signing key, or plain offline all surface from the updater
+ * plugin as a low-level fetch/signature error — shown verbatim that reads
+ * as "the app is broken". Map those to the actual state; anything
+ * unrecognized passes through untouched.
+ */
+export function friendlyUpdateError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const lower = raw.toLowerCase();
+  const unreachable =
+    lower.includes("404") ||
+    lower.includes("not found") ||
+    lower.includes("failed to fetch") ||
+    lower.includes("network") ||
+    lower.includes("offline") ||
+    lower.includes("dns") ||
+    lower.includes("connection") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("signature") ||
+    lower.includes("public key") ||
+    lower.includes("unauthorized") ||
+    lower.includes("forbidden") ||
+    lower.includes("403") ||
+    lower.includes("401");
+  if (unreachable) {
+    return "Updates aren't available for this build (release feed unreachable — private repo, unpublished release, or offline). See docs/UPDATES.md for the one-time release setup.";
+  }
+  return raw;
 }
 
 /** Returns the available update, or null when up to date. */

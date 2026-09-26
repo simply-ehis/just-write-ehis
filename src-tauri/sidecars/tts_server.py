@@ -38,7 +38,7 @@ import sys
 import wave
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "kokoro-multi-lang-v1_0")
 
 # ── Kokoro v1.0 speaker → sid (53 speakers, sherpa order) ─────────
@@ -180,7 +180,16 @@ class _TtsEngine:
                 f"(missing: {', '.join(missing)}). "
                 "Run: python src-tauri/sidecars/fetch_sidecars.py --tts")
         else:
-            print(f"[tts] Bundle: {self.model_dir}", flush=True)
+            try:
+                import sherpa_onnx
+            except Exception as e:
+                self.ready_error = f"TTS runtime unavailable: {e}"
+            else:
+                print(f"[tts] Bundle: {self.model_dir}", flush=True)
+
+    @property
+    def ready(self) -> bool:
+        return self.ready_error is None
 
     @property
     def loaded(self) -> bool:
@@ -309,16 +318,20 @@ def synthesize(text: str, voice: str = "af_heart", speed: float = 1.0,
               f"using {FALLBACK_VOICE}.", flush=True)
     chunks = _chunk_text(text, max_tokens=chunk_size, split_pattern=split_pattern)
     all_audio = []
+    errors = []
     for chunk in chunks:
         try:
             samples = eng.synth(chunk, sid, speed, lang_code)
             if samples is not None and len(samples) > 0:
                 all_audio.append(samples)
+            else:
+                errors.append(f"empty audio for chunk {chunk[:40]!r}")
         except Exception as e:
-            print(f"[tts] Chunk error: {e}", flush=True)
-            continue
+            errors.append(str(e))
+    if errors:
+        raise RuntimeError("TTS synthesis failed: " + "; ".join(errors[:3]))
     if not all_audio:
-        return b"", eng.sample_rate, fallback
+        raise RuntimeError("TTS synthesis produced no audio")
     combined = np.concatenate(all_audio)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -349,7 +362,14 @@ class TtsHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._json({"status": "ok", "model_loaded": _engine().loaded})
+            try:
+                eng = _engine()
+                self._json({"status": "ok" if eng.ready else "error",
+                            "ready": eng.ready, "model_loaded": eng.loaded,
+                            "error": eng.ready_error})
+            except Exception as e:
+                self._json({"status": "error", "ready": False,
+                            "model_loaded": False, "error": str(e)})
         else:
             self._json({"error": "not found"}, 404)
 

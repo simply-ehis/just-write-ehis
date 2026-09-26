@@ -1,19 +1,18 @@
 PURPOSE: what each verification layer proves and how to run it
 OWNS: check/build/e2e/self-test contracts, fixture policy
 READ-WHEN: before declaring anything done; after touching backend, parsers, or config
-KEY-FILES: tests/e2e-browser.mjs, tests/make-fixtures.py + fixtures/, SettingsPane.svelte (self-test)
-INVARIANTS: check 0 errors; build passes; e2e exit 0 — all three, every change
-GOTCHAS: e2e serves dist/ so rebuild first; binary fixtures are committed, regenerate via script never by hand; Rust has no harness — logic bugs there surface only via self-test in the shell or first tauri build
-UPDATED: 2026-09-17
+KEY-FILES: tests/e2e-browser.mjs, tests/ensure-poll.mjs, tests/settings-validate.mjs, tests/sidecar-resolve.py, SettingsPane.svelte (self-test)
+INVARIANTS: check 0 errors; source regressions pass; release verification additionally requires a fresh build and e2e exit 0
+GOTCHAS: e2e serves dist/ so rebuild first; source-only work must not run Tauri/PyInstaller; native packaging and Rust runtime require an explicitly authorized build
+UPDATED: 2026-09-25
 
 # Testing
 
-Three layers, all required. No layer substitutes for another.
+Seven layers cover the contracts; release verification also requires an explicitly authorized native build.
 
 ## 1. `npm run check` — types
 
-`svelte-check`: **0 errors** required. Warnings are pre-existing a11y/css
-categories; do not add new ones (fix roles/labels at the source).
+`svelte-check`: **0 errors and 0 warnings** required for the current source-only pass. Fix new diagnostics at the source rather than suppressing them.
 
 ## 2. `npm run build` — the bundle
 
@@ -22,7 +21,7 @@ categories; do not add new ones (fix roles/labels at the source).
 
 ## 3. `npm run test:e2e` — behavior without a shell
 
-`tests/e2e-browser.mjs` (zero dependencies) currently asserts ~190 checks:
+`tests/e2e-browser.mjs` (zero dependencies) currently asserts a broad set of static, parsing, IPC-parity, and memory-runtime checks:
 
 - serves `dist/` over HTTP (page + bundle + logo/manifest/assets),
 - bundle contains every workspace's UI markers,
@@ -64,8 +63,37 @@ snapshot/restore/graph/log/lock-exclusion/pinned/metrics/rhythm/export/
 canvas through the **live** backend (works in preview and in the shell).
 Extend it with every user-flow change (see `DEVELOPMENT.md` step 6).
 
+## 7. Local model + PIN source regressions
+
+Run these without producing an application or sidecar executable:
+
+```bash
+npm run test:ensure
+npm run test:sidecar
+npm run test:resolve
+npm run test:settings
+npm run test:assets
+npm run test:e2e
+npm run test:source
+```
+
+`test:source` is the CI-safe aggregate (settings, sidecar validation/readiness,
+write-back queue, window state, and support units). `test:sidecar` rejects traversal and renderer-selected Python executables while accepting the supported PATH interpreter names. `test:settings` also exercises the shared browser PIN retry state and recovery path. `test:ensure` proves running processes are still
+health-checked, readiness is not faked, and TTS lazy loading is represented
+honestly. `test:resolve` executes the STT/TTS model-path guards against the
+local asset tree. `test:assets` runs the release preflight without creating a
+venv or executable. `test:settings` executes validation plus the PIN
+create/confirm-enable/session unlock/remove state machine against the browser
+secret backend. `test:e2e` checks the Settings self-tests and packaged-runtime
+preference markers.
+
+These tests do not replace an explicitly authorized desktop build. The final
+`build_sidecars.py` → PyInstaller → Tauri resource chain and native GUI
+behavior remain release-gate checks.
+
 ## What is NOT covered
 
+- Build-gated UI probes (`test:onboard`, `test:wstoggles`, `test:reader`, theme mount phases, and mobile behavior) report `SKIP` when `dist/` is older than their source inputs. Run them only after an authorized frontend build; source-only mode must not treat a skip as UI evidence.
 - Rust compilation (no `cargo` in agent sessions by project rule) — logic
   errors in new Rust surface only at the maintainer's first `tauri build`.
 - Real model calls (AI/STT/TTS need servers/sidecars; errors are asserted,

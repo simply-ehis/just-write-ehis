@@ -11,6 +11,11 @@ import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } fro
 import { markdownToHtmlFragment } from "$lib/markdown";
 
 const browserSecrets = new Map<string, string>();
+let browserPinFailures = 0;
+let browserPinLockoutUntil = 0;
+const browserPinBaseBackoffMs = 2000;
+const browserPinMaxBackoffMs = 60000;
+const browserPinMaxFailedAttempts = 5;
 
 function frontmatter(doc: BrowserDoc): Record<string, unknown> {
   if (!doc.frontmatter_json) return {};
@@ -23,6 +28,13 @@ function frontmatter(doc: BrowserDoc): Record<string, unknown> {
 
 function docShape(d: BrowserDoc): BrowserDoc {
   return { ...d };
+}
+
+function widgetDocShape(store: ReturnType<typeof getBrowserStore>, id: string): BrowserDoc {
+  const doc = store.get(id);
+  if (!doc) throw new Error("document not found");
+  if (doc.locked) throw new Error("document is locked and unavailable to the companion window");
+  return docShape(doc);
 }
 
 async function aiChatCompletions(
@@ -262,6 +274,23 @@ export function craftStats(content: string): { dialogue: number; avgSentence: nu
 }
 
 /** Every Tauri command the frontend can invoke, implemented for the browser. */
+function browserVerifyPin(expected: string, candidate: string): { verified: boolean; retry_after_ms: number } {
+  const normalizedExpected = expected.trim();
+  const normalizedCandidate = candidate.trim();
+  const remaining = Math.max(0, browserPinLockoutUntil - Date.now());
+  if (remaining > 0) return { verified: false, retry_after_ms: remaining };
+  if (normalizedExpected.length >= 4 && normalizedExpected === normalizedCandidate) {
+    browserPinFailures = 0;
+    browserPinLockoutUntil = 0;
+    return { verified: true, retry_after_ms: 0 };
+  }
+  browserPinFailures += 1;
+  if (browserPinFailures < browserPinMaxFailedAttempts) return { verified: false, retry_after_ms: 0 };
+  const delay = Math.min(browserPinMaxBackoffMs, browserPinBaseBackoffMs * 2 ** (browserPinFailures - browserPinMaxFailedAttempts));
+  browserPinLockoutUntil = Date.now() + delay;
+  return { verified: false, retry_after_ms: delay };
+}
+
 export async function browserInvoke<T>(cmd: string, payload: Record<string, unknown>): Promise<T> {
   const store = getBrowserStore();
   const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -286,6 +315,20 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "doc_get":
       return docShape(store.get(String(payload.id))) as T;
 
+    case "widget_doc_get":
+      return widgetDocShape(store, String(payload.id)) as T;
+
+    case "widget_doc_save": {
+      widgetDocShape(store, String(payload.id));
+      const patch: Record<string, unknown> = {};
+      if (payload.title !== undefined) patch.title = payload.title;
+      if (payload.content !== undefined) patch.content = payload.content;
+      if (payload.status !== undefined) patch.status = payload.status;
+      if (payload.frontmatterJson !== undefined) patch.frontmatter_json = payload.frontmatterJson;
+      if (payload.parentId !== undefined) patch.parent_id = payload.parentId;
+      return docShape(store.saveDoc(String(payload.id), patch)) as T;
+    }
+
     case "doc_save": {
       const patch: Record<string, unknown> = {};
       if (payload.title !== undefined) patch.title = payload.title;
@@ -297,6 +340,10 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     }
 
     case "atomic_save":
+      return docShape(store.saveDoc(String(payload.docId), { content: String(payload.body) })) as T;
+
+    case "widget_atomic_save":
+      widgetDocShape(store, String(payload.docId));
       return docShape(store.saveDoc(String(payload.docId), { content: String(payload.body) })) as T;
 
     case "doc_delete":
@@ -698,15 +745,22 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       const t0 = performance.now();
       store.search("the");
       const searchMs = performance.now() - t0;
+      const g0 = performance.now();
       let edges = 0;
       for (const d of store.docs) edges += store.outgoingLinks(d).length;
+      const graphMs = performance.now() - g0;
+      let totalWords = 0;
+      for (const d of store.docs) totalWords += d.word_count || 0;
       return {
         doc_count: store.docs.length,
         snapshot_count: store.snaps.length,
         edge_count: edges,
         rag_chunk_count: 0,
+        total_words: totalWords,
         search_latency_us: Math.round(searchMs * 1000),
         snapshot_latency_us: 0,
+        graph_latency_us: Math.round(graphMs * 1000),
+        memory_mb: 0,
       } as T;
     }
 
@@ -1066,19 +1120,6 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "setup_file_watcher":
       return undefined as T;
 
-    case "sidecar_start":
-    case "sidecar_stop":
-      return undefined as T;
-
-    case "sidecar_is_running":
-      return false as T;
-
-    case "sidecar_set_endpoint":
-      return undefined as T;
-
-    case "sidecar_query":
-      throw new Error("The small-model sidecar runs in the desktop app. Connect an HTTP model in Settings → AI & Providers to use AI here.");
-
     case "memory_get_streak": {
       const sorted = [...store.days].sort();
       let streak = 0;
@@ -1287,7 +1328,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return false as T;
 
     case "llm_health":
-      return { status: "unavailable", model_loaded: false } as T;
+      return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
 
     case "llm_port":
       return 0 as T;
@@ -1302,7 +1343,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return false as T;
 
     case "stt_health":
-      return { status: "unavailable", model_loaded: false } as T;
+      return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
 
     case "stt_port":
       return 0 as T;
@@ -1320,7 +1361,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       return false as T;
 
     case "tts_health":
-      return { status: "unavailable", model_loaded: false } as T;
+      return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
 
     case "tts_port":
       return 0 as T;
@@ -1392,6 +1433,9 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
         throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
       }
       const v = String(payload.value ?? "");
+      if (payload.key === "appLockPin" && v.trim() && v.trim().length < 4) {
+        throw new Error("app PIN must be at least 4 characters");
+      }
       if (v) browserSecrets.set(String(payload.key), v);
       else browserSecrets.delete(String(payload.key));
       return undefined as T;
@@ -1402,6 +1446,17 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       }
       return (browserSecrets.get(String(payload.key)) ?? null) as T;
     }
+    case "app_lock_configured":
+      return (String(browserSecrets.get("appLockPin") ?? "").trim().length >= 4) as T;
+    case "app_lock_verify": {
+      const expected = String(browserSecrets.get("appLockPin") ?? "");
+      const candidate = String(payload.pin ?? "");
+      return browserVerifyPin(expected, candidate) as T;
+    }
+    case "app_lock_reset":
+      browserPinFailures = 0;
+      browserPinLockoutUntil = 0;
+      return undefined as T;
 
     default:
       throw new Error(`Unknown command in browser preview: ${cmd}`);

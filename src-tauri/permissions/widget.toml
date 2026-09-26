@@ -1,14 +1,15 @@
 [[permission]]
 identifier = "widget"
-description = "Existing document, log, capture, and save commands used by the companion window. Sidecars, secrets, filesystem, watcher, and updater commands are deliberately absent so the ACL refuses them even if the widget code changes."
+description = "Existing document, log, capture, save, and narrow app-lock verification commands used by the companion window. General secrets, sidecars, filesystem, watcher, and updater commands are deliberately absent."
 permissions = [
-  "allow-doc-get",
+  "allow-widget-doc-get",
   "allow-doc-create",
-  "allow-doc-save",
+  "allow-widget-doc-save",
   "allow-doc-search-full",
   "allow-log-get-or-create",
   "allow-usage-record",
-  "allow-atomic-save",
+  "allow-widget-atomic-save",
   "allow-bible-get-facts",
-  "allow-snapshot-list",
-]
+   "allow-snapshot-list",
+   "allow-app-lock-configured",
+ ]

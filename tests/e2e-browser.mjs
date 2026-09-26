@@ -16,9 +16,9 @@ import { join, extname, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /** Plain http GET with keep-alive disabled (undici fetch crashes Win libuv on exit). */
-function getText(port, path) {
+function getText(port, path, headers = {}) {
   return new Promise((resolve, reject) => {
-    const req = httpGet({ host: "127.0.0.1", port, path, agent: false }, (res) => {
+    const req = httpGet({ host: "127.0.0.1", port, path, agent: false, headers }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c) => (body += c));
@@ -232,8 +232,28 @@ async function modelWiring() {
   const settings = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
   check("provider test buttons exist", settings.includes("testSlot") && settings.includes("Test Main Slot"));
   check("voice model fields exist", settings.includes("sttModel") && settings.includes("ttsModel"));
+  check("local model runtime checks exist", settings.includes("testSttSetup") && settings.includes("testTtsSetup") && settings.includes("testLlmSetup"));
+  check("bundled LLM toggle makes a real request", panel.includes("ensureLlm()") && panel.includes("api.llmCompletion") && !panel.includes("sidecarHarnessDir"));
+  const audioStore = await readFile(join(root, "src/lib/stores/audio.ts"), "utf8");
+  check("TTS lazy-load gate fixed", audioStore.includes("ttsModelReady") && audioStore.includes("health.ready ?? health.model_loaded"));
+  check("running sidecars still health-check", audioStore.includes("result.value ?? await spec.health()"));
+  const sidecarRust = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
+  check("release prefers bundled native Python runtimes", sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') && sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "tts-server.exe")') && sidecarRust.indexOf('if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') < sidecarRust.indexOf('let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")') && sidecarRust.includes("JWE_SIDECARS_DIR"));
+  check("stale port cleanup never adopts arbitrary Python", sidecarRust.includes("fn port_owner") && !sidecarRust.includes('starts_with("python")'));
+  const nativeCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
+  check("renderer cannot choose arbitrary sidecar roots", nativeCommands.includes("trusted_sidecars_dir") && nativeCommands.includes("outside the application resource root"));
+  check("renderer cannot choose arbitrary Python executables", nativeCommands.includes("trusted_python_command") && nativeCommands.includes("custom Python paths are disabled"));
+  const sidecarValidation = await readFile(join(root, "src/lib/sidecarValidate.ts"), "utf8");
+  check("Python setting matches native allowlist", sidecarValidation.includes("python3") && sidecarValidation.includes("Use python, python3, or py from PATH"));
+  const browserBackend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
+  check("empty PIN cannot verify", nativeCommands.includes("fn verify_pin_value") && nativeCommands.includes('verify_pin_value("", "")') && browserBackend.includes("normalizedExpected.length >= 4"));
+  const tauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.conf.json"), "utf8"));
+  const windowsTauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.windows.conf.json"), "utf8"));
+  const baseResources = tauriConfig.bundle?.resources ?? [];
+  const windowsResources = windowsTauriConfig.bundle?.resources ?? [];
+  check("native runtime build is Windows desktop-only", !tauriConfig.build?.beforeBuildCommand?.includes("build:sidecars") && windowsTauriConfig.build?.beforeBuildCommand?.includes("build:sidecars") && baseResources.every((resource) => windowsResources.includes(resource)) && windowsResources.includes("sidecars/bin/**/*"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
-  check("voice model defaults set", stores.includes('sttModel: "moonshine-base"') && stores.includes('ttsModel: ""'));
+  check("voice model defaults set", stores.includes('sttModel: ""') && stores.includes('ttsModel: ""'));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust passes model to sidecars", commands.includes("model: Option<String>"));
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");
@@ -254,25 +274,30 @@ async function memorySidecarLive() {
   const { spawn } = await import("node:child_process");
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
-  const dir = mkdtempSync(join(tmpdir(), "jwe-mem-"));
-  const port = 18099;
-  const proc = spawn(
-    "python",
-    [join(root, "src-tauri/sidecars/memory_server.py"), String(port), dir],
-    { stdio: "ignore" }
-  );
+   const dir = mkdtempSync(join(tmpdir(), "jwe-mem-"));
+   const port = 18099;
+   const token = "test-memory-token";
+   const proc = spawn(
+     "python",
+     [join(root, "src-tauri/sidecars/memory_server.py"), String(port), dir],
+     { stdio: "ignore", env: { ...process.env, JWE_MEMORY_TOKEN: token } }
+   );
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   try {
     let health = null;
     for (let i = 0; i < 40 && !health; i++) {
       await wait(250);
       try {
-        health = await getText(port, "/health");
+         health = await getText(port, "/health", { "X-JWE-Memory-Token": token });
       } catch {
         /* still booting */
       }
     }
     check("memory sidecar boots", !!health && health.status === 200, health?.body ?? "no response");
+     const unauthorized = await getText(port, "/health");
+     check("memory sidecar rejects unauthenticated callers", unauthorized.status === 401);
+     const memorySource = await readFile(join(root, "src-tauri/sidecars/memory_server.py"), "utf8");
+     check("memory sidecar supports launch token", memorySource.includes("JWE_MEMORY_TOKEN") && memorySource.includes("X-JWE-Memory-Token"));
     if (!health || health.status !== 200) return;
     const post = (path, obj) =>
       new Promise((resolve, reject) => {
@@ -284,7 +309,11 @@ async function memorySidecarLive() {
             path,
             method: "POST",
             agent: false,
-            headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+             headers: {
+               "Content-Type": "application/json",
+               "Content-Length": Buffer.byteLength(body),
+               "X-JWE-Memory-Token": token,
+             },
           },
           (res) => {
             let text = "";
@@ -300,7 +329,7 @@ async function memorySidecarLive() {
       (await post("/learn", { text: "My name is Ehis. Always use Oxford commas. Key sk-testfakekey1234567890." })).body
     );
     check("memory learns facts (secret redacted at store)", learned.stored >= 2, `stored=${learned.stored}`);
-    const recalled = JSON.parse((await getText(port, "/recall?q=name")).body);
+     const recalled = JSON.parse((await getText(port, "/recall?q=name", { "X-JWE-Memory-Token": token })).body);
     check("memory recalls by relevance", recalled.facts.includes("Ehis"), recalled.facts.slice(0, 60));
     const redacted = JSON.parse((await post("/redact", { text: "token=hf_abcdefghijklmnopqrstuvwx" })).body);
     check("memory redacts pasted keys", !redacted.text.includes("hf_abcdefghij"), redacted.text);
@@ -416,7 +445,7 @@ async function auditBatchWiring() {
   check("saved views + calendar", props.includes("saveCurrentView") && props.includes("calendarCells"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust streams SSE deltas", commands.includes("ai_generate_stream") && commands.includes("delta"));
-  check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("harness_dir is empty") && commands.includes("ctx_size"));
+  check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("trusted_sidecars_dir") && commands.includes("app_lock_verify") && !commands.includes("harness_dir is empty"));
 }
 
 async function settingsAreaWiring() {
@@ -445,8 +474,16 @@ async function secretsWiring() {
   const schema = await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8");
   check("import allowlist excludes secrets", schema.includes("SECRET_KEYS") && schema.includes('"apiKey", "appLockPin"'));
   check("lock can be disabled in settings", stores.includes("lockEnabled") && pane.includes("setting-lock-enabled"));
+  const lockStore = await readFile(join(root, "src/lib/stores/lock.ts"), "utf8");
+  check("PIN storage fails closed and reset transitions are explicit", lockStore.includes("requirePinStorage") && lockStore.includes("resetPinConfiguration") && lockStore.includes("api.appLockReset"));
+  const app = await readFile(join(root, "src/App.svelte"), "utf8");
+  check("lock listener is installed before access wait", app.indexOf('"app-lock-unlock-request"') < app.indexOf("await waitForAppAccess()") && !app.includes('listen<boolean>("app-lock-state"'));
+  check("invalid persisted PIN cannot open the shell", app.includes("$appLockConfigured || $settings.lockEnabled") && !app.includes("$settings.appLockPin.trim().length"));
   const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
   check("preview secret bucket has allowlist", backend.includes('payload.key !== "apiKey"'));
+  const appLockCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
+  const widgetPermissions = await readFile(join(root, "src-tauri/permissions/widget.toml"), "utf8");
+  check("widget has narrow app-lock status only", appLockCommands.includes("app_lock_configured") && appLockCommands.includes("app_lock_verify") && widgetPermissions.includes("allow-app-lock-configured") && !widgetPermissions.includes("allow-app-lock-verify") && !widgetPermissions.includes("allow-secret-get"));
   const tab = await readFile(join(root, "src/lib/components/TabBar.svelte"), "utf8");
   check("tab unlock requires session PIN", tab.includes("isUnlocked(doc.id)"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");

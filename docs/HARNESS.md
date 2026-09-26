@@ -1,10 +1,10 @@
 PURPOSE: vendored AI-memory code, server contract, privacy behavior
 OWNS: src-tauri/sidecars/harness/*, memory_server.py, Rust MemoryManager, scrub/recall flow
 READ-WHEN: touching AI prompts, privacy, sidecars, or the vendored files
-KEY-FILES: harness/memory.py + clarification.py (vendored, MIT, see ATTRIBUTION.md), memory_server.py (ours), sidecar.rs MemoryManager, src/lib/harness.ts, AiPanel preparePrompt
+KEY-FILES: harness/memory.py + clarification.py (vendored, MIT, see ATTRIBUTION.md), memory_server.py (ours), sidecar.rs MemoryManager, src/lib/memorySidecar.ts, AiPanel preparePrompt
 INVARIANTS: scrubbing fails closed (missing sidecar blocks the call); stored facts are redacted at write; browser has no memory — its commands throw, never pass through
-GOTCHAS: voice swaps need sidecar restart; memory data lives in <app-data>/ai-memory (NOT the vault, NOT synced); vendored files stay pristine except marked APP ADDITION blocks
-UPDATED: 2026-09-17
+GOTCHAS: voice swaps need sidecar restart; memory data lives in <app-data>/ai-memory (NOT the vault, NOT synced); Rust supplies a per-launch loopback token; vendored files stay pristine except marked APP ADDITION blocks
+UPDATED: 2026-09-25
 
 # HARNESS.md — AI memory (vendored, adapted)
 
@@ -18,9 +18,11 @@ no `tools` arrays).
 
 App adaptations (all marked inline):
 - `_SECRET_PATTERNS` gains `hf_` + `AKIA` credential patterns.
-- `memory_server.py` (ours, stdlib only): HTTP wrapper + JSON persistence
-  across restarts. `GET /health /recall /facts`, `POST /learn /redact
-  /forget /clear`. Port 8092, data dir from argv (Rust passes app-data).
+- `memory_server.py` (ours, stdlib only): authenticated loopback HTTP wrapper
+  + JSON persistence across restarts. Rust supplies a per-launch
+  `X-JWE-Memory-Token`; implemented routes are `GET /health /recall` and
+  `POST /learn /redact /clear`. Port 8092, data dir from argv (Rust passes
+  app-data).
 - Secrets are redacted **before storage** (`remember()` scrubs first).
 
 ## Flow in the app

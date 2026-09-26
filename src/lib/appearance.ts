@@ -6,12 +6,25 @@
  * - `accentOverride`: custom #rrggbb accent, or "" for the style default.
  *
  * Called from the App/WidgetApp theme effects and the index.html first-paint
- * script path (via applyAppearanceObject). Accent math (luminance +
- * shading) lives here so every surface agrees on text-on-accent.
+ * path. Accent math (luminance + shading) lives here so every surface agrees
+ * on text-on-accent.
  */
+
+import { editorFontStack } from "./editorTheme";
 
 export type ThemeStyle = "default" | "brutalist" | "glass";
 export type ThemeMode = "dark" | "light";
+
+export function applyEditorTypography(font: string, size: number, lineHeight: number): void {
+  const safeSize = Number.isFinite(size) ? Math.min(32, Math.max(10, size)) : 15;
+  const safeLineHeight = Number.isFinite(lineHeight)
+    ? Math.min(3, Math.max(1, lineHeight))
+    : 1.7;
+  const style = document.documentElement.style;
+  style.setProperty("--editor-font-family", editorFontStack(font));
+  style.setProperty("--editor-font-size", `${safeSize}px`);
+  style.setProperty("--editor-line-height", String(safeLineHeight));
+}
 
 function luminance(hex: string): number {
   const r = parseInt(hex.slice(1, 3), 16) / 255;

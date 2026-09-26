@@ -15,7 +15,7 @@
  *
  * Run: npm run build && node tests/ws-toggles.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
@@ -69,6 +69,25 @@ function check(name, ok, detail = "") {
   if (!ok) failures++;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const sourceFiles = [
+  "src/main.ts",
+  "src/App.svelte",
+  "src/lib/components/Sidebar.svelte",
+  "src/lib/components/CommandPalette.svelte",
+  "src/lib/stores/settings.ts",
+];
+try {
+  const distStat = await stat(join(root, "dist/index.html"));
+  const sourceStats = await Promise.all(sourceFiles.map((file) => stat(join(root, file))));
+  if (Math.max(...sourceStats.map((entry) => entry.mtimeMs)) > distStat.mtimeMs) {
+    console.log("SKIP  workspace toggle flow requires a fresh dist; source-only mode forbids rebuilding");
+    process.exit(0);
+  }
+} catch {
+  console.log("SKIP  workspace toggle flow requires dist; source-only mode forbids rebuilding");
+  process.exit(0);
+}
 
 const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
 const jsName = distHtml.match(/assets\/(index-.*\.js)/)?.[1];

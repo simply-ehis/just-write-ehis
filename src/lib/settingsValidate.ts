@@ -13,6 +13,16 @@
 
 /** Keys that live in the OS keychain, never in a settings file. */
 export const SECRET_KEYS = ["apiKey", "appLockPin"] as const;
+export const APP_LOCK_MIN_PIN_LENGTH = 4;
+export const EDITOR_FONT_VALUES = [
+  "JetBrains Mono",
+  "Fira Code",
+  "Source Code Pro",
+  "IBM Plex Mono",
+  "Cascadia Code",
+  "Consolas",
+  "monospace",
+] as const;
 
 type Kind =
   | "bool"
@@ -67,7 +77,7 @@ const SCHEMA: Record<string, Rule> = {
 
   fontSize: NUM(10, 32),
   lineHeight: NUM(1, 3),
-  fontFamily: STR,
+  fontFamily: ENUM(...EDITOR_FONT_VALUES),
   readerFont: ENUM("serif", "sans", "mono"),
   readerSize: NUM(10, 32),
   readerMeasure: ENUM("narrow", "comfortable", "wide"),
@@ -86,7 +96,6 @@ const SCHEMA: Record<string, Rule> = {
   mainModelEndpoint: STR,
   mainModelName: STR,
   aiRateLimitCooldown: INT(0, 60000),
-  sidecarHarnessDir: STR,
   blankModeDefault: BOOL,
   logsLocalOnly: BOOL,
   scrubSecrets: BOOL,
@@ -195,17 +204,25 @@ export function validateSettings(
         break;
       case "num":
       case "int": {
-        if (typeof v !== "number" || !Number.isFinite(v) || (rule.kind === "int" && !Number.isInteger(v))) {
+        // Number inputs bind as strings ("18") — coerce before validating so
+        // a typed value survives reload instead of being dropped as unknown.
+        let n: unknown = v;
+        if (typeof n === "string" && n.trim() !== "") {
+          const parsed = Number(n);
+          if (Number.isFinite(parsed)) n = parsed;
+        }
+        if (typeof n !== "number" || !Number.isFinite(n) || (rule.kind === "int" && !Number.isInteger(n))) {
           rejected.push(k);
           break;
         }
+        const num = n;
         const lo = rule.min!;
         const hi = rule.max!;
-        if (v < lo || v > hi) {
-          valid[k] = Math.min(hi, Math.max(lo, v));
+        if (num < lo || num > hi) {
+          valid[k] = Math.min(hi, Math.max(lo, num));
           clamped.push(k);
         } else {
-          valid[k] = v;
+          valid[k] = num;
         }
         break;
       }
@@ -237,8 +254,14 @@ export function validateSettings(
 export function clampNumber(key: string, value: unknown): number | null {
   const rule = SCHEMA[key];
   if (!rule || (rule.kind !== "num" && rule.kind !== "int")) return null;
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const fixed = Math.min(rule.max!, Math.max(rule.min!, value));
+  let n: unknown = value;
+  if (typeof n === "string" && n.trim() !== "") {
+    const parsed = Number(n);
+    if (Number.isFinite(parsed)) n = parsed;
+  }
+  if (typeof n !== "number" || !Number.isFinite(n as number)) return null;
+  const num = n as number;
+  const fixed = Math.min(rule.max!, Math.max(rule.min!, num));
   return rule.kind === "int" ? Math.round(fixed) : fixed;
 }
 

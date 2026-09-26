@@ -15,7 +15,7 @@
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
-  import { AUTOCORRECT_WAVY, editorPalette } from "$lib/editorTheme";
+  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette } from "$lib/editorTheme";
   import VersionHistory from "./VersionHistory.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
   import RhythmPanel from "./RhythmPanel.svelte";
@@ -339,7 +339,7 @@ import { countWords } from "$lib/text";
       },
       ".cm-content": {
         caretColor: p.accent,
-        fontFamily: `'${font}', monospace`,
+        fontFamily: editorFontStack(font),
         fontSize: `${size}px`,
         lineHeight: `${lh}`,
         padding: "40px 0",
@@ -581,7 +581,9 @@ import { countWords } from "$lib/text";
   function queueDocSave(editingDocId: string, content: string) {
     saveQueue = saveQueue.then(async () => {
       try {
-        const updated = await api.docSave(editingDocId, undefined, content);
+        const updated = await (companionMode
+          ? api.widgetDocSave(editingDocId, undefined, content)
+          : api.docSave(editingDocId, undefined, content));
         if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: updated.word_count };
         if (!companionMode) scheduleStoryMemory(updated, content);
         const now = Date.now();
@@ -619,7 +621,9 @@ import { countWords } from "$lib/text";
     flushTimeout = setTimeout(() => {
       saveQueue = saveQueue.then(async () => {
         try {
-          await api.atomicSave(editingDocId, content);
+          await (companionMode
+            ? api.widgetAtomicSave(editingDocId, content)
+            : api.atomicSave(editingDocId, content));
         } catch (e) {
           domainError("Write", "couldn't flush document to disk", e);
         }
@@ -685,7 +689,9 @@ import { countWords } from "$lib/text";
     }
     try {
       const content = editorView?.state.doc.toString() ?? $currentDoc.content ?? '';
-      await api.docSave($currentDoc.id, undefined, content);
+      await (companionMode
+        ? api.widgetDocSave($currentDoc.id, undefined, content)
+        : api.docSave($currentDoc.id, undefined, content));
       const out = await api.convertRun($currentDoc.id, format);
       downloadConvertOutput(out);
       markUsed('export');
@@ -764,6 +770,33 @@ import { countWords } from "$lib/text";
     void [$settings.theme, $settings.themeMode, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+    });
+  });
+
+  // Settings → typewriter/focus defaults apply to the open doc live when it
+  // has no per-doc override (no jwe-focus-<id> entry). Explicit per-doc
+  // toggles win; defaults only govern untouched docs.
+  $effect(() => {
+    const td = $settings.typewriterDefault;
+    const fd = $settings.focusDimmingDefault;
+    untrack(() => {
+      const id = $currentDoc?.id;
+      if (!id || !editorView || !editorContainer) return;
+      try {
+        if (localStorage.getItem(`jwe-focus-${id}`)) return;
+      } catch {
+        return;
+      }
+      let changed = false;
+      if (typewriterEnabled !== td) {
+        typewriterEnabled = td;
+        changed = true;
+      }
+      if (focusDimming !== fd) {
+        focusDimming = fd;
+        changed = true;
+      }
+      if (changed) createEditor($currentDoc);
     });
   });
 

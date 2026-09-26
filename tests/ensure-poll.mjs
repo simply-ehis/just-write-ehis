@@ -15,6 +15,12 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const memory = new Map();
+globalThis.localStorage = {
+  getItem: (key) => memory.get(key) ?? null,
+  setItem: (key, value) => memory.set(key, String(value)),
+  removeItem: (key) => memory.delete(key),
+};
 const esbuild = await import("esbuild");
 const { mkdir, rm } = await import("node:fs/promises");
 const outdir = join(root, "tests", ".tmp-ensure-poll");
@@ -76,12 +82,13 @@ function check(name, ok, detail = "") {
 // ensureSidecar: already-running short-circuits start.
 {
   let started = 0;
+  let healthChecks = 0;
   const events = [];
   const ok = await audio.ensureSidecar({
     kind: "Test",
     isRunning: async () => true,
     start: async () => { started++; },
-    health: async () => ({}),
+    health: async () => { healthChecks++; return {}; },
     modelReady: () => true,
     setRunning: (v) => events.push(["running", v]),
     setLoaded: (v) => events.push(["loaded", v]),
@@ -90,7 +97,32 @@ function check(name, ok, detail = "") {
     setProbed: () => events.push(["probed"]),
   });
   check("running short-circuits start", ok === true && started === 0);
+  check("running process still health-checks", healthChecks === 1, `${healthChecks} checks`);
   check("probed flagged", events.some(([k]) => k === "probed"));
+}
+
+// ensureSidecar: an owned process may still be loading its HTTP server.
+{
+  let started = 0;
+  let healthChecks = 0;
+  const ok = await audio.ensureSidecar({
+    kind: "Loading",
+    isRunning: async () => true,
+    start: async () => { started++; },
+    health: async () => {
+      healthChecks++;
+      if (healthChecks < 3) throw new Error("still loading");
+      return { ready: true };
+    },
+    modelReady: (h) => h.ready,
+    setRunning: () => {},
+    setLoaded: () => {},
+    setError: () => {},
+    setProgress: () => {},
+    setProbed: () => {},
+  });
+  check("running process waits for health", ok === true && healthChecks === 3, `${healthChecks} checks`);
+  check("loading process is not restarted", started === 0);
 }
 
 // ensureSidecar: start failure surfaces error + not running.
@@ -111,6 +143,32 @@ function check(name, ok, detail = "") {
   check("start failure returns false", ok === false);
   check("start failure sets error", events.some(([k, v]) => k === "error" && String(v).includes("ENOENT")));
   check("start failure marks down", events.some(([k, v]) => k === "running" && v === false));
+}
+
+check("TTS server is ready before lazy model load", audio.ttsModelReady({ ready: true, model_loaded: false }));
+check("TTS incomplete bundle is not ready", !audio.ttsModelReady({ ready: false, model_loaded: false }));
+check("STT health requires a loaded runtime", !audio.sttModelReady({ ready: false, model_loaded: false }));
+check("LLM health accepts native ok status", audio.llmModelReady({ status: "ok" }));
+
+// ensureSidecar: an unhealthy model is not reported as usable.
+{
+  const events = [];
+  const ok = await audio.ensureSidecar({
+    kind: "Voice",
+    isRunning: async () => false,
+    start: async () => {},
+    health: async () => ({ ready: false, error: "runtime missing" }),
+    modelReady: (h) => h.ready,
+    unavailableMessage: (h) => h.error,
+    setRunning: () => {},
+    setLoaded: (v) => events.push(["loaded", v]),
+    setError: (e) => events.push(["error", e]),
+    setProgress: () => {},
+    setProbed: () => {},
+  });
+  check("unready model returns false", ok === false);
+  check("unready model surfaces detail", events.some(([k, v]) => k === "error" && v === "runtime missing"));
+  check("unready model is not marked loaded", events.some(([k, v]) => k === "loaded" && v === false));
 }
 
 await rm(outdir, { recursive: true, force: true });

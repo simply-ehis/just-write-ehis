@@ -274,6 +274,27 @@ check("Canvas board renders", await waitFor(
     const stored = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
     check("appearance persists to settings", stored.theme === "brutalist" && stored.themeMode === "light" && stored.accentOverride === "#ff8800");
   }
+  const editorCategory = [...doc.querySelectorAll(".settings-nav .nav-item")].find((b) => (b.textContent || "").includes("Editor & Writing"));
+  editorCategory?.click();
+  await sleep(250);
+  const scriptFontSize = doc.querySelector("#setting-font-size");
+  const scriptLineHeight = doc.querySelector("#setting-line-height");
+  const scriptFontFamily = doc.querySelector("#setting-font-family");
+  if (scriptFontSize && scriptLineHeight && scriptFontFamily) {
+    scriptFontSize.value = "21";
+    scriptFontSize.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    scriptLineHeight.value = "2.2";
+    scriptLineHeight.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    scriptFontFamily.value = "IBM Plex Mono";
+    scriptFontFamily.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await sleep(350);
+  }
+  doc.querySelector('.workspace-nav [data-ws="script"]')?.click();
+  check("Script list returns", await waitFor(() => !!doc.querySelector(".script-item"), 10000));
+  doc.querySelector(".script-item")?.click();
+  check("Script editor returns with shared typography", await waitFor(() => !!doc.querySelector(".fountain-input"), 10000));
+  const scriptSource = await readFile(join(root, "src/lib/components/ScriptWorkspace.svelte"), "utf8");
+  check("Script uses shared typography contract", scriptSource.includes("font-family: var(--editor-font-family)") && scriptSource.includes("font-size: var(--editor-font-size)") && scriptSource.includes("line-height: var(--editor-line-height)"));
 }
 }
 

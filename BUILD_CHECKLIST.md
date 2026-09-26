@@ -54,14 +54,16 @@
 ## Remaining
 
 - [ ] Companion widget native verification — source/type/static gates pass; `tauri build --debug`, cold-open timing, RSS delta, crash recovery, theme propagation, and workspace/theme/size matrix remain pending because builds are explicitly skipped
+- [ ] Local STT/TTS/LLM release verification — source contracts, model resolution, and packaging pipeline pass; PyInstaller executables, Tauri resource layout, fresh-machine launch, real model self-tests, and Rust compilation remain pending explicit build permission
+- [ ] App PIN native verification — browser-backed create/confirm/enable/unlock/remove state machine passes; OS-keychain persistence, launch gate, retry countdown, and Lock-app-now flow require the desktop shell
 
-- [x] ~~Rust backend compilation~~ — **BUILDING SUCCESSFULLY** (cargo build passes, 86 warnings all dead-code/unused)
+- [ ] Rust backend compilation and Tauri packaging remain deferred in this source-only pass; no native build was run
 - [x] sqlite-vec vector embeddings for semantic RAG — **DONE** (sqlite-vec 0.1.9, zerocopy IntoBytes, TF-IDF text_to_embedding, rag_vec virtual table, semantic + keyword fallback search)
 - [x] Chat → Editor write-back (§A3) — **DONE** (writeBack store, EditorPane listener, 4 actions, keyboard shortcuts)
 - [x] AI Structurizer / Blueprint Mode (§A1) — **DONE** (`ai_structurize` command, Structurize mode tab, `{directive}` highlighting, workspace-aware system prompt, accept/insert/append/copy review actions)
 - [x] Performance budget verification (§14) — **DONE** (Settings > About & Diagnostics: cold start time, memory usage, DB search latency, doc/edge/snapshot counts, "Run Diagnostics" button with live metrics)
 - [x] Browser live preview (no Tauri shell) — **DONE** (`browserStore.ts` + `browserBackend.ts` localStorage backend, `api.ts` safeInvoke routing, preview banner, Tauri-only watcher guard; `npm run dev` serves a fully explorable app)
-- [x] Unified icon system, no duplicates — **DONE** (`Icon.svelte`: 41 hand-authored stroke icons, zero Lucide, zero emoji icons in nav/actions; icon-first buttons with title + aria-label tooltips; shared `.icon-btn` class)
+- [x] Unified icon system, no duplicates — **DONE** (`Icon.svelte`: 53 hand-authored stroke icons, zero Lucide, zero emoji icons in nav/actions; icon-first buttons with title + aria-label tooltips; shared `.icon-btn` class)
 - [x] Inbox multi-select + bulk triage (§A7.4) — **DONE** (select-all, bulk move-to-workspace, bulk delete)
 - [x] Conflict View Diff — **DONE** (was "coming soon" stub; now a real local-vs-snapshot line diff modal)
 - [x] Feature self-test + e2e — **DONE** (Settings > About > "Run Feature Self-Test" exercises create/save/search/link/snapshot/restore/graph/log/delete through the live backend; `npm run test:e2e` serves dist/ and asserts 15 checks, all passing)
@@ -76,7 +78,7 @@
 - [x] Per-workspace last place — **DONE** (`lastPlace.ts`, restore on visit for write/novel/script/projects/reader; Logs stays on today per spec §8.1)
 - [x] Streak sparkline — **DONE** (`today_rhythm` 24-bucket query, SVG sparkline with tooltip in StatusBar)
 - [x] Canvas board (A11.1) — **DONE where verifiable** (freeform cards + labeled connections + doc links; pan/zoom/fit, drag persist, connect mode, per-card inspector, keyboard delete; sidebar/palette/mobile/Home wiring; Rust side uncompiled per no-exe constraint)
-- [x] Audit fixes — **DONE** (Ghost autocomplete now passes workspace so private workspaces stay local-only; Reader import refuses epub/pdf/docx binaries with conversion guidance instead of storing `file.text()` garbage)
+- [x] Audit fixes — **DONE** (Ghost autocomplete passes the workspace so private workspaces stay local-only; Reader import now parses EPUB/DOCX/PDF into document text instead of storing binary garbage)
 - [x] Unlinked mentions UI — **DONE** (Inspector Links tab lists bare mentions with one-click in-place `[[linking]]`; fixes doubling)
 - [x] Logs quick-capture + touched-today — **DONE** (capture text was composed then discarded — data loss, now appended; derived touched-today footer with open actions)
 - [x] Reminders + auto-backup — **DONE** (weekly triage banner for week-stale inbox, daily streak nudge, frequency-aware silent auto-backup on open in the desktop shell)
@@ -87,7 +89,7 @@
 - [x] Theme system repair + light mode — **DONE** (`app.css` was never imported — the entire var theme was dead — restored import, defined the missing surface/type/spacing vars, added a paper light palette behind the existing toggle with no-flash preload and theme-aware logos)
 - [x] E-reader — **DONE** (real EPUB/DOCX/PDF text extraction into the doc body: jszip spine parse, raw-OOXML paragraphs, pdf.js page text; lazy chunk so the main bundle stays lean; position/search/export unaffected; fixtures + node parsing proofs)
 - [x] Dictionary selector + place stamp — **DONE** (English table can switch to custom-words-only; opt-in Nominatim/Open-Meteo stamp on fresh daily notes, keyless, fails silent)
-- [x] Model slots + voice models — **DONE** (chat/composer/structurize routed to main slot, ghost stays small; per-slot provider ping with latency + model presence; paste-to-swap STT id / TTS repo plumbed python↔Rust↔settings; `docs/MODELS.md` with Sept-2026 picks; no weights bundled by design — first-run downloads; Rust side uncompiled per no-exe constraint)
+- [x] Model slots + voice models — **DONE where source-verifiable** (bundled LFM2.5 local toggle performs a real completion; STT/TTS/LLM runtime self-tests added; running-process health and TTS lazy-load contracts repaired; model paths resolve legacy/default values safely; release build now packages Python runtimes with PyInstaller; `docs/MODELS.md` documents the native-first path; Rust/PyInstaller release side remains uncompiled per no-build constraint)
 - [x] Model research write-up — **DONE** (LFM2.5-350M default kept + base-wins-finetunes verdict; Moonshine-streaming-only and Kokoro-only locked with evaluated-and-rejected logs; full constraint-audit table so the hunt isn't repeated; small slot stays paste-to-swap with instant effect, voice swaps on sidecar restart)
 - [x] AI memory harness (vendored copy) — **DONE where verifiable** (memory.py + clarification.py vendored MIT with attribution; +hf_/AKIA patterns; `memory_server.py` stdlib server proven live: learn/recall/redact/persist; Rust manager + 8 commands; chat recall injection + fire-and-forget learning; opt-in scrub gate that fails closed; Privacy UI with count + wipe; e2e boots the real server; Rust uncompiled per no-exe constraint)
 - [x] Hardcoded demo purge — **DONE** (removed browser seed vault incl. Elena/Harbor fiction; avg-session stat returns 0-unknown instead of invented 25; e2e cleans its esbuild scratch dir + stale copy deleted; Rust verified free of demo data)
@@ -96,7 +98,7 @@
 - [x] AI discoverability — **DONE** (the panel had no desktop opener at all: added editor + JustWrite sparkle toggles, Ctrl+J, palette command, help/onboarding rows, and an empty-state warning when the endpoint is unreachable; editor font/size/line-height now rebuild live like theme does; harness-dir placeholder de-faked)
 - [x] Console-error + mobile hardening — **DONE** (wikilink hover hammered the backend per-pixel with no catch — now once per target + guarded; MarkdownViewer + template-create chains guarded; `npm run test:smoke` mounts the real bundle headless at 1280/390/390-dirty, walks all 12 workspaces, asserts zero console errors; NodeMap null-ctx already guarded)
 
-## Verification evidence (2026-09-16, no executable builds per user constraint)
+## Historical verification evidence (2026-09-16; prior passes, not current source-only evidence)
 
 - `npx svelte-check`: **0 errors**, 31 warnings (all pre-existing a11y/css categories)
 - `npm run build` (vite web bundle only): **passes**
@@ -115,3 +117,26 @@
 - [x] `cargo test` 31 passed, `npm run check` clean, `npm run build` passed, `npm run test:e2e` passed
 - [x] Supplemental browser preview recording in `artifacts/auto-story-memory-preview.webm`
 - [ ] Native Tauri/WebView screen recording remains manual; preview recording is explicitly seeded because native LFM extraction is unavailable in browser preview
+
+## Settings, local models, and PIN repair (2026-09-25, source-only)
+
+- [x] Shared editor typography is applied before first paint and consumed by prose, CodeMirror, and Script editors; four mono font families are bundled
+- [x] Settings validation, defaults, migrations, daily-goal UI, truthful vault path, icon set, blank mode, compact mode, and local-only Logs behavior are wired
+- [x] STT/TTS/LLM health contracts distinguish process readiness from lazy model loading; running processes are polled instead of falsely accepted
+- [x] Settings exposes real STT load, TTS synthesis, and bundled-LLM completion checks
+- [x] Windows release pipeline is wired to preflight assets and package native STT/TTS/memory runtimes through `tauri.windows.conf.json`; the platform overlay retains every base resource and adds the native bin bundle; no executable was produced in this pass
+- [x] Development fallback accepts only `python`, `python3`, or `py` from PATH; renderer-supplied executable paths are rejected, and native executables bypass interpreter validation
+- [x] PIN locking defaults off, requires create+confirm in the lock store, fails closed on unknown/invalid keychain state, gates the main and widget shells, and resumes startup after explicit recovery
+- [x] PIN retry/backoff state is shared by main/widget through the managed backend and mirrored in browser preview; empty/whitespace-only PINs cannot verify
+- [x] Stale-port cleanup terminates only verified sidecar executable names; unknown/Python holders fail closed
+- [x] Memory sidecar uses a per-launch token and rejects unauthenticated loopback calls
+- [x] Release asset fetches refuse missing SHA-256 pins unless the explicit local-only override is set
+- [x] `npm run check`: 0 errors, 0 warnings
+- [x] Current-source `npm run test:source` (settings, sidecar validation/readiness, write-back, window, support), `test:resolve`, and `test:assets`: pass
+- [x] Existing-dist `test:e2e`: pass; UI bundle checks remain non-release evidence because rebuilding is forbidden in this phase
+- [x] `test:widget` and `test:widget-proof`: pass; native two-window behavior remains unmeasured
+- [x] Build-gated UI probes (`onboard`, workspace toggles, Reader surface, theme mount, mobile behavior) report explicit `SKIP` when fresh `dist` is unavailable; they are not source evidence
+- [x] `build_sidecars.py` and all sidecar Python sources parse successfully; no PyInstaller/Tauri/native executable was produced
+- [ ] Rust compilation and PyInstaller output are intentionally deferred until explicit build permission
+- [ ] `cargo fmt --check` remains blocked by broad pre-existing formatting drift across Rust files; no mass reformat was applied during this focused repair
+- [ ] Fresh-machine STT/TTS/LLM, OS-keychain PIN, Tauri resource layout, and updater-signature flows remain manual release-gate checks

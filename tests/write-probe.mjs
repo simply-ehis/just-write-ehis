@@ -259,6 +259,68 @@ if (view) {
   check("search panel has a query input", !!panel?.querySelector("input"));
 }
 
+const settingsBtn = [...qa("button")].find((b) => (b.getAttribute("aria-label") || "") === "Settings");
+check("Settings opens from editor", !!settingsBtn);
+settingsBtn?.click();
+await sleep(500);
+const editorSettingsBtn = [...qa(".settings-nav .nav-item")].find((b) => (b.textContent || "").includes("Editor & Writing"));
+check("Editor & Writing settings open", !!editorSettingsBtn);
+editorSettingsBtn?.click();
+await sleep(300);
+const fontSizeInput = q("#setting-font-size");
+const lineHeightInput = q("#setting-line-height");
+const fontFamilySelect = q("#setting-font-family");
+check("editor typography controls render", !!fontSizeInput && !!lineHeightInput && !!fontFamilySelect);
+if (fontSizeInput && lineHeightInput && fontFamilySelect) {
+  fontSizeInput.value = "23";
+  fontSizeInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  lineHeightInput.value = "2.4";
+  lineHeightInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  fontFamilySelect.value = "Fira Code";
+  fontFamilySelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await sleep(500);
+  const rootStyle = dom.window.document.documentElement.style;
+  check("font size applies globally", rootStyle.getPropertyValue("--editor-font-size") === "23px");
+  check("line height applies globally", rootStyle.getPropertyValue("--editor-line-height") === "2.4");
+  check("font family applies globally", rootStyle.getPropertyValue("--editor-font-family").includes("Fira Code"));
+  const storedTypography = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
+  check("typography settings persist", storedTypography.fontSize === 23 && storedTypography.lineHeight === 2.4 && storedTypography.fontFamily === "Fira Code");
+  q('.workspace-nav [data-ws="write"]')?.click();
+  await sleep(700);
+  const content = q(".cm-content");
+  const contentStyle = content ? dom.window.getComputedStyle(content) : null;
+  check("CodeMirror uses configured font size", contentStyle?.fontSize === "23px", contentStyle?.fontSize);
+  check("CodeMirror uses valid line height", contentStyle?.lineHeight === "2.4", contentStyle?.lineHeight);
+  check("CodeMirror uses configured family", !!contentStyle?.fontFamily.includes("Fira Code"), contentStyle?.fontFamily);
+}
+
+const settingsBtn2 = [...qa("button")].find((b) => (b.getAttribute("aria-label") || "") === "Settings");
+settingsBtn2?.click();
+await sleep(400);
+const generalSettingsBtn = [...qa(".settings-nav .nav-item")].find((b) => (b.textContent || "").trim() === "General");
+generalSettingsBtn?.click();
+await sleep(200);
+const iconSetSelect = q("#setting-icon-set");
+const streakGoalInput = q("#setting-streak-goal");
+const compactModeInput = q("#setting-compact-mode");
+check("major setting controls render", !!iconSetSelect && !!streakGoalInput && !!compactModeInput);
+if (iconSetSelect && streakGoalInput && compactModeInput) {
+  iconSetSelect.value = "tabler";
+  iconSetSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  streakGoalInput.value = "321";
+  streakGoalInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  compactModeInput.checked = true;
+  compactModeInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await sleep(400);
+  q('.workspace-nav [data-ws="write"]')?.click();
+  await sleep(700);
+  const storedMajor = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
+  check("major settings persist", storedMajor.iconSet === "tabler" && storedMajor.streakGoal === 321 && storedMajor.compactMode === true);
+  check("icon set applies", q(".workspace-nav svg")?.getAttribute("stroke-width") === "1.5");
+  check("compact mode applies", !!q(".app-shell.compact"));
+  check("daily goal applies", (q(".status-bar")?.textContent || "").includes("0 / 321 today"));
+}
+
 console.log(`INFO  console.error count: ${errors.length}`);
 for (const e of [...new Set(errors)].slice(0, 15)) console.log("ERR  ", e);
 if (errors.length > 0) failures++;

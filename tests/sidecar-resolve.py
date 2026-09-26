@@ -7,6 +7,7 @@ no model weights or native bindings are needed.
 
 Run: python tests/sidecar-resolve.py
 """
+import importlib.util
 import os
 import sys
 import tempfile
@@ -34,7 +35,11 @@ def load_prefix(path, stop_marker):
 
 
 stt = load_prefix(os.path.join(SIDECARS, "stt_server.py"), "def _find_transcribe_cli")
-tts = load_prefix(os.path.join(SIDECARS, "tts_server.py"), "def _find(")
+tts_path = os.path.join(SIDECARS, "tts_server.py")
+tts = load_prefix(tts_path, "def _find(")
+tts_spec = importlib.util.spec_from_file_location("tts_server_full", tts_path)
+tts_full = importlib.util.module_from_spec(tts_spec)
+tts_spec.loader.exec_module(tts_full)
 
 orig_argv = list(sys.argv)
 
@@ -44,6 +49,8 @@ try:
     check("stt empty -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
     sys.argv = ["stt_server.py", "8093", "moonshine-v2-q6"]
     check("stt legacy -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
+    sys.argv = ["stt_server.py", "8093", "moonshine-base"]
+    check("stt old default alias -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
 
     for evil in ["../evil.gguf", "..\\evil.gguf", "models/../../etc/passwd",
                  "C:/vault/../secret/x.gguf"]:
@@ -111,6 +118,9 @@ try:
         sys.argv = ["tts_server.py", "8094", d]
         check("tts explicit existing dir accepted",
               tts["_model_dir"]() == os.path.realpath(d))
+        engine = tts_full._TtsEngine()
+        check("tts incomplete bundle not ready", not engine.ready)
+        check("tts incomplete bundle explains missing files", "missing" in (engine.ready_error or ""))
 finally:
     sys.argv = orig_argv
 

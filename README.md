@@ -9,12 +9,13 @@ A personal super app for **writing and everything around writing** — docs, fic
 - **AI Generation Controls** — Cancel button for in-flight generations, 3-second configurable cooldown between sends (`aiRateLimitCooldown` setting), request timeouts (90s chat / 120s stream / 180s structurize).
 - **Error Handling Polish** — Friendly error messages (401→API key, 429→rate limited, 408→timeout, network→can't reach server), retry button after failed generation, toast notifications for AI failures.
 - **Toast System** — Click-to-dismiss, explicit close button, max 3 visible (queues rest), error toasts persist until dismissed.
-- **Sidecar Lifecycle** — `is_running()` now detects crashed processes (non-zero exit codes), proper crash logging for STT/TTS/LLM sidecars.
+- **Local Runtime Integrity** — STT, TTS, AI memory, and the bundled LLM use real readiness checks and native-first release runtimes; Settings can run STT, TTS, and LLM test requests.
+- **App PIN** — locking defaults off, requires confirmed setup, stores the desktop PIN through the OS keychain, gates the app session, and applies retry backoff.
 - **XSS Fix** — HTML sanitization via `ammonia` crate for published output (replaced incomplete custom escape).
 - **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
 - **Auto Story Memory** — Successful scene saves queue local-only mention extraction; unmatched names wait in the Story Bible suggestion queue, while appearance links and contradiction badges stay informational.
 - **Settings** — `aiRateLimitCooldown` (ms, default 3000), `blankModeDefault` now initializes AI panel state and persists toggle.
-- **Default STT Model** — Moonshine-base (GGUF) now the default (`sttModel: "moonshine-base"`).
+- **Default STT Model** — the bundled `moonshine-base-Q8_0.gguf` is selected when `sttModel` is empty; the legacy `moonshine-base` value remains compatible.
 - **Brutalist Theme** — Third theme option alongside Dark/Light: zero border-radius, thick borders, hard offset shadows, Archivo Black headers, Space Mono body.
 - **Windows OS Integration** — NSIS registers `.txt` and `.md`, single-instance file handoff opens the requested file, autostart is explicit opt-in, and Default Apps opens Windows Settings without forcing a default editor.
 
@@ -38,7 +39,7 @@ npm run build      # web bundle only — never an executable
 npm run preview    # serve the built bundle
 npm run check      # svelte-check (0 errors required)
 npm run test:os    # Windows OS integration static checks
-npm run test:e2e   # 50+ end-to-end checks, exit 0 required
+npm run test:e2e   # broad static, parsing, IPC-parity, and memory-runtime checks; exit 0 required
 ```
 
 The desktop shell additionally needs Rust + `npm run tauri build`
@@ -46,16 +47,17 @@ The desktop shell additionally needs Rust + `npm run tauri build`
 
 ## Install (Windows)
 
-The release artifact is `Just Write ehis_<version>_x64-setup.exe` (~416MB —
-it bundles everything offline: Moonshine STT, Kokoro int8 TTS voices, and the
-local LLM, so no downloads happen at runtime).
+The release artifact is `Just Write ehis_<version>_x64-setup.exe`. It bundles
+the local model assets plus native STT, TTS, and AI-memory runtimes, so a
+normal installation does not require Python or model downloads at runtime.
+Exact size varies with the fetched llama.cpp runtime assets.
 
 > **Windows Defender SmartScreen warning is normal and expected.** The app has
 > no paid code-signing certificate, so Windows shows a blue
 > "Windows protected your PC / Unknown publisher" dialog on first run. Click
-> **More info → Run anyway**. The installer is built from this repo and every
-> release artifact carries an updater signature (`.sig`) verifiable against
-> the pinned public key in `src-tauri/tauri.conf.json`.
+> **More info → Run anyway**. Publish an updater artifact only after its `.sig`
+> has been generated and verified against the pinned public key in
+> `src-tauri/tauri.conf.json`; an unsigned artifact is not release-ready.
 
 Uninstall anytime via **Settings → Apps → Just Write ehis → Uninstall**
 (the installer registers a standard uninstaller — no leftover services).

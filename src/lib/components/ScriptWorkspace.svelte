@@ -693,9 +693,9 @@
     border: none;
     background: transparent;
     color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-base);
-    line-height: 1.8;
+    font-family: var(--editor-font-family);
+    font-size: var(--editor-font-size);
+    line-height: var(--editor-line-height);
     resize: none;
     outline: none;
   }

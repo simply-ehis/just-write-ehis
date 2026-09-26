@@ -3,7 +3,7 @@
   import { EditorView, keymap } from "@codemirror/view";
   import { Compartment, EditorState } from "@codemirror/state";
   import { ghostField, ghostInlinePlugin, setGhostEffect } from "$lib/ghostWidget";
-  import { AUTOCORRECT_WAVY, editorPalette } from "$lib/editorTheme";
+  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette } from "$lib/editorTheme";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
@@ -247,7 +247,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
       },
       ".cm-content": {
         caretColor: p.accent,
-        fontFamily: `'${font}', monospace`,
+        fontFamily: editorFontStack(font),
         fontSize: `${size}px`,
         lineHeight: `${lh}`,
         padding: "40px 0",
@@ -738,6 +738,33 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
     void [$settings.theme, $settings.themeMode, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
       reconfigureAppearance();
+    });
+  });
+
+  // Settings → typewriter/focus defaults apply to the open doc live when it
+  // has no per-doc override (no jwe-focus-<id> entry). Docs the user toggled
+  // explicitly keep their choice — defaults only govern untouched docs.
+  $effect(() => {
+    const td = $settings.typewriterDefault;
+    const fd = $settings.focusDimmingDefault;
+    untrack(() => {
+      const id = $currentDoc?.id;
+      if (!id) return;
+      try {
+        if (localStorage.getItem(`jwe-focus-${id}`)) return;
+      } catch {
+        return;
+      }
+      let changed = false;
+      if (typewriterEnabled !== td) {
+        typewriterEnabled = td;
+        changed = true;
+      }
+      if (focusDimming !== fd) {
+        focusDimming = fd;
+        changed = true;
+      }
+      if (changed) reconfigureAppearance();
     });
   });
 

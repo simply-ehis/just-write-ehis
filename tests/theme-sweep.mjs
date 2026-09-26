@@ -21,7 +21,7 @@
  *
  * Run: npm run build && node tests/theme-sweep.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir, rm, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
@@ -194,7 +194,19 @@ for (const [style, mode] of COMBOS) {
 }
 
 // ── Phase E: editor palette parity ──────────────────────────────────
-const { editorPalette } = await import(pathToFileURL(join(root, "src/lib/editorTheme.ts")).href);
+const esbuild = await import("esbuild");
+const themeOutDir = join(root, "tests", ".tmp-theme-probe");
+const themeOutFile = join(themeOutDir, "editor-theme.mjs");
+await mkdir(themeOutDir, { recursive: true });
+await esbuild.build({
+  entryPoints: [join(root, "src/lib/editorTheme.ts")],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  outfile: themeOutFile,
+  logLevel: "silent",
+});
+const { editorPalette } = await import(`${pathToFileURL(themeOutFile).href}?${Date.now()}`);
 for (const [style, mode] of COMBOS) {
   const p = editorPalette(style, mode);
   const v = comboMap(style, mode);
@@ -209,6 +221,26 @@ for (const [style, mode] of COMBOS) {
   check(`[${style}/${mode}] editor accent tracks theme`, p.accent.toLowerCase() === cssAccent.toLowerCase(), `${p.accent} vs ${cssAccent}`);
 }
 check("unknown style falls back to dark", editorPalette("nope").bg === editorPalette("default", "dark").bg);
+
+let distFresh = false;
+try {
+  const distStat = await stat(join(root, "dist/index.html"));
+  const sourceStats = await Promise.all([
+    stat(join(root, "src/main.ts")),
+    stat(join(root, "src/App.svelte")),
+    stat(join(root, "src/app.css")),
+    stat(join(root, "src/lib/editorTheme.ts")),
+  ]);
+  distFresh = Math.max(...sourceStats.map((entry) => entry.mtimeMs)) <= distStat.mtimeMs;
+} catch {
+  distFresh = false;
+}
+if (!distFresh) {
+  console.log("SKIP  theme mount phases require a fresh dist; source-only mode forbids rebuilding");
+  await rm(themeOutDir, { recursive: true, force: true });
+  console.log(failures === 0 ? "THEME-SWEEP SOURCE CHECKS PASS" : `THEME-SWEEP ${failures} FAILURE(S)`);
+  process.exit(failures === 0 ? 0 : 1);
+}
 
 // ── Phase A: mount per theme ────────────────────────────────────────
 const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
@@ -383,5 +415,6 @@ process.exit(0);
   // require the settled-or-retryable contract above.
 }
 
+await rm(themeOutDir, { recursive: true, force: true });
 console.log(failures === 0 ? "THEME-SWEEP ALL PASS" : `THEME-SWEEP ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

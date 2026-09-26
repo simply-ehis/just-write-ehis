@@ -7,6 +7,15 @@
  */
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdir, rm } from "node:fs/promises";
+import { get } from "svelte/store";
+
+const storage = new Map();
+globalThis.localStorage = {
+  getItem: (key) => storage.get(key) ?? null,
+  setItem: (key, value) => storage.set(key, String(value)),
+  removeItem: (key) => storage.delete(key),
+};
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const v = await import(pathToFileURL(join(root, "src/lib/settingsValidate.ts")).href);
@@ -38,6 +47,9 @@ r = v.validateSettings({ theme: 42, fontSize: "big", ghostEnabled: "yes" });
 check("non-string enum rejected", r.rejected.includes("theme"));
 check("non-number rejected", r.rejected.includes("fontSize"));
 check("non-bool rejected", r.rejected.includes("ghostEnabled"));
+r = v.validateSettings({ fontFamily: "Comic Sans", fontSize: "18", lineHeight: "2.0" });
+check("unknown editor font rejected", r.rejected.includes("fontFamily"));
+check("numeric setting strings normalized", r.valid.fontSize === 18 && r.valid.lineHeight === 2);
 r = v.validateSettings({ theme: "neon", themeMode: "dim", accentOverride: "red", backupFrequency: "sometimes" });
 check("bad enum rejected", r.rejected.includes("theme") && r.rejected.includes("backupFrequency"));
 check("bad mode + accent rejected", r.rejected.includes("themeMode") && r.rejected.includes("accentOverride"));
@@ -92,6 +104,70 @@ m = v.migrateRetiredProviders({ mainModelEndpoint: "https://proxy.lan/v1", mainM
 check("custom endpoint stays, retired model migrates", m.patch.mainModelEndpoint === "https://proxy.lan/v1" && m.patch.mainModelName === FRESH.mainModelName && m.migrated.length === 1);
 m = v.migrateRetiredProviders({ mainModelEndpoint: "https://proxy.lan/v1", mainModelName: "my-model" }, FRESH);
 check("full custom untouched", m.migrated.length === 0 && m.patch.mainModelName === "my-model");
+
+const esbuild = await import("esbuild");
+const lockOutDir = join(root, "tests", ".tmp-lock-flow");
+const lockOutFile = join(lockOutDir, "lock.mjs");
+await mkdir(lockOutDir, { recursive: true });
+await esbuild.build({
+  stdin: {
+    contents: `export * from ${JSON.stringify(join(root, "src/lib/stores/lock.ts"))}; export { settings, DEFAULT_SETTINGS, appLockPinStatus, resetSettings } from ${JSON.stringify(join(root, "src/lib/stores/settings.ts"))};`,
+    resolveDir: root,
+    sourcefile: "lock-flow.ts",
+    loader: "ts",
+  },
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  alias: { $lib: join(root, "src/lib") },
+  outfile: lockOutFile,
+  logLevel: "silent",
+});
+const lock = await import(`${pathToFileURL(lockOutFile).href}?${Date.now()}`);
+await new Promise((resolve) => setTimeout(resolve, 100));
+check("locking defaults off", lock.DEFAULT_SETTINGS.lockEnabled === false);
+let shortPinRejected = false;
+try {
+  await lock.configurePin("123", "123");
+} catch {
+  shortPinRejected = true;
+}
+check("short PIN rejected", shortPinRejected);
+let mismatchedPinRejected = false;
+try {
+  await lock.configurePin("2468", "2469");
+} catch {
+  mismatchedPinRejected = true;
+}
+check("PIN confirmation is enforced by lock store", mismatchedPinRejected);
+lock.appLockPinStatus.set("error");
+let unavailablePinRejected = false;
+try {
+  await lock.configurePin("2468", "2468");
+} catch {
+  unavailablePinRejected = true;
+}
+check("unknown PIN storage fails closed", unavailablePinRejected);
+lock.appLockPinStatus.set("ready");
+await lock.configurePin("2468", "2468");
+check("PIN setup enables locking", get(lock.settings).lockEnabled === true);
+check("PIN setup is immediately usable", await lock.hasPin() && get(lock.settings).appLockPin === "2468");
+lock.resetSettings();
+check("settings reset preserves lock secrets", get(lock.settings).lockEnabled === true && get(lock.settings).appLockPin === "2468");
+check("PIN setup unlocks current session", get(lock.appUnlocked) === true);
+lock.lockAppNow();
+check("lock-now closes the session gate", get(lock.appUnlocked) === false);
+check("configured PIN verifies", await lock.verifyPin("2468") && get(lock.appUnlocked) === false);
+for (let attempt = 0; attempt < 5; attempt += 1) await lock.verifyPin("0000");
+check("wrong PIN attempts create backoff", lock.pinLockoutRemaining() > 0);
+check("backend rejects correct PIN during backoff", !(await lock.verifyPin("2468")) && lock.pinLockoutRemaining() > 0);
+lock.markAppUnlocked();
+await lock.removePin();
+check("PIN removal disables locking", !get(lock.settings).lockEnabled && get(lock.settings).appLockPin === "");
+lock.appLockPinStatus.set("error");
+await lock.resetPinConfiguration();
+check("PIN recovery reopens configuration flow", get(lock.appLockPinStatus) === "ready" && !get(lock.settings).lockEnabled);
+await rm(lockOutDir, { recursive: true, force: true });
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

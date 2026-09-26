@@ -2,15 +2,14 @@
 
 Wraps `harness/memory.py` (vendored from small-model-harness, see
 harness/ATTRIBUTION.md) in the same stdlib HTTP shape as stt/tts_server.py.
+The desktop launcher supplies a per-process X-JWE-Memory-Token header.
 
 Endpoints (all JSON):
   GET  /health          → {"status": "ok", "facts": N}
   POST /learn   {text}  → {"stored": N}      (extract + store facts)
   GET  /recall?q=...    → {"facts": "..."}   (prompt-ready block or "")
   POST /redact  {text}  → {"text": "..."}    (secrets scrubbed)
-  POST /forget  {id}    → {"forgotten": bool}
   POST /clear           → {"facts": 0}
-  GET  /facts           → {"facts": [{id, text, kind, importance, use_count}]}
 
 Persistence: facts JSON at argv[2]/memory.json (default: alongside this
 script's working dir). argv[1] is the port, like the other sidecars.
@@ -18,6 +17,7 @@ script's working dir). argv[1] is the port, like the other sidecars.
 Stdlib only — no new requirements.
 """
 
+import hmac
 import json
 import os
 import sys
@@ -25,11 +25,13 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
 from harness.memory import SessionMemory, redact_secrets  # noqa: E402
 
 DATA_FILENAME = "memory.json"
+AUTH_TOKEN = os.environ.get("JWE_MEMORY_TOKEN", "")
 
 
 class MemoryStore:
@@ -105,6 +107,13 @@ class MemoryHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self) -> bool:
+        supplied = self.headers.get("X-JWE-Memory-Token", "")
+        if not AUTH_TOKEN or not hmac.compare_digest(supplied, AUTH_TOKEN):
+            self._json({"error": "unauthorized"}, 401)
+            return False
+        return True
+
     def _body(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -118,6 +127,8 @@ class MemoryHandler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        if not self._authorized():
+            return
         parsed = urlparse(self.path)
         if parsed.path == "/health":
             self._json({"status": "ok", "facts": len(STORE.mem) if STORE else 0})
@@ -129,6 +140,8 @@ class MemoryHandler(BaseHTTPRequestHandler):
             self._json({"error": "unknown endpoint"}, 404)
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if STORE is None:
             self._json({"error": "store not ready"}, 500)
             return
@@ -149,6 +162,8 @@ class MemoryHandler(BaseHTTPRequestHandler):
 
 def main():
     global STORE
+    if not AUTH_TOKEN:
+        raise RuntimeError("JWE_MEMORY_TOKEN is required")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8092
     data_dir = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
     STORE = MemoryStore(data_dir)

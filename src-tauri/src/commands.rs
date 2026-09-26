@@ -2,7 +2,9 @@ use tauri::{Manager, State};
 use crate::database::Database;
 use crate::models::*;
 use crate::sidecar;
-use std::time::Duration;
+use std::io::Read;
+use std::time::{Duration, Instant};
+use std::sync::Mutex;
 use std::collections::HashSet;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
@@ -88,6 +90,40 @@ pub fn doc_get(db: State<'_, Database>, id: String) -> Result<Doc, String> {
     db.get_doc(&id)
 }
 
+fn widget_doc_unlocked(db: &Database, id: &str) -> Result<Doc, String> {
+    let doc = db.get_doc(id)?;
+    if doc.locked {
+        return Err("document is locked and unavailable to the companion window".to_string());
+    }
+    Ok(doc)
+}
+
+#[tauri::command]
+pub fn widget_doc_get(db: State<'_, Database>, id: String) -> Result<Doc, String> {
+    widget_doc_unlocked(&db, &id)
+}
+
+#[tauri::command]
+pub fn widget_doc_save(
+    db: State<'_, Database>,
+    id: String,
+    title: Option<String>,
+    content: Option<String>,
+    status: Option<String>,
+    frontmatter_json: Option<String>,
+    parent_id: Option<Option<String>>,
+) -> Result<Doc, String> {
+    widget_doc_unlocked(&db, &id)?;
+    db.save_doc(SaveDocRequest {
+        id,
+        title,
+        content,
+        status,
+        frontmatter_json,
+        parent_id,
+    })
+}
+
 #[tauri::command]
 pub fn doc_save(
     db: State<'_, Database>,
@@ -146,7 +182,9 @@ pub fn memory_sidecar_start(
     python_path: String,
     sidecars_dir: String,
 ) -> Result<(), String> {
-    mem.start(&python_path, &sidecars_dir)
+    require_sidecar_paths(&sidecars_dir)?;
+    let python = python_for_sidecar(&python_path, &sidecars_dir, "memory-server.exe")?;
+    mem.start(&python, &sidecars_dir)
 }
 
 #[tauri::command]
@@ -1144,43 +1182,14 @@ pub fn atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Res
 }
 
 #[tauri::command]
+pub fn widget_atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Result<(), String> {
+    widget_doc_unlocked(&db, &doc_id)?;
+    db.atomic_save(&doc_id, &body)
+}
+
+#[tauri::command]
 pub fn setup_file_watcher(db: State<'_, Database>, app: tauri::AppHandle) -> Result<(), String> {
     db.setup_file_watcher(app)
-}
-
-#[tauri::command]
-pub fn sidecar_start(sidecar: State<'_, sidecar::SidecarManager>, python_path: String, harness_dir: String) -> Result<(), String> {
-    // Guard at the Rust boundary: an empty dir must be a typed error,
-    // never Command::current_dir("") (which spawns in an undefined cwd).
-    if harness_dir.trim().is_empty() {
-        return Err("sidecar_start: harness_dir is empty — set the harness directory in Settings → AI & Providers first.".to_string());
-    }
-    sidecar.start(&python_path, &harness_dir)
-}
-
-#[tauri::command]
-pub fn sidecar_stop(sidecar: State<'_, sidecar::SidecarManager>) -> Result<(), String> {
-    sidecar.stop()
-}
-
-#[tauri::command]
-pub fn sidecar_is_running(sidecar: State<'_, sidecar::SidecarManager>) -> bool {
-    sidecar.is_running()
-}
-
-#[tauri::command]
-pub fn sidecar_set_endpoint(sidecar: State<'_, sidecar::SidecarManager>, endpoint: String) -> Result<(), String> {
-    sidecar.set_endpoint(&endpoint)
-}
-
-#[tauri::command]
-pub async fn sidecar_query(sidecar: State<'_, sidecar::SidecarManager>, prompt: String, session_id: String) -> Result<sidecar::HarnessResponse, String> {
-    let request = sidecar::HarnessRequest {
-        prompt,
-        session_id,
-        tools: None,
-    };
-    sidecar.query(request).await
 }
 
 #[tauri::command]
@@ -1806,15 +1815,71 @@ pub fn get_vault_path(db: State<'_, Database>) -> Result<String, String> {
 
 // ── STT: Moonshine Voice ─────────────────────────────────────────
 
-#[tauri::command]
-fn require_sidecar_paths(python_path: &str, sidecars_dir: &str) -> Result<(), String> {
-    if python_path.trim().is_empty() {
-        return Err("python path is empty — set it in Settings → AI & Providers → System.".to_string());
+fn trusted_sidecars_dir(sidecars_dir: &str) -> bool {
+    let requested = std::path::Path::new(sidecars_dir);
+    if requested.components().any(|component| {
+        matches!(component, std::path::Component::ParentDir)
+    }) {
+        return false;
     }
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else if requested == std::path::Path::new("src-tauri/sidecars") {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(requested)
+    } else {
+        return false;
+    };
+    let Ok(candidate) = std::fs::canonicalize(candidate) else { return false };
+    let mut roots = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecars")];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            roots.push(parent.join("resources").join("sidecars"));
+            roots.push(parent.join("sidecars"));
+        }
+    }
+    roots.iter().any(|root| {
+        std::fs::canonicalize(root)
+            .map(|root| candidate.starts_with(root))
+            .unwrap_or(false)
+    })
+}
+
+fn require_sidecar_paths(sidecars_dir: &str) -> Result<(), String> {
     if sidecars_dir.trim().is_empty() {
         return Err("sidecars directory is empty — reinstall or re-fetch the sidecar bundle.".to_string());
     }
+    if !trusted_sidecars_dir(sidecars_dir) {
+        return Err("sidecar directory is outside the application resource root".to_string());
+    }
     Ok(())
+}
+
+fn trusted_python_command(requested: &str) -> Result<String, String> {
+    let command = requested.trim();
+    let command = if command.is_empty() { "python" } else { command };
+    let name = std::path::Path::new(command)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let allowed = matches!(name.as_str(), "python" | "python.exe" | "python3" | "python3.exe" | "py" | "py.exe");
+    if command.contains('/') || command.contains('\\') || command.contains(':')
+        || std::path::Path::new(command).components().count() != 1
+        || !allowed
+    {
+        return Err("custom Python paths are disabled; use python, python3, or py from PATH".to_string());
+    }
+    Ok(command.to_string())
+}
+
+fn python_for_sidecar(requested: &str, sidecars_dir: &str, executable: &str) -> Result<String, String> {
+    if sidecar::native_runtime_available(sidecars_dir, executable) {
+        Ok("python".to_string())
+    } else {
+        trusted_python_command(requested)
+    }
 }
 
 #[tauri::command]
@@ -1824,8 +1889,9 @@ pub fn stt_start(
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
-    require_sidecar_paths(&python_path, &sidecars_dir)?;
-    stt.start(&python_path, &sidecars_dir, model.as_deref())
+    require_sidecar_paths(&sidecars_dir)?;
+    let python = python_for_sidecar(&python_path, &sidecars_dir, "stt-server.exe")?;
+    stt.start(&python, &sidecars_dir, model.as_deref())
 }
 
 #[tauri::command]
@@ -1885,30 +1951,59 @@ pub fn tts_start(
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
-    require_sidecar_paths(&python_path, &sidecars_dir)?;
-    tts.start(&python_path, &sidecars_dir, model.as_deref())
+    require_sidecar_paths(&sidecars_dir)?;
+    let python = python_for_sidecar(&python_path, &sidecars_dir, "tts-server.exe")?;
+    tts.start(&python, &sidecars_dir, model.as_deref())
 }
 
 /// Probe a python interpreter (`python --version`). Used by the Settings
 /// voice section on blur so a missing/broken python shows an inline
 /// error instead of failing later at sidecar start.
-#[tauri::command]
-pub fn sidecar_python_probe(python_path: String) -> Result<String, String> {
-    if python_path.trim().is_empty() {
-        return Err("Python path is empty — STT/TTS/memory sidecars need it; app features besides sidecars still work.".to_string());
-    }
-    let out = std::process::Command::new(python_path.trim())
+fn run_python_probe(python: &str) -> Result<String, String> {
+    let mut child = std::process::Command::new(python)
         .arg("--version")
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|e| format!("Python not found — STT/TTS/memory need it ({}); app features besides sidecars still work.", e))?;
-    if !out.status.success() {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Python probe timed out — use a responsive python command from PATH".to_string());
+            }
+            Err(error) => return Err(format!("Python probe failed: {}", error)),
+        }
+    };
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        let _ = pipe.read_to_end(&mut stdout);
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_end(&mut stderr);
+    }
+    if !status.success() {
         return Err(format!(
             "Python probe failed — STT/TTS/memory need a working python; app features besides sidecars still work. ({})",
-            String::from_utf8_lossy(&out.stderr).trim()
+            String::from_utf8_lossy(&stderr).trim()
         ));
     }
-    let version = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    Ok(version.trim().to_string())
+    Ok(format!(
+        "{}{}",
+        String::from_utf8_lossy(&stdout),
+        String::from_utf8_lossy(&stderr)
+    ).trim().to_string())
+}
+
+#[tauri::command]
+pub fn sidecar_python_probe(python_path: String) -> Result<String, String> {
+    let python = trusted_python_command(&python_path)?;
+    run_python_probe(&python)
 }
 
 #[tauri::command]
@@ -1958,6 +2053,7 @@ pub fn llm_start(
     model: Option<String>,
     ctx_size: Option<u32>,
 ) -> Result<(), String> {
+    require_sidecar_paths(&sidecars_dir)?;
     llm.start(&sidecars_dir, model.as_deref(), ctx_size)
 }
 
@@ -2202,6 +2298,58 @@ pub fn atlas_get_stars(db: State<'_, Database>) -> Result<Vec<AtlasStar>, String
 // ── OS keychain secrets (apiKey, appLockPin) ────────────────────
 
 const KEYCHAIN_SERVICE: &str = "com.just-write-ehis.app";
+const APP_LOCK_MIN_PIN_LENGTH: usize = 4;
+
+const PIN_BASE_BACKOFF_MS: u64 = 2_000;
+const PIN_MAX_BACKOFF_MS: u64 = 60_000;
+const PIN_MAX_FAILED_ATTEMPTS: u32 = 5;
+
+#[derive(Default)]
+struct PinLockoutState {
+    failures: u32,
+    until: Option<Instant>,
+}
+
+#[derive(Default)]
+pub struct PinLockout {
+    state: Mutex<PinLockoutState>,
+}
+
+#[derive(Serialize)]
+pub struct PinVerification {
+    pub verified: bool,
+    pub retry_after_ms: u64,
+}
+
+impl PinLockout {
+    fn retry_after_ms(&self) -> u64 {
+        let Ok(state) = self.state.lock() else { return 0 };
+        state.until
+            .and_then(|until| until.checked_duration_since(Instant::now()))
+            .map(|remaining| remaining.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    fn record_failure(&self) -> u64 {
+        let Ok(mut state) = self.state.lock() else { return PIN_MAX_BACKOFF_MS };
+        state.failures = state.failures.saturating_add(1);
+        if state.failures < PIN_MAX_FAILED_ATTEMPTS {
+            return 0;
+        }
+        let exponent = state.failures - PIN_MAX_FAILED_ATTEMPTS;
+        let delay = PIN_BASE_BACKOFF_MS.saturating_mul(2u64.saturating_pow(exponent.min(31)));
+        let delay = delay.min(PIN_MAX_BACKOFF_MS);
+        state.until = Some(Instant::now() + Duration::from_millis(delay));
+        delay
+    }
+
+    fn reset(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.failures = 0;
+            state.until = None;
+        }
+    }
+}
 
 fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
     // Static error: never echo the caller-supplied key (log/forgery surface).
@@ -2215,6 +2363,9 @@ fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
 #[tauri::command]
 pub fn secret_set(key: String, value: String) -> Result<(), String> {
     let entry = keychain_entry(&key)?;
+    if key == "appLockPin" && !value.trim().is_empty() && value.trim().len() < APP_LOCK_MIN_PIN_LENGTH {
+        return Err("app PIN must be at least 4 characters".to_string());
+    }
     if value.is_empty() {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -2223,6 +2374,45 @@ pub fn secret_set(key: String, value: String) -> Result<(), String> {
     } else {
         entry.set_password(&value).map_err(|_| "keychain write failed".to_string())
     }
+}
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter().zip(right).fold(0u8, |difference, (a, b)| difference | (a ^ b)) == 0
+}
+
+#[tauri::command]
+pub fn app_lock_configured() -> Result<bool, String> {
+    Ok(secret_get("appLockPin".to_string())?.is_some_and(|pin| pin.trim().len() >= APP_LOCK_MIN_PIN_LENGTH))
+}
+
+fn verify_pin_value(expected: &str, candidate: &str) -> bool {
+    let expected = expected.trim();
+    expected.len() >= APP_LOCK_MIN_PIN_LENGTH && constant_time_eq(expected, candidate.trim())
+}
+
+#[tauri::command]
+pub fn app_lock_verify(lockout: State<'_, PinLockout>, pin: String) -> Result<PinVerification, String> {
+    let retry_after_ms = lockout.retry_after_ms();
+    if retry_after_ms > 0 {
+        return Ok(PinVerification { verified: false, retry_after_ms });
+    }
+    let expected = secret_get("appLockPin".to_string())?.unwrap_or_default();
+    if verify_pin_value(&expected, &pin) {
+        lockout.reset();
+        return Ok(PinVerification { verified: true, retry_after_ms: 0 });
+    }
+    let retry_after_ms = lockout.record_failure();
+    Ok(PinVerification { verified: false, retry_after_ms })
+}
+
+#[tauri::command]
+pub fn app_lock_reset(lockout: State<'_, PinLockout>) {
+    lockout.reset();
 }
 
 #[tauri::command]
@@ -2238,6 +2428,35 @@ pub fn secret_get(key: String) -> Result<Option<String>, String> {
 #[cfg(test)]
 mod ai_slot_tests {
     use super::*;
+
+    #[test]
+    fn pin_lockout_tracks_retry_window() {
+        let lockout = PinLockout::default();
+        for _ in 0..5 {
+            lockout.record_failure();
+        }
+        assert!(lockout.retry_after_ms() > 0);
+        lockout.reset();
+        assert_eq!(lockout.retry_after_ms(), 0);
+    }
+
+    #[test]
+    fn pin_verification_rejects_empty_values() {
+        assert!(!verify_pin_value("", ""));
+        assert!(!verify_pin_value("   ", "   "));
+        assert!(!verify_pin_value("123", "123"));
+        assert!(verify_pin_value("2468", " 2468 "));
+        assert!(!verify_pin_value("2468", "2467"));
+    }
+
+    #[test]
+    fn python_command_allowlist_rejects_paths() {
+        assert_eq!(trusted_python_command("python").unwrap(), "python");
+        assert_eq!(trusted_python_command("py.exe").unwrap(), "py.exe");
+        assert!(trusted_python_command("C:/Python312/python.exe").is_err());
+        assert!(trusted_python_command("a/python").is_err());
+        assert!(trusted_python_command("python -c").is_err());
+    }
 
     #[test]
     fn resolve_slot_defaults() {

@@ -1,5 +1,18 @@
 {
+  "build": {
+    "beforeBuildCommand": "npm run build && npm run build:sidecars"
+  },
   "bundle": {
+    "resources": [
+      "sidecars/fetch_sidecars.py",
+      "sidecars/requirements.txt",
+      "sidecars/stt_server.py",
+      "sidecars/tts_server.py",
+      "sidecars/memory_server.py",
+      "sidecars/harness/*",
+      "sidecars/models/**/*",
+      "sidecars/bin/**/*"
+    ],
     "fileAssociations": [
       {
         "ext": ["txt", "md"],

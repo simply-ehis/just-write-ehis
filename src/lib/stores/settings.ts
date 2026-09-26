@@ -1,5 +1,5 @@
 import { writable, get } from "svelte/store";
-import { SECRET_KEYS, validateSettings, migrateRetiredProviders } from "$lib/settingsValidate";
+import { APP_LOCK_MIN_PIN_LENGTH, SECRET_KEYS, validateSettings, migrateRetiredProviders } from "$lib/settingsValidate";
 
 /** Re-exported so panes strip secrets with the same single list. */
 export { SECRET_KEYS };
@@ -15,6 +15,7 @@ export type SettingsCategory =
   | "skills"
   | "craft"
   | "stats"
+  | "support"
   | "about";
 
 export interface SavedView {
@@ -78,8 +79,6 @@ export interface AppSettings {
   /** Minimum milliseconds between AI sends (0 = no limit). */
   aiRateLimitCooldown: number;
   apiKey: string;
-  /** Working dir of the small-model harness server (sidecar toggle needs it). */
-  sidecarHarnessDir: string;
   blankModeDefault: boolean;
   logsLocalOnly: boolean;
   /** Scrub secrets from outgoing AI prompts via the memory sidecar. */
@@ -190,14 +189,13 @@ const defaultSettings: AppSettings = {
   mainModelName: "gpt-4o-mini",
   aiRateLimitCooldown: 3000,
   apiKey: "",
-  sidecarHarnessDir: "",
   blankModeDefault: false,
   logsLocalOnly: true,
   scrubSecrets: false,
   aiMemoryEnabled: true,
 
   appLockPin: "",
-  lockEnabled: true,
+  lockEnabled: false,
   // Off until the user opts in: no craft metrics are recorded, so Craft
   // charts and the filter-word nudge stay empty rather than half-fed.
   craftProfilingEnabled: false,
@@ -255,7 +253,7 @@ const defaultSettings: AppSettings = {
   autoCheckUpdates: true,
 
   sttEnabled: true,
-  sttModel: "moonshine-base",
+  sttModel: "",
   ttsModel: "",
   ttsEnabled: true,
   ttsVoice: "af_heart",
@@ -289,6 +287,10 @@ export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
 export const ONBOARD_VERSION = 2;
 /** Sidebar default hides (null hiddenIds): power-user surfaces reachable via palette. */
 export const DEFAULT_HIDDEN_WORKSPACES: readonly string[] = ["inbox", "canvas"];
+export type AppLockPinStatus = "loading" | "ready" | "error";
+export const appLockPinStatus = writable<AppLockPinStatus>("loading");
+export const appLockConfigured = writable(false);
+
 /** Resolves once keychain hydration + legacy migration finished. */
 let resolveSecretsReady!: () => void;
 export const secretsReady = new Promise<void>((resolve) => {
@@ -305,8 +307,22 @@ function apiLazy() {
   return (apiPromise ??= import("$lib/api"));
 }
 
+function withTimeout<T>(promise: Promise<T>, label: string, ms = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function isWidgetRoute(): boolean {
   return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("widget") === "1";
+}
+
+function routeSecretKeys(): readonly SecretKey[] {
+  return isWidgetRoute() ? ["appLockPin"] : SECRET_KEYS;
 }
 
 function loadSettings(): AppSettings {
@@ -320,6 +336,7 @@ function loadSettings(): AppSettings {
       // migrate forward (exact matches only); deliberate custom values stay.
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const raw = parsed as Record<string, unknown>;
+        raw.vaultPath = defaultSettings.vaultPath;
         // Style×mode migration (2026-09): legacy single `theme` values map
         // onto the split fields before validation drops them as unknown.
         if (raw.theme === "dark" || raw.theme === "light" || raw.theme === "brutalist" || raw.theme === "glass") {
@@ -352,13 +369,22 @@ function loadSettings(): AppSettings {
 function saveSettings(s: AppSettings) {
   try {
     const payload = { ...s };
-    if (!preserveLegacySecrets || secretsMigrated) {
+    if (isWidgetRoute()) {
+      try {
+        const existing = JSON.parse(localStorage.getItem("writing-app-settings") || "{}") as Record<string, unknown>;
+        payload.apiKey = typeof existing.apiKey === "string" ? existing.apiKey : "";
+        payload.appLockPin = typeof existing.appLockPin === "string" ? existing.appLockPin : "";
+      } catch {
+        payload.apiKey = "";
+        payload.appLockPin = "";
+      }
+    } else if (!preserveLegacySecrets || secretsMigrated) {
       payload.apiKey = "";
       payload.appLockPin = "";
     }
     localStorage.setItem("writing-app-settings", JSON.stringify(payload));
   } catch (e) {
-    console.warn("Failed to save settings to localStorage:", e);
+    console.warn("Failed to save settings to localStorage; keeping the previous persisted copy:", e);
   }
   if (secretsMigrated) scheduleSecretSync(s);
 }
@@ -368,11 +394,11 @@ function scheduleSecretSync(s: AppSettings) {
   secretSyncTimer = setTimeout(() => {
     void (async () => {
       const { api } = await apiLazy();
-      for (const k of SECRET_KEYS) {
+      for (const k of routeSecretKeys()) {
         const v = s[k];
         if (v === lastSynced[k]) continue;
         try {
-          await api.secretSet(k, v);
+          await withTimeout(api.secretSet(k, v), `keychain sync for ${k}`);
           lastSynced[k] = v;
         } catch (e) {
           console.warn(`Failed to sync ${k} to OS keychain:`, e);
@@ -386,50 +412,104 @@ function scheduleSecretSync(s: AppSettings) {
  * Pull secrets from the OS keychain, migrate any legacy localStorage
  * values into it, then strip them from localStorage for good.
  */
-async function initSecrets(): Promise<void> {
+function stripPersistedSecrets(): boolean {
   try {
-    const { api } = await apiLazy();
-    for (const k of SECRET_KEYS) {
-      try {
-        const v = await api.secretGet(k);
-        // Emptiness is checked INSIDE the updater: s was snapshotted
-        // before the await, and the user may have typed since.
-        if (v != null && v !== "") {
-          lastSynced[k] = v;
-          settings.update((st) => (st[k] === "" ? { ...st, [k]: v } : st));
+    localStorage.setItem("writing-app-settings", JSON.stringify({
+      ...get(settings),
+      apiKey: "",
+      appLockPin: "",
+    }));
+    return true;
+  } catch (e) {
+    console.warn("Failed to strip secrets from localStorage; keeping the previous persisted copy:", e);
+    return false;
+  }
+}
+
+async function initSecrets(): Promise<void> {
+  const keys = SECRET_KEYS;
+  let lockPinReady = false;
+  let migrationFailed = false;
+  try {
+    const { api } = await withTimeout(apiLazy(), "secret backend");
+    if (isWidgetRoute()) {
+      let configured = !get(settings).lockEnabled;
+      for (let attempt = 0; attempt < 50 && !configured; attempt += 1) {
+        configured = await withTimeout(api.appLockConfigured(), "app lock status");
+        if (!configured && get(settings).lockEnabled) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
-      } catch (e) {
-        console.warn(`keychain read failed for ${k}:`, e);
       }
-    }
-    let allOk = true;
-    for (const k of SECRET_KEYS) {
-      const v = get(settings)[k];
-      if (v !== lastSynced[k]) {
-        try {
-          await api.secretSet(k, v);
-          lastSynced[k] = v;
-        } catch (e) {
-          console.warn(`keychain write failed for ${k}:`, e);
-          allOk = false;
-        }
-      }
-    }
-    if (allOk) {
+      appLockConfigured.set(configured);
+      appLockPinStatus.set(configured ? "ready" : "error");
       secretsMigrated = true;
       preserveLegacySecrets = false;
-      try {
-        localStorage.setItem("writing-app-settings", JSON.stringify({
-          ...get(settings),
-          apiKey: "",
-          appLockPin: "",
-        }));
-      } catch (e) {
-        console.warn("Failed to strip secrets from localStorage:", e);
-      }
+      return;
     }
-  } catch (e) {
-    console.warn("Secret hydration failed — secrets stay in localStorage until next launch:", e);
+
+    const readSecret = async (key: SecretKey): Promise<void> => {
+      const before = get(settings)[key];
+      try {
+        const value = await withTimeout(api.secretGet(key), `keychain read for ${key}`);
+        if (key === "appLockPin") lockPinReady = true;
+        if (value != null && value !== "") {
+          lastSynced[key] = value;
+          settings.update((state) => (state[key] === before ? { ...state, [key]: value } : state));
+        }
+      } catch (error) {
+        if (key === "appLockPin") lockPinReady = false;
+        console.warn(`keychain read failed for ${key}:`, error);
+      }
+    };
+
+    const writeSecret = async (key: SecretKey): Promise<void> => {
+      const value = get(settings)[key];
+      if (value === lastSynced[key]) return;
+      try {
+        await withTimeout(api.secretSet(key, value), `keychain write for ${key}`);
+        lastSynced[key] = value;
+        if (key === "appLockPin") lockPinReady = true;
+      } catch (error) {
+        migrationFailed = true;
+        if (key === "appLockPin") lockPinReady = false;
+        console.warn(`keychain write failed for ${key}:`, error);
+      }
+    };
+
+    if (keys.includes("appLockPin")) {
+      await readSecret("appLockPin");
+      await writeSecret("appLockPin");
+    }
+    const lockConfigured = get(settings).lockEnabled || !!get(settings).appLockPin.trim();
+    const pinMissing = lockConfigured && get(settings).appLockPin.trim().length < APP_LOCK_MIN_PIN_LENGTH;
+    const lockStateValid = !lockConfigured || (lockPinReady && !pinMissing);
+    appLockConfigured.set(lockConfigured && lockStateValid);
+    const stripped = stripPersistedSecrets();
+    preserveLegacySecrets = false;
+    appLockPinStatus.set(!lockConfigured || (lockStateValid && stripped) ? "ready" : "error");
+
+    for (const key of keys) {
+      if (key === "appLockPin") continue;
+      await readSecret(key);
+      await writeSecret(key);
+    }
+    secretsMigrated = true;
+    preserveLegacySecrets = false;
+    if (migrationFailed) scheduleSecretSync(get(settings));
+  } catch (error) {
+    if (isWidgetRoute()) {
+      appLockConfigured.set(false);
+      appLockPinStatus.set(get(settings).lockEnabled ? "error" : "ready");
+      preserveLegacySecrets = false;
+      secretsMigrated = true;
+      return;
+    }
+    appLockConfigured.set(get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH);
+    appLockPinStatus.set(get(settings).lockEnabled ? "error" : "ready");
+    preserveLegacySecrets = false;
+    secretsMigrated = true;
+    const stripped = stripPersistedSecrets();
+    console.warn("Secret hydration failed; localStorage was scrubbed:", stripped, error);
   } finally {
     resolveSecretsReady();
   }
@@ -439,6 +519,9 @@ export const settings = writable<AppSettings>(loadSettings());
 let lastSettings = get(settings);
 
 settings.subscribe((value) => {
+  if (get(appLockPinStatus) === "ready" && value.lockEnabled && value.appLockPin.trim().length < APP_LOCK_MIN_PIN_LENGTH) {
+    appLockPinStatus.set("error");
+  }
   lastSettings = value;
   saveSettings(value);
 });
@@ -462,8 +545,7 @@ if (typeof window !== "undefined") {
   });
 }
 
-if (isWidgetRoute()) resolveSecretsReady();
-else void initSecrets();
+void initSecrets();
 
 /** Global Settings nav: lets palette/sidebar deep-link into a category. */
 export const settingsCategory = writable<SettingsCategory>("general");
@@ -475,10 +557,13 @@ export function openSettingsAt(category: SettingsCategory) {
 
 /**
  * Check if a workspace is private (local-only AI, no API calls).
- * Logs workspace is private by default per spec §8E.
+ * Logs workspace is private by default per spec §8E, and the
+ * Settings → "Logs: Local Model Only" switch forces it regardless of
+ * the per-workspace map (that switch was previously stored but never read).
  */
 export function isWorkspacePrivate(workspaceId: string): boolean {
   const s = loadSettings();
+  if (workspaceId === "logs" && s.logsLocalOnly) return true;
   return s.workspacePrivacy[workspaceId] === true;
 }
 
@@ -496,5 +581,11 @@ export function toggleWorkspacePrivacy(workspaceId: string) {
  * keychain.
  */
 export function resetSettings(): void {
-  settings.set(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings);
+  const current = get(settings);
+  settings.set({
+    ...(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings),
+    apiKey: current.apiKey,
+    appLockPin: current.appLockPin,
+    lockEnabled: current.lockEnabled,
+  });
 }

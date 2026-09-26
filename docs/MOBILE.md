@@ -4,7 +4,7 @@ READ-WHEN: adding a mobile feature, changing BottomBar/app.css mobile rules, or 
 KEY-FILES: src/App.svelte (breakpoint + mobile sheets), src/app.css (mobile media queries), src/lib/components/BottomBar.svelte (phone nav), tests/mobile-parity.mjs (probe)
 INVARIANTS: isMobile means viewport <= 768px; desktop CSS must not be altered by mobile rules except inside media queries; every phone control is >= 44px; hidden-workspace rules identical to desktop
 GOTCHAS: jsdom applies no CSS, so mobile-parity asserts CSS by source contract and behavior by driving the real bundle; touch changes require (hover: none), (pointer: coarse)
-UPDATED: 2026-09-23
+UPDATED: 2026-09-25
 
 # Mobile / Android
 
@@ -50,7 +50,8 @@ Before shipping, decide these parity gaps (they are code, not layout):
 | File watcher (`file-changed` event) | no equivalent; rely on in-app writes |
 | Updater plugin | store-managed updates |
 
-`tauri.conf.json` currently defines only the `main` window and NSIS bundle; add the
-Android window/capability entries in the same change as `android init`. If a `widget`
-label is ever added (Area 14), it must be added to `capabilities/default.json` too, or
-its `invoke` calls fail silently.
+`tauri.conf.json` defines the desktop `main` and `widget` windows; the Windows
+platform config adds the NSIS bundle and native sidecar build hook. Android
+window/capability entries are still added as part of `android init`. The existing
+`widget` label is already listed in `capabilities/default.json`; any future
+Android-only window must be added there too or its `invoke` calls fail silently.

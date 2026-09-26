@@ -41,7 +41,7 @@ check("capability permits both labels", JSON.stringify(capability.windows) === J
 for (const permission of ["core:window:allow-show", "core:window:allow-hide", "core:window:allow-set-focus", "core:window:allow-start-dragging"]) {
   check(`capability ${permission}`, capability.permissions.includes(permission));
 }
-check("widget command set is narrow", !capability.permissions.includes("updater:default") && !capability.permissions.includes("process:default") && widgetCapability.permissions.includes("widget") && !widgetCapability.permissions.includes("main") && !widgetCapability.permissions.includes("process:allow-exit"));
+check("widget command set is narrow", !capability.permissions.includes("updater:default") && !capability.permissions.includes("process:default") && widgetCapability.permissions.includes("widget") && !widgetCapability.permissions.includes("main") && !widgetCapability.permissions.includes("process:allow-exit") && !widgetPermissions.includes("allow-app-lock-verify"));
 check("main keeps updater and process controls", mainCapability.windows.includes("main") && mainCapability.permissions.includes("main") && mainCapability.permissions.includes("updater:default") && mainCapability.permissions.includes("process:default"));
 check("query route avoids static full app", main.includes('get("widget") === "1"') && main.includes('import("./WidgetApp.svelte")') && main.includes('import("./App.svelte")'));
 check("minimal widget shell", widget.includes("LazyWorkspace") && !widget.includes("Sidebar") && !widget.includes("TabBar") && !widget.includes("InspectorPanel") && !widget.includes("CommandPalette") && !widget.includes("QuickCaptureInput"));
@@ -50,25 +50,27 @@ check("lazy workspace supports component props", lazyWorkspace.includes("compone
 check("files deep-links into library", widget.includes('initialTab: "files"') && libraryWorkspace.includes("initialTab"));
 check("widget never inits forbidden systems", !widget.includes("setupFileWatcher") && !widget.includes("sidecarStart") && !widget.includes("api.rag") && !widget.includes("llmStart") && !widget.includes("sttStart") && !widget.includes("ttsStart"));
 check("widget has collapsed/expanded geometry", widget.includes("setCollapsed") && widget.includes("placeWidget") && widget.includes("widgetDockEdge") && widget.includes("widgetDockOffset") && widget.includes("onMoved"));
+check("locked widget expands for recovery", widget.includes("widgetLocked") && widget.includes("placeWidget(false"));
 check("write uses the existing companion editor", widget.includes('companionMode: true') && editor.includes("!companionMode && $settings.ghostEnabled") && editor.includes("{#if !companionMode}") && editor.includes("if (companionMode) return false"));
 check("main watcher stays call-once", (app.match(/api\.setupFileWatcher\(\)/g) ?? []).length === 1 && !settingsPane.includes("setupFileWatcher"));
 check("settings own widget state", settings.includes("companionWidgetVisible") && settings.includes("widgetWorkspace") && settings.includes("widgetCollapsed") && settings.includes("widgetDockEdge") && settings.includes("widgetDockOffset") && settings.includes("widgetLaunchAtStartup"));
-check("widget never hydrates secrets", settings.includes("function isWidgetRoute()") && settings.includes("if (isWidgetRoute()) resolveSecretsReady()") && settings.includes('apiKey: ""'));
+check("widget never hydrates secrets", settings.includes("function isWidgetRoute()") && settings.includes("api.appLockConfigured()") && !widget.includes("secretGet") && !widget.includes("secretSet") && !widgetPermissions.includes("allow-secret"));
 check("locked docs excluded before widget state", widget.includes('api.docSearchFull("", workspace)') && !widget.includes(".filter((doc) => !doc.locked)"));
-check("open-in-app validates unlocked allowed doc", bridge.includes("doc.locked") && bridge.includes("isWidgetWorkspace") && bridge.includes("workspaces"));
-check("cross-window settings sync", settings.includes('window.addEventListener("storage"') && settings.includes('event.key !== "writing-app-settings"') && widget.includes("document.documentElement.dataset.theme = $settings.theme"));
+check("open-in-app validates unlocked allowed doc", bridge.includes("widgetDocGet") && bridge.includes("doc.locked") && bridge.includes("isWidgetWorkspace") && bridge.includes("workspaces") && bridge.includes("appLockConfigured"));
+check("cross-window settings sync", settings.includes('window.addEventListener("storage"') && settings.includes('event.key !== "writing-app-settings"') && widget.includes("applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride)"));
 check("settings toggle and dock controls wired", settingsPane.includes("setting-companion-widget") && settingsPane.includes("setting-widget-workspace") && settingsPane.includes("setting-widget-dock-edge") && settingsPane.includes("setting-widget-dock-offset") && settingsPane.includes("setting-widget-startup"));
 check("widget emits doc and workspace handoffs", widget.includes('emitTo("main", "widget-open-doc"') && widget.includes('emitTo("main", "widget-open-workspace"'));
+check("widget waits for handoff acknowledgement", widget.includes('listen("main-window-shown"') && widget.includes('listen<string>("widget-open-failed"'));
 check("main opens and focuses routed doc or workspace", bridge.includes('listen<string>("widget-open-doc"') && bridge.includes('listen<string>("widget-open-workspace"') && bridge.includes("setFocus()"));
 check("tray show/hide entry", rust.includes('MenuItemBuilder::with_id("widget"') && rust.includes('get_webview_window("widget")'));
 check("autostart plugin is wired", rust.includes("tauri_plugin_autostart::Builder") && mainCapability.permissions.includes("autostart:default") && widgetAutostart.includes("enableAutostart") && widgetAutostart.includes("disableAutostart"));
-check("no widget backend command", !rust.includes("commands::widget_") && !rust.includes("pub fn widget_"));
+check("widget backend commands are narrow", rust.includes("commands::widget_doc_get") && rust.includes("commands::widget_doc_save") && rust.includes("commands::widget_atomic_save") && !rust.includes("commands::widget_start") && !rust.includes("pub fn widget_start"));
 const handlerBlock = rust.match(/generate_handler!\[(.*?)\]/s)?.[1] ?? "";
 const handlerCommands = [...handlerBlock.matchAll(/commands::([a-z0-9_]+)/g)].map((match) => match[1]);
 const manifestCommands = [...build.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]).filter((name) => handlerCommands.includes(name));
 check("app ACL manifest covers every handler", handlerCommands.length > 0 && manifestCommands.length === handlerCommands.length && handlerCommands.every((command) => manifestCommands.includes(command)), `${manifestCommands.length}/${handlerCommands.length}`);
 check("main command permissions cover handler set", handlerCommands.every((command) => mainPermissions.includes(`allow-${command.replaceAll("_", "-")}`)));
-for (const command of ["doc_get", "doc_create", "doc_save", "doc_search_full", "log_get_or_create", "usage_record", "atomic_save", "bible_get_facts", "snapshot_list"]) {
+for (const command of ["widget_doc_get", "doc_create", "widget_doc_save", "doc_search_full", "log_get_or_create", "usage_record", "widget_atomic_save", "bible_get_facts", "snapshot_list"]) {
   check(`widget command allowed: ${command}`, widgetPermissions.includes(`allow-${command.replaceAll("_", "-")}`));
 }
 check("main command set includes widget subset", mainPermissions.includes('identifier = "main"') && widgetPermissions.includes('identifier = "widget"'));

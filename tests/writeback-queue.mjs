@@ -8,11 +8,23 @@
  */
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { mkdir, rm } from "node:fs/promises";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const { writeBack } = await import(
-  pathToFileURL(join(root, "src/lib/stores/writeBack.ts")).href
-);
+const esbuild = await import("esbuild");
+const outDir = join(root, "tests", ".tmp-writeback-flow");
+const outFile = join(outDir, "writeback.mjs");
+await mkdir(outDir, { recursive: true });
+await esbuild.build({
+  entryPoints: [join(root, "src/lib/stores/writeBack.ts")],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  alias: { $lib: join(root, "src/lib") },
+  outfile: outFile,
+  logLevel: "silent",
+});
+const { writeBack } = await import(`${pathToFileURL(outFile).href}?${Date.now()}`);
 
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -43,5 +55,6 @@ writeBack.clear();
 check("extra clear is a safe no-op", current === null && writeBack.depth() === 0);
 
 unsub();
+await rm(outDir, { recursive: true, force: true });
 console.log(failures === 0 ? "WRITEBACK-QUEUE ALL PASS" : `WRITEBACK-QUEUE ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

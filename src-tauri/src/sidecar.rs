@@ -1,13 +1,14 @@
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 // ── Shared process management ──────────────────────────────────────
 //
 // LAZY-START POLICY (one place): nothing spawns at boot or import time.
 // Every sidecar starts on first user tap (ensure_*), stops on toggle-off.
-// ManagedSidecar is the ONE child-process owner for all 5 managers:
+// ManagedSidecar is the ONE child-process owner for the STT, TTS, memory,
+// and LLM managers:
 // dead handles are reaped and respawned (never early-Ok on a corpse),
 // stop() is kill()+wait() (reaped, no zombies), Drop kills best-effort
 // so children die with the app, and every HTTP client carries a timeout
@@ -23,12 +24,150 @@ fn http_client(timeout_secs: u64) -> reqwest::Client {
         .expect("reqwest client with a timeout always builds")
 }
 
-/// ONE managed child process shared by all 5 sidecar managers.
+/// Resolve a sidecar script, tolerating raw portable exes run without the
+/// installer layout. The frontend passes resourceDir/sidecars; when that
+/// script is missing we also try beside the exe (portable bundle) before
+/// failing with an actionable hint instead of a cryptic spawn error.
+fn resolve_sidecar_script(sidecars_dir: &str, script: &str) -> Result<std::path::PathBuf, String> {
+    let primary = std::path::PathBuf::from(sidecars_dir).join(script);
+    if primary.is_file() {
+        return Ok(primary);
+    }
+    let mut tried = vec![primary.clone()];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for cand in [
+                dir.join("sidecars").join(script),
+                dir.join(script),
+                dir.join("resources").join("sidecars").join(script),
+            ] {
+                tried.push(cand.clone());
+                if cand.is_file() {
+                    return Ok(cand);
+                }
+            }
+        }
+    }
+    let tried_list = tried
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("; ");
+    Err(format!(
+        "{} not found. Tried: {}. If you ran the raw exe directly (no installer), run the setup exe or place the sidecars bundle beside the exe.",
+        script, tried_list
+    ))
+}
+
+fn resolve_sidecar_executable(sidecars_dir: &str, executable: &str) -> Option<std::path::PathBuf> {
+    let mut candidates = vec![
+        std::path::PathBuf::from(sidecars_dir).join("bin").join(executable),
+        std::path::PathBuf::from(sidecars_dir).join(executable),
+    ];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("sidecars").join("bin").join(executable));
+            candidates.push(dir.join("sidecars").join(executable));
+            candidates.push(dir.join("resources").join("sidecars").join("bin").join(executable));
+        }
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+pub fn native_runtime_available(sidecars_dir: &str, executable: &str) -> bool {
+    resolve_sidecar_executable(sidecars_dir, executable).is_some()
+}
+
+fn sidecar_root_from_executable(executable: &std::path::Path) -> std::path::PathBuf {
+    executable
+        .parent()
+        .and_then(|parent| {
+            if parent.file_name().is_some_and(|name| name.to_string_lossy() == "bin") {
+                parent.parent()
+            } else {
+                Some(parent)
+            }
+        })
+        .unwrap_or_else(|| executable.parent().unwrap_or(executable))
+        .to_path_buf()
+}
+
+fn terminate_child(child: &mut Child) -> Result<(), String> {
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        let pid = child.id().to_string();
+        let mut killer = Command::new(system_tool("taskkill"))
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("failed to terminate sidecar process tree: {}", e))?;
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let status = loop {
+            match killer.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+                Ok(None) => break None,
+                Err(error) => return Err(format!("failed to terminate sidecar process tree: {}", error)),
+            }
+        };
+        let Some(status) = status else {
+            let _ = killer.kill();
+            let _ = killer.wait();
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("sidecar process-tree termination timed out".to_string());
+        };
+        if !status.success() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("taskkill failed for sidecar process tree: {}", status));
+        }
+    }
+    #[cfg(not(windows))]
+    child.kill().map_err(|e| format!("failed to terminate sidecar: {}", e))?;
+    child.wait().map_err(|e| format!("failed to reap sidecar: {}", e))?;
+    Ok(())
+}
+
+async fn ensure_http_ok(response: reqwest::Response, label: &str) -> Result<reqwest::Response, String> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    Err(format!("{} HTTP {}: {}", label, status, body.trim()))
+}
+
+/// ONE managed child process shared by all sidecar managers.
 pub struct ManagedSidecar {
     process: Mutex<Option<Child>>,
     port: u16,
     /// Short log name, e.g. "stt".
     name: &'static str,
+}
+
+#[derive(Debug, Clone)]
+struct PortOwner {
+    pid: String,
+    image: String,
+}
+
+#[cfg(windows)]
+fn system_tool(name: &str) -> std::path::PathBuf {
+    std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join(name)
+}
+
+#[cfg(not(windows))]
+fn system_tool(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(name)
 }
 
 impl ManagedSidecar {
@@ -65,6 +204,17 @@ impl ManagedSidecar {
     /// respawned (never early-Ok on a corpse). If our port is held by a
     /// stale holder, it is reclaimed (orphan restart) before spawning.
     pub fn start(&self, program: &str, args: &[String], cwd: &str, start_label: &str) -> Result<(), String> {
+        self.start_with_env(program, args, cwd, start_label, &[])
+    }
+
+    pub fn start_with_env(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &str,
+        start_label: &str,
+        envs: &[(&str, &str)],
+    ) -> Result<(), String> {
         let mut guard = self.process.lock().map_err(|e| e.to_string())?;
         if let Some(child) = guard.as_mut() {
             match child.try_wait() {
@@ -78,9 +228,15 @@ impl ManagedSidecar {
 
         self.reclaim_stale_port()?;
 
-        let child = Command::new(program)
-            .args(args)
-            .current_dir(cwd)
+        let mut command = Command::new(program);
+        command.args(args).current_dir(cwd);
+        command.env_remove("PYTHONHOME");
+        command.env_remove("PYTHONPATH");
+        command.env("PYTHONNOUSERSITE", "1");
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let child = command
             .spawn()
             .map_err(|e| format!("Failed to start {} sidecar ({}): {}", start_label, program, e))?;
         guard.replace(child);
@@ -91,152 +247,109 @@ impl ManagedSidecar {
     pub fn stop(&self) -> Result<(), String> {
         let mut guard = self.process.lock().map_err(|e| e.to_string())?;
         if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_child(&mut child)?;
         }
         Ok(())
     }
 
-    /// If our port is held while we own no live child, it is a stale
-    /// holder (e.g. an orphaned sidecar from a killed app). When the
-    /// holder looks like one of ours (a python/llama/transcribe process),
-    /// kill it and let the caller respawn fresh; otherwise fail closed
-    /// with a typed error instead of a silent health-false.
     fn reclaim_stale_port(&self) -> Result<(), String> {
         use std::net::{SocketAddr, TcpStream};
         let addr: SocketAddr = format!("127.0.0.1:{}", self.port)
             .parse()
             .map_err(|e| format!("bad sidecar port: {}", e))?;
         if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err() {
-            return Ok(()); // port free — normal path
+            return Ok(());
         }
-        match Self::holder_image(self.port) {
-            Some(image) => {
-                let lower = image.to_lowercase();
-                let ours = lower.contains("python")
-                    || lower.contains("llama-server")
-                    || lower.contains("transcribe")
-                    || lower.contains("kokoro")
-                    || lower.contains("just-write");
-                if ours {
-                    eprintln!(
-                        "[{}] port {} held by orphan process ({}) — killed and restarted",
-                        self.name, self.port, image
-                    );
-                    Self::kill_port_holder(self.port)?;
-                    std::thread::sleep(Duration::from_millis(500));
-                    return Ok(());
-                }
-                Err(format!(
-                    "port {} is held by {} (not a sidecar) — stop it and retry",
-                    self.port, image
-                ))
-            }
-            None => Err(format!(
+        let Some(owner) = Self::port_owner(self.port) else {
+            return Err(format!(
                 "port {} is already in use by an unknown process — stop it and retry",
                 self.port
-            )),
+            ));
+        };
+        let image = owner.image.to_ascii_lowercase();
+        let ours = matches!(
+            image.as_str(),
+            "stt-server.exe"
+                | "stt-server"
+                | "tts-server.exe"
+                | "tts-server"
+                | "memory-server.exe"
+                | "memory-server"
+                | "llama-server.exe"
+                | "llama-server"
+        );
+        if !ours {
+            return Err(format!(
+                "port {} is held by {} (pid {}, not a verified sidecar) — stop it and retry",
+                self.port, owner.image, owner.pid
+            ));
         }
+        eprintln!(
+            "[{}] port {} held by verified orphan process ({}) — killed and restarted",
+            self.name, self.port, owner.image
+        );
+        Self::kill_port_owner(&owner)?;
+        std::thread::sleep(Duration::from_millis(500));
+        Ok(())
     }
 
-    /// Image name of the process listening on `port`, if identifiable.
-    fn holder_image(port: u16) -> Option<String> {
+    fn port_owner(port: u16) -> Option<PortOwner> {
         #[cfg(windows)]
         {
-            Self::holder_image_windows(port)
+            Self::port_owner_windows(port)
         }
         #[cfg(not(windows))]
         {
-            Self::holder_image_unix(port)
+            Self::port_owner_unix(port)
         }
     }
 
     #[cfg(windows)]
-    fn holder_image_windows(port: u16) -> Option<String> {
-        let netstat = Command::new("netstat").args(["-ano", "-p", "TCP"]).output().ok()?;
+    fn port_owner_windows(port: u16) -> Option<PortOwner> {
+        let netstat = Command::new(system_tool("netstat")).args(["-ano", "-p", "TCP"]).output().ok()?;
         let out = String::from_utf8_lossy(&netstat.stdout);
         let needle = format!("127.0.0.1:{}", port);
-        let mut pid: Option<String> = None;
-        for line in out.lines() {
-            // TCP    127.0.0.1:8093    0.0.0.0:0    LISTENING    1234
+        let pid = out.lines().find_map(|line| {
             let cols: Vec<&str> = line.split_whitespace().collect();
-            if cols.len() >= 5 && cols[0] == "TCP" && cols[1] == needle && cols[3] == "LISTENING" {
-                pid = Some(cols[4].to_string());
-                break;
-            }
-        }
-        let pid = pid?;
-        let tasklist = Command::new("tasklist")
+            (cols.len() >= 5 && cols[0] == "TCP" && cols[1] == needle && cols[3] == "LISTENING")
+                .then(|| cols[4].to_string())
+        })?;
+        let tasklist = Command::new(system_tool("tasklist"))
             .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
             .output()
             .ok()?;
         let row = String::from_utf8_lossy(&tasklist.stdout);
-        // "python.exe","1234","Console","1","15,000 K"
-        row.split(',').next().map(|s| s.trim_matches('"').to_string())
+        let image = row.split(',').next()?.trim_matches('"').to_string();
+        (!image.is_empty()).then_some(PortOwner { pid, image })
     }
 
     #[cfg(not(windows))]
-    fn holder_image_unix(port: u16) -> Option<String> {
-        // lsof preferred; /proc fallback on Linux.
-        if let Ok(lsof) = Command::new("lsof").args(["-ti", &format!("tcp:{}", port)]).output() {
-            let pid = String::from_utf8_lossy(&lsof.stdout).lines().next()?.trim().to_string();
-            if pid.is_empty() {
-                return None;
-            }
-            let ps = Command::new("ps").args(["-p", &pid, "-o", "comm="]).output().ok()?;
-            let image = String::from_utf8_lossy(&ps.stdout).trim().to_string();
-            if image.is_empty() {
-                return None;
-            }
-            return Some(image);
+    fn port_owner_unix(port: u16) -> Option<PortOwner> {
+        let output = Command::new("lsof").args(["-ti", &format!("tcp:{}", port)]).output().ok()?;
+        let pid = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_string();
+        if pid.is_empty() {
+            return None;
         }
-        #[cfg(target_os = "linux")]
-        {
-            for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-                let pid = entry.file_name().to_string_lossy().into_owned();
-                if !pid.chars().all(|c| c.is_ascii_digit()) {
-                    continue;
-                }
-                // Too coarse without fd parsing — report unknown, fail closed.
-                let _ = pid;
-            }
-        }
-        None
+        let ps = Command::new("ps").args(["-p", &pid, "-o", "comm="]).output().ok()?;
+        let image = String::from_utf8_lossy(&ps.stdout).trim().to_string();
+        (!image.is_empty()).then_some(PortOwner { pid, image })
     }
 
-    /// Kill whatever holds `port` (only called after holder_image identified
-    /// it as one of ours).
-    fn kill_port_holder(port: u16) -> Result<(), String> {
+    fn kill_port_owner(owner: &PortOwner) -> Result<(), String> {
         #[cfg(windows)]
-        {
-            // Resolve PID the same way holder_image did, then taskkill it.
-            let netstat = Command::new("netstat").args(["-ano", "-p", "TCP"]).output().map_err(|e| e.to_string())?;
-            let out = String::from_utf8_lossy(&netstat.stdout);
-            let needle = format!("127.0.0.1:{}", port);
-            for line in out.lines() {
-                let cols: Vec<&str> = line.split_whitespace().collect();
-                if cols.len() >= 5 && cols[0] == "TCP" && cols[1] == needle && cols[3] == "LISTENING" {
-                    let status = Command::new("taskkill").args(["/F", "/PID", cols[4]]).status().map_err(|e| e.to_string())?;
-                    if !status.success() {
-                        return Err(format!("could not kill orphan holder of port {}", port));
-                    }
-                    return Ok(());
-                }
-            }
-            Err(format!("orphan holder of port {} vanished mid-reclaim", port))
-        }
+        let status = Command::new(system_tool("taskkill"))
+            .args(["/F", "/T", "/PID", owner.pid.as_str()])
+            .status()
+            .map_err(|e| e.to_string())?;
         #[cfg(not(windows))]
-        {
-            let out = Command::new("lsof").args(["-ti", &format!("tcp:{}", port)]).output().map_err(|e| e.to_string())?;
-            let pid = String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string();
-            if pid.is_empty() {
-                return Err(format!("orphan holder of port {} vanished mid-reclaim", port));
-            }
-            let status = Command::new("kill").args(["-9", &pid]).status().map_err(|e| e.to_string())?;
-            if !status.success() {
-                return Err(format!("could not kill orphan holder of port {}", port));
-            }
+        let status = Command::new("kill")
+            .args(["-9", owner.pid.as_str()])
+            .status()
+            .map_err(|e| e.to_string())?;
+        if status.success() {
             Ok(())
+        } else {
+            Err(format!("could not kill verified orphan process {}", owner.pid))
         }
     }
 }
@@ -246,75 +359,9 @@ impl Drop for ManagedSidecar {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.process.lock() {
             if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                let _ = terminate_child(&mut child);
             }
         }
-    }
-}
-
-// ── Generic sidecar (AI harness, kept for backward compat) ───────
-
-pub struct SidecarManager {
-    proc: ManagedSidecar,
-    endpoint: Mutex<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct HarnessRequest {
-    pub prompt: String,
-    pub session_id: String,
-    pub tools: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct HarnessResponse {
-    pub response: String,
-    pub confidence: f64,
-    pub escalated: bool,
-    pub tool_used: Option<String>,
-}
-
-impl SidecarManager {
-    pub fn new() -> Self {
-        Self {
-            proc: ManagedSidecar::new(8080, "sidecar"),
-            endpoint: Mutex::new("http://localhost:8080".to_string()),
-        }
-    }
-
-    pub fn start(&self, python_path: &str, harness_dir: &str) -> Result<(), String> {
-        self.proc.start(
-            python_path,
-            &["-m".to_string(), "small_model_harness.server".to_string()],
-            harness_dir,
-            "harness",
-        )
-    }
-
-    pub fn stop(&self) -> Result<(), String> {
-        self.proc.stop()
-    }
-
-    pub async fn query(&self, request: HarnessRequest) -> Result<HarnessResponse, String> {
-        let endpoint = self.endpoint.lock().map_err(|e| e.to_string())?.clone();
-        let client = http_client(30);
-        let resp = client
-            .post(format!("{}/chat", endpoint))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| format!("Sidecar request failed: {}", e))?;
-        resp.json().await.map_err(|e| format!("Parse error: {}", e))
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.proc.is_running()
-    }
-
-    pub fn set_endpoint(&self, endpoint: &str) -> Result<(), String> {
-        *self.endpoint.lock().map_err(|e| e.to_string())? = endpoint.to_string();
-        Ok(())
     }
 }
 
@@ -327,8 +374,10 @@ pub struct SttManager {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SttHealth {
     pub status: String,
+    pub ready: bool,
     pub model_loaded: bool,
     pub model: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -345,15 +394,26 @@ impl SttManager {
     }
 
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
-        let script = std::path::PathBuf::from(sidecars_dir).join("stt_server.py");
-        let mut args = vec![
-            script.to_string_lossy().to_string(),
-            self.proc.port().to_string(),
-        ];
+        let mut args = vec![self.proc.port().to_string()];
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             args.push(m.to_string());
         }
-        self.proc.start(python_path, &args, sidecars_dir, "STT")
+        if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe") {
+            let working_dir = sidecar_root_from_executable(&executable);
+            let working_dir_text = working_dir.to_string_lossy();
+            return self.proc.start_with_env(
+                &executable.to_string_lossy(),
+                &args,
+                &working_dir_text,
+                "STT",
+                &[("JWE_SIDECARS_DIR", &working_dir_text)],
+            );
+        }
+        let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")?;
+        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let mut python_args = vec![script.to_string_lossy().to_string()];
+        python_args.extend(args);
+        self.proc.start(python_path, &python_args, &working_dir.to_string_lossy(), "STT")
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -424,7 +484,9 @@ pub struct TtsManager {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TtsHealth {
     pub status: String,
+    pub ready: bool,
     pub model_loaded: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -442,15 +504,26 @@ impl TtsManager {
     }
 
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
-        let script = std::path::PathBuf::from(sidecars_dir).join("tts_server.py");
-        let mut args = vec![
-            script.to_string_lossy().to_string(),
-            self.proc.port().to_string(),
-        ];
+        let mut args = vec![self.proc.port().to_string()];
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             args.push(m.to_string());
         }
-        self.proc.start(python_path, &args, sidecars_dir, "TTS")
+        if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "tts-server.exe") {
+            let working_dir = sidecar_root_from_executable(&executable);
+            let working_dir_text = working_dir.to_string_lossy();
+            return self.proc.start_with_env(
+                &executable.to_string_lossy(),
+                &args,
+                &working_dir_text,
+                "TTS",
+                &[("JWE_SIDECARS_DIR", &working_dir_text)],
+            );
+        }
+        let script = resolve_sidecar_script(sidecars_dir, "tts_server.py")?;
+        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let mut python_args = vec![script.to_string_lossy().to_string()];
+        python_args.extend(args);
+        self.proc.start(python_path, &python_args, &working_dir.to_string_lossy(), "TTS")
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -514,6 +587,7 @@ pub struct MemoryHealth {
 pub struct MemoryManager {
     proc: ManagedSidecar,
     data_dir: String,
+    auth_token: String,
 }
 
 impl MemoryManager {
@@ -521,17 +595,38 @@ impl MemoryManager {
         Self {
             proc: ManagedSidecar::new(port, "memory"),
             data_dir,
+            auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
     pub fn start(&self, python_path: &str, sidecars_dir: &str) -> Result<(), String> {
-        let script = std::path::PathBuf::from(sidecars_dir).join("memory_server.py");
-        let args = vec![
-            script.to_string_lossy().to_string(),
-            self.proc.port().to_string(),
-            self.data_dir.clone(),
-        ];
-        self.proc.start(python_path, &args, sidecars_dir, "memory")
+        let args = vec![self.proc.port().to_string(), self.data_dir.clone()];
+        if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "memory-server.exe") {
+            let working_dir = sidecar_root_from_executable(&executable);
+            let working_dir_text = working_dir.to_string_lossy();
+            return self.proc.start_with_env(
+                &executable.to_string_lossy(),
+                &args,
+                &working_dir_text,
+                "memory",
+                &[
+                    ("JWE_SIDECARS_DIR", working_dir_text.as_ref()),
+                    ("JWE_MEMORY_TOKEN", self.auth_token.as_str()),
+                ],
+            );
+        }
+        let script = resolve_sidecar_script(sidecars_dir, "memory_server.py")?;
+        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let mut python_args = vec![script.to_string_lossy().to_string()];
+        python_args.extend(args);
+        let working_dir_text = working_dir.to_string_lossy();
+        self.proc.start_with_env(
+            python_path,
+            &python_args,
+            &working_dir_text,
+            "memory",
+            &[("JWE_MEMORY_TOKEN", self.auth_token.as_str())],
+        )
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -549,6 +644,7 @@ impl MemoryManager {
     async fn post_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
         let client = http_client(30);
         let resp = client.post(format!("{}{}", self.base_url(), path))
+            .header("X-JWE-Memory-Token", &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         resp.json().await.map_err(|e| e.to_string())
@@ -557,6 +653,7 @@ impl MemoryManager {
     pub async fn health(&self) -> Result<MemoryHealth, String> {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
+            .header("X-JWE-Memory-Token", &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         resp.json().await.map_err(|e| e.to_string())
     }
@@ -569,6 +666,7 @@ impl MemoryManager {
     pub async fn recall(&self, query: &str) -> Result<String, String> {
         let client = http_client(30);
         let resp = client.get(format!("{}/recall", self.base_url()))
+            .header("X-JWE-Memory-Token", &self.auth_token)
             .query(&[("q", query)])
             .send().await.map_err(|e| e.to_string())?;
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
@@ -592,6 +690,51 @@ impl MemoryManager {
 
 // ── LLM sidecar (llama.cpp server) ─────────────────────────────────
 
+fn resolve_llm_model_path(
+    path: Option<&str>,
+    asset_root: &std::path::Path,
+    models_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let requested = path.map(str::trim).filter(|value| !value.is_empty());
+    let Some(requested) = requested else {
+        let default_path = models_dir.join("lfm2.5-350m-q4_k_m.gguf");
+        if !default_path.is_file() {
+            return Err(format!("LLM model not found: {}", default_path.to_string_lossy()));
+        }
+        return Ok(default_path);
+    };
+    if !requested.to_ascii_lowercase().ends_with(".gguf") {
+        return Err("LLM model must be a .gguf file".to_string());
+    }
+    let requested_path = std::path::Path::new(requested);
+    if requested_path.is_absolute() {
+        if !requested_path.is_file() {
+            return Err(format!("LLM model not found: {}", requested));
+        }
+        return Ok(requested_path.to_path_buf());
+    }
+    if requested.contains(':')
+        || requested.starts_with('/')
+        || requested.starts_with('\\')
+        || requested_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::RootDir
+            )
+        }) {
+        return Err("LLM model path must stay inside the bundled models directory".to_string());
+    }
+    let candidate = if requested_path.starts_with("models") {
+        asset_root.join(requested_path)
+    } else {
+        models_dir.join(requested_path)
+    };
+    if !candidate.is_file() {
+        return Err(format!("LLM model not found: {}", candidate.to_string_lossy()));
+    }
+    Ok(candidate)
+}
+
 pub struct LlmManager {
     proc: ManagedSidecar,
 }
@@ -600,6 +743,7 @@ pub struct LlmManager {
 pub struct LlmHealth {
     pub status: String,
     pub model: Option<String>,
+    pub error: Option<String>,
 }
 
 impl LlmManager {
@@ -612,18 +756,40 @@ impl LlmManager {
     pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>, ctx_size: Option<u32>) -> Result<(), String> {
         let sidecars = std::path::PathBuf::from(sidecars_dir);
         // fetch_sidecars.py lands the server under models/; fall back to the
-        // sidecars root so older/manual layouts keep working.
-        let server_exe = {
-            let in_models = sidecars.join("models").join("llama-server.exe");
-            if in_models.exists() {
-                in_models
-            } else {
-                sidecars.join("llama-server.exe")
+        // sidecars root so older/manual layouts keep working. Raw portable
+        // exes also try beside the exe before failing with a fetch hint.
+        let mut server_candidates = vec![
+            sidecars.join("models").join("llama-server.exe"),
+            sidecars.join("llama-server.exe"),
+        ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                server_candidates.push(dir.join("sidecars").join("models").join("llama-server.exe"));
+                server_candidates.push(dir.join("sidecars").join("llama-server.exe"));
             }
-        };
-        let model_file = model_path
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(sidecars_dir).join("models").join("lfm2.5-350m-q4_k_m.gguf"));
+        }
+        let server_exe = server_candidates
+            .iter()
+            .find(|p| p.is_file())
+            .cloned()
+            .unwrap_or_else(|| sidecars.join("llama-server.exe"));
+        if !server_exe.is_file() {
+            return Err(format!(
+                "llama-server not found at {}. Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md). Raw-exe runs need the sidecars bundle beside the exe or use the setup installer.",
+                server_exe.to_string_lossy()
+            ));
+        }
+        let asset_root = server_exe
+            .parent()
+            .filter(|parent| parent.file_name().is_some_and(|name| name.to_string_lossy() == "models"))
+            .and_then(std::path::Path::parent)
+            .or_else(|| server_exe.parent())
+            .unwrap_or(&sidecars)
+            .to_path_buf();
+        let models_dir = asset_root.join("models");
+        let model_file = resolve_llm_model_path(model_path, &asset_root, &models_dir).map_err(|error| {
+            format!("{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).", error)
+        })?;
 
         // NOTE (b11047+): --no-mmap/--mlock were removed upstream; the
         // 350M default model pages fine without them.
@@ -643,10 +809,11 @@ impl LlmManager {
             "--parallel".to_string(),
             "2".to_string(),
         ];
+        let server_dir = server_exe.parent().unwrap_or(&sidecars);
         self.proc.start(
-            &server_exe.to_string_lossy().to_string(),
+            &server_exe.to_string_lossy(),
             &args,
-            sidecars_dir,
+            &server_dir.to_string_lossy(),
             "LLM",
         )
     }
@@ -669,6 +836,7 @@ impl LlmManager {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        let resp = ensure_http_ok(resp, "LLM health").await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -683,6 +851,7 @@ impl LlmManager {
         let resp = client.post(format!("{}/completion", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        let resp = ensure_http_ok(resp, "LLM completion").await?;
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         data["content"].as_str().map(|s| s.to_string())
             .ok_or_else(|| "LLM server returned no content".to_string())
@@ -699,6 +868,7 @@ impl LlmManager {
         let resp = client.post(format!("{}/v1/chat/completions", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        let resp = ensure_http_ok(resp, "LLM chat completion").await?;
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         data["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
             .ok_or_else(|| "LLM server returned no content".to_string())

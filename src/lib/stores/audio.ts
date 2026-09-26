@@ -23,6 +23,7 @@ export const ttsError = writable<string | null>(null);
 // ── LLM state ───────────────────────────────────────────────────
 export const llmRunning = writable(false);
 export const llmModelLoaded = writable(false);
+export const llmError = writable<string | null>(null);
 
 // ── Startup progress + probe flags ──────────────────────────────
 // Progress text while poll-until-healthy runs ("Starting Moonshine… 3s").
@@ -33,13 +34,28 @@ export const ttsStarting = writable<string | null>(null);
 export const llmStarting = writable<string | null>(null);
 export const sttProbed = writable(false);
 export const ttsProbed = writable(false);
+export const llmProbed = writable(false);
 
 export const STT_FETCH_HINT =
-  "Moonshine model not loaded — fetch it first (fetch_sidecars.py, see docs/MODELS.md).";
+  "Moonshine is unavailable. Check the bundled model and Python runtime in Settings → AI & Providers.";
 export const TTS_FETCH_HINT =
-  "No voice output — fetch the TTS bundle first (fetch_sidecars.py --tts).";
+  "Kokoro is unavailable. Check the bundled voice model and Python runtime in Settings → AI & Providers.";
 
 /** Poll `check` until `ok` (500ms interval, 15s cap). Never throws. */
+async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("health probe timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function pollUntilHealthy<T>(
   check: () => Promise<T>,
   ok: (h: T) => boolean,
@@ -47,11 +63,14 @@ export async function pollUntilHealthy<T>(
   onTick: (msg: string, elapsedSec: number) => void,
   capMs = 15000,
   intervalMs = 500,
-): Promise<{ healthy: boolean; elapsedMs: number }> {
+): Promise<{ healthy: boolean; elapsedMs: number; value?: T }> {
   const t0 = Date.now();
   for (;;) {
+    const remaining = capMs - (Date.now() - t0);
+    if (remaining <= 0) return { healthy: false, elapsedMs: Date.now() - t0 };
     try {
-      if (ok(await check())) return { healthy: true, elapsedMs: Date.now() - t0 };
+      const value = await within(check(), remaining);
+      if (ok(value)) return { healthy: true, elapsedMs: Date.now() - t0, value };
     } catch {
       /* not up yet — keep polling */
     }
@@ -69,11 +88,13 @@ export interface SidecarSpec<THealth> {
   health: () => Promise<THealth>;
   /** True when the health payload means "loaded enough to use". */
   modelReady: (h: THealth) => boolean;
+  unavailableMessage?: (h: THealth) => string | null | undefined;
   setRunning: (v: boolean) => void;
   setLoaded: (v: boolean) => void;
   setError: (e: string | null) => void;
   setProgress: (msg: string | null, elapsedSec: number) => void;
   setProbed: () => void;
+  stop?: () => Promise<void>;
 }
 
 /**
@@ -84,37 +105,44 @@ export interface SidecarSpec<THealth> {
  * (1–5s) now awaits readiness instead of letting ghost fall back.
  */
 export async function ensureSidecar<THealth>(spec: SidecarSpec<THealth>): Promise<boolean> {
-  try {
-    if (await spec.isRunning()) {
-      spec.setRunning(true);
-      spec.setProbed();
-      return true;
+  const fail = async (message: string) => {
+    try {
+      await spec.stop?.();
+    } catch {
+      /* cleanup is best effort */
     }
-  } catch (e) {
-    spec.setError(String(e));
-    spec.setProbed();
-    return false;
-  }
-  try {
-    await spec.start();
-    spec.setRunning(true);
-    const res = await pollUntilHealthy(spec.health, () => true, spec.kind, (m, s) => spec.setProgress(m, s));
-    spec.setProgress(null, 0);
-    spec.setProbed();
-    if (!res.healthy) {
-      spec.setError(`${spec.kind} sidecar started but never became healthy.`);
-      spec.setRunning(false);
-      return false;
-    }
-    const h = await spec.health();
-    spec.setLoaded(spec.modelReady(h));
-    return true;
-  } catch (e) {
-    spec.setError(String(e));
+    spec.setError(message);
     spec.setRunning(false);
     spec.setLoaded(false);
     spec.setProgress(null, 0);
     spec.setProbed();
+  };
+  try {
+    if (!(await spec.isRunning())) await spec.start();
+    spec.setRunning(true);
+    const result = await pollUntilHealthy(
+      spec.health,
+      () => true,
+      spec.kind,
+      (message, elapsedSec) => spec.setProgress(message, elapsedSec),
+    );
+    spec.setProgress(null, 0);
+    spec.setProbed();
+    if (!result.healthy) {
+      await fail(`${spec.kind} started but its local server never became reachable.`);
+      return false;
+    }
+    const health = result.value ?? await spec.health();
+    const ready = spec.modelReady(health);
+    spec.setLoaded(ready);
+    if (!ready) {
+      await fail(spec.unavailableMessage?.(health) || `${spec.kind} is not ready.`);
+      return false;
+    }
+    spec.setError(null);
+    return true;
+  } catch (error) {
+    await fail(String(error));
     return false;
   }
 }
@@ -125,8 +153,30 @@ export const ttsReady = derived(ttsRunning, ($r) => $r);
 export const llmReady = derived(llmRunning, ($r) => $r);
 
 // ── Sidecar paths (from settings) ───────────────────────────────
-export function getPythonPath(): string {
-  return get(settings).pythonPath || 'python';
+export function resolvePythonPath(): string {
+  return get(settings).pythonPath?.trim() || "python";
+}
+
+/**
+ * Probed interpreter resolution for sidecar starts (all three call sites
+ * are async): the Settings value first, then the Windows launchers (`py`,
+ * `python3`, `python`). Raw portable exes often run where `python` is not
+ * on PATH but `py` is — without this the sidecar fails with a bare
+ * "Python not found" and STT/TTS/memory read as dead. Falls back to the
+ * configured value (whose probe error then surfaces verbatim) when none
+ * of the candidates respond.
+ */
+export async function resolvePythonPathProbed(): Promise<string> {
+  const configured = resolvePythonPath();
+  for (const candidate of [...new Set([configured, "py", "python3", "python"])]) {
+    try {
+      await api.sidecarPythonProbe(candidate);
+      return candidate;
+    } catch {
+      /* try next */
+    }
+  }
+  return configured;
 }
 
 /**
@@ -135,6 +185,11 @@ export function getPythonPath(): string {
  * resolve it there (async import keeps the path plugin out of the preview
  * bundle). Preview falls back to the dev path — sidecar spawn fails closed
  * there anyway (no python), surfaced as a clear sidecar error.
+ *
+ * Raw portable exes (unbundled target/release binary run directly) have no
+ * installer-laid resources: resourceDir may not contain sidecars. The Rust
+ * side re-resolves beside the exe and reports the tried paths, so this stays
+ * the primary candidate and the backend does the fallback.
  */
 export async function getSidecarsDir(): Promise<string> {
   const devPath = 'src-tauri/sidecars';
@@ -150,21 +205,27 @@ export async function getSidecarsDir(): Promise<string> {
 
 // ── STT actions ─────────────────────────────────────────────────
 
+export function sttModelReady(health: { ready?: boolean; model_loaded: boolean }): boolean {
+  return Boolean(health.ready ?? health.model_loaded);
+}
+
 /** Start the Moonshine sidecar (lazy, first tap). */
 export async function ensureStt(): Promise<boolean> {
   return ensureSidecar({
     kind: "Moonshine",
     isRunning: () => api.sttIsRunning(),
     start: async () => {
-      await api.sttStart(getPythonPath(), await getSidecarsDir(), get(settings).sttModel || undefined);
+      await api.sttStart(await resolvePythonPathProbed(), await getSidecarsDir(), get(settings).sttModel || undefined);
     },
     health: () => api.sttHealth(),
-    modelReady: (h) => h.model_loaded,
+    modelReady: sttModelReady,
+    unavailableMessage: (h) => h.error || STT_FETCH_HINT,
     setRunning: (v) => sttRunning.set(v),
     setLoaded: (v) => sttModelLoaded.set(v),
     setError: (e) => sttError.set(e),
     setProgress: (m) => sttStarting.set(m),
     setProbed: () => sttProbed.set(true),
+    stop: stopStt,
   });
 }
 
@@ -172,11 +233,11 @@ export async function ensureStt(): Promise<boolean> {
 export async function stopStt(): Promise<void> {
   try {
     await api.sttStop();
-  } catch {
-    /* already down */
-  } finally {
     sttRunning.set(false);
     sttModelLoaded.set(false);
+  } catch (error) {
+    sttError.set(String(error));
+    throw error;
   }
 }
 
@@ -200,21 +261,27 @@ export async function transcribeAudio(
 
 // ── TTS actions ─────────────────────────────────────────────────
 
+export function ttsModelReady(health: { ready?: boolean; model_loaded: boolean }): boolean {
+  return Boolean(health.ready ?? health.model_loaded);
+}
+
 /** Start the Kokoro sidecar (lazy, first tap). */
 export async function ensureTts(): Promise<boolean> {
   return ensureSidecar({
     kind: "Kokoro",
     isRunning: () => api.ttsIsRunning(),
     start: async () => {
-      await api.ttsStart(getPythonPath(), await getSidecarsDir(), get(settings).ttsModel || undefined);
+      await api.ttsStart(await resolvePythonPathProbed(), await getSidecarsDir(), get(settings).ttsModel || undefined);
     },
     health: () => api.ttsHealth(),
-    modelReady: (h) => h.model_loaded,
+    modelReady: ttsModelReady,
+    unavailableMessage: (h) => h.error || TTS_FETCH_HINT,
     setRunning: (v) => ttsRunning.set(v),
     setLoaded: (v) => ttsModelLoaded.set(v),
     setError: (e) => ttsError.set(e),
     setProgress: (m) => ttsStarting.set(m),
     setProbed: () => ttsProbed.set(true),
+    stop: stopTts,
   });
 }
 
@@ -260,15 +327,19 @@ export async function stopTtsPlayback(): Promise<void> {
 export async function stopTts(): Promise<void> {
   try {
     await api.ttsStop();
-  } catch {
-    /* already down */
-  } finally {
     ttsRunning.set(false);
     ttsModelLoaded.set(false);
+  } catch (error) {
+    ttsError.set(String(error));
+    throw error;
   }
 }
 
 // ── LLM actions ─────────────────────────────────────────────────
+
+export function llmModelReady(health: { status: string }): boolean {
+  return health.status.toLowerCase() === "ok";
+}
 
 /** Start the llama.cpp server sidecar (lazy, first ghost autocomplete). */
 export async function ensureLlm(): Promise<boolean> {
@@ -280,12 +351,14 @@ export async function ensureLlm(): Promise<boolean> {
       await api.llmStart(await getSidecarsDir(), s.llmModel || undefined, s.smallModelContextLength || undefined);
     },
     health: () => api.llmHealth(),
-    modelReady: (h) => !!h.model,
+    modelReady: llmModelReady,
+    unavailableMessage: (h) => h.error || "The bundled LLM server is not ready.",
     setRunning: (v) => llmRunning.set(v),
     setLoaded: (v) => llmModelLoaded.set(v),
-    setError: () => {},
+    setError: (e) => llmError.set(e),
     setProgress: (m) => llmStarting.set(m),
-    setProbed: () => {},
+    setProbed: () => llmProbed.set(true),
+    stop: stopLlm,
   });
 }
 
@@ -293,11 +366,12 @@ export async function ensureLlm(): Promise<boolean> {
 export async function stopLlm(): Promise<void> {
   try {
     await api.llmStop();
-  } catch {
-    /* already down */
-  } finally {
     llmRunning.set(false);
     llmModelLoaded.set(false);
+    llmError.set(null);
+  } catch (error) {
+    llmError.set(String(error));
+    throw error;
   }
 }
 
@@ -340,6 +414,7 @@ export function stopWavPlayback(): void {
 
 /** Play base64 WAV audio. Resolves when done — or on stop (never hangs). */
 export function playWavBase64(b64: string): Promise<void> {
+  stopWavPlayback();
   const seq = ++playSeq;
   return new Promise((resolve, reject) => {
     pendingResolves.add(resolve);

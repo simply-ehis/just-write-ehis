@@ -1,29 +1,50 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
+  import { appLockConfigured, settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
   import { api, isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
-  import { checkForUpdate, downloadAndInstall, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
+  import { checkForUpdate, downloadAndInstall, friendlyUpdateError, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
+  import { APP_VERSION } from "$lib/version";
   import { testProvider, type ProviderTestResult } from "$lib/providerTest";
   import BackupManager from "./BackupManager.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import LazyWorkspace from "./LazyWorkspace.svelte";
-  import { stopStt, stopTts, stopLlm } from "$lib/stores/audio";
+  import {
+    ensureLlm,
+    ensureStt,
+    ensureTts,
+    llmError,
+    llmStarting,
+    sttError,
+    stopLlm,
+    stopStt,
+    stopTts,
+    synthesizeText,
+    ttsError,
+  } from "$lib/stores/audio";
   import { validateLlmModel, validatePythonPath, validateSttModel, validateTtsModel } from "$lib/sidecarValidate";
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
   import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
-  import { MIN_PIN_LENGTH } from "$lib/stores/lock";
+  import {
+    MIN_PIN_LENGTH,
+    configurePin,
+    hasPin,
+    lockAppNow,
+    removePin,
+  } from "$lib/stores/lock";
   import { domainError, warnOnce } from "$lib/errors";
   import { defaultAccentFor, ACCENT_PRESETS } from "$lib/appearance";
+  import { EDITOR_FONTS } from "$lib/editorTheme";
 
   // Export setup probe (Settings → About): surfaces pandoc presence +
   // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
   let exportStatus = $state<{ pandoc: boolean; bundled: boolean; formats: string[] } | null>(null);
   let exportProbing = $state(false);
+  let resolvedVaultPath = $state("");
 
   async function probeExportSetup() {
     if (exportProbing) return;
@@ -45,6 +66,13 @@
   let ttsModelError = $state<string | null>(null);
   let llmModelError = $state<string | null>(null);
   let pythonProbeToken = 0;
+  let localModelTesting = $state<"stt" | "tts" | "llm" | null>(null);
+  let localModelStatus = $state("");
+  let pinDraft = $state("");
+  let pinConfirmation = $state("");
+  let pinSetupError = $state("");
+  let pinSaving = $state(false);
+  let showPinSetup = $state(false);
 
   async function probePythonPath() {
     pythonError = validatePythonPath($settings.pythonPath);
@@ -58,6 +86,128 @@
       if (token === pythonProbeToken) {
         pythonError = e instanceof Error ? e.message : String(e);
       }
+    }
+  }
+
+  async function onLockToggle(event: Event) {
+    pinSetupError = "";
+    const enabled = (event.currentTarget as HTMLInputElement).checked;
+    if (!enabled) {
+      settings.update((current) => ({ ...current, lockEnabled: false }));
+      return;
+    }
+    try {
+      if (await hasPin()) {
+        lockAppNow();
+        settings.update((current) => ({ ...current, lockEnabled: true }));
+        return;
+      }
+    } catch (error) {
+      pinSetupError = error instanceof Error ? error.message : String(error);
+    }
+    settings.update((current) => ({ ...current, lockEnabled: false }));
+    showPinSetup = true;
+    if (!pinSetupError) showToast("Create the app PIN before enabling locking", "warning");
+  }
+
+  async function savePin() {
+    if (pinSaving) return;
+    pinSetupError = "";
+    if (pinDraft.trim() !== pinConfirmation.trim()) {
+      pinSetupError = "PINs do not match.";
+      return;
+    }
+    pinSaving = true;
+    try {
+      await configurePin(pinDraft, pinConfirmation);
+      pinDraft = "";
+      pinConfirmation = "";
+      showPinSetup = false;
+      showToast("App PIN saved and locking enabled", "success");
+    } catch (error) {
+      pinSetupError = error instanceof Error ? error.message : String(error);
+    } finally {
+      pinSaving = false;
+    }
+  }
+
+  async function removeConfiguredPin() {
+    if (pinSaving) return;
+    pinSaving = true;
+    pinSetupError = "";
+    try {
+      await removePin();
+      showPinSetup = false;
+      showToast("App PIN removed; locking is off", "info");
+    } catch (error) {
+      pinSetupError = error instanceof Error ? error.message : String(error);
+    } finally {
+      pinSaving = false;
+    }
+  }
+
+  async function testSttSetup() {
+    if (localModelTesting) return;
+    localModelTesting = "stt";
+    localModelStatus = "";
+    const wasRunning = await api.sttIsRunning().catch(() => false);
+    try {
+      localModelStatus = await ensureStt() ? "STT model loaded" : $sttError || "STT unavailable";
+    } catch (error) {
+      localModelStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (!wasRunning) await stopStt().catch((error) => {
+        localModelStatus = localModelStatus || `STT cleanup failed: ${error instanceof Error ? error.message : error}`;
+      });
+      localModelTesting = null;
+    }
+  }
+
+  async function testTtsSetup() {
+    if (localModelTesting) return;
+    localModelTesting = "tts";
+    localModelStatus = "";
+    const wasRunning = await api.ttsIsRunning().catch(() => false);
+    try {
+      if (!(await ensureTts())) {
+        localModelStatus = $ttsError || "TTS unavailable";
+        return;
+      }
+      const result = await synthesizeText("Your local voice is ready.");
+      localModelStatus = result ? "TTS generated a test waveform" : $ttsError || "TTS generated no audio";
+    } catch (error) {
+      localModelStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (!wasRunning) await stopTts().catch((error) => {
+        localModelStatus = localModelStatus || `TTS cleanup failed: ${error instanceof Error ? error.message : error}`;
+      });
+      localModelTesting = null;
+    }
+  }
+
+  async function testLlmSetup() {
+    if (localModelTesting) return;
+    localModelTesting = "llm";
+    localModelStatus = "";
+    const wasRunning = await api.llmIsRunning().catch(() => false);
+    try {
+      if (!(await ensureLlm())) {
+        localModelStatus = $llmError || "Bundled LLM unavailable";
+        return;
+      }
+      const text = (await api.llmCompletion("Reply with exactly READY", 8, 0)).trim();
+      localModelStatus = text.toUpperCase() === "READY"
+        ? "Bundled LLM replied READY"
+        : text
+          ? `Bundled LLM returned unexpected text: ${text.slice(0, 80)}`
+          : "Bundled LLM returned no text";
+    } catch (error) {
+      localModelStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (!wasRunning) await stopLlm().catch((error) => {
+        localModelStatus = localModelStatus || `LLM cleanup failed: ${error instanceof Error ? error.message : error}`;
+      });
+      localModelTesting = null;
     }
   }
 
@@ -121,7 +271,7 @@
   let coldStartTime = $state(0);
   let selfTest = $state<{ name: string; pass: boolean; detail: string }[]>([]);
   let selfTestRunning = $state(false);
-  let appVersion = $state("0.2.1");
+  let appVersion = $state(APP_VERSION);
   let updateConfigured = $state<boolean | null>(null);
   let updateEndpoint = $state<string | null>(null);
   let updateInfo = $state<UpdateInfo | null>(null);
@@ -206,7 +356,9 @@
         }
         const report = validateSettings(imported as Record<string, unknown>);
         if (Object.keys(report.valid).length > 0) {
-          settings.set({ ...$settings, ...report.valid });
+          const next = { ...$settings, ...report.valid };
+          if (!next.appLockPin.trim()) next.lockEnabled = false;
+          settings.set(next);
         }
         // Loud report: secrets rejected, unknown/bad keys dropped, clamps.
         if (report.secrets.length > 0) {
@@ -324,12 +476,24 @@
     { id: "vaults", label: "Vaults & Backup", icon: "download" },
     { id: "capture", label: "Capture & Notifications", icon: "bell" },
     { id: "keybindings", label: "Keybindings", icon: "keyboard" },
+    { id: "support", label: "Support", icon: "send" },
     { id: "about", label: "About & Diagnostics", icon: "info" },
   ];
 
   onMount(() => {
-    coldStartTime = performance.now();
-    getAppVersion("0.2.1").then((v) => (appVersion = v));
+    // Honest cold start: the real navigation→interactive time recorded at
+    // boot (App.svelte reportBootMs). performance.now() here would only
+    // measure "time since page load", which is always red and meaningless.
+    try {
+      const bootMs = Number(localStorage.getItem("jwe-boot-ms"));
+      coldStartTime = Number.isFinite(bootMs) && bootMs > 0 ? Math.round(bootMs) : 0;
+    } catch {
+      coldStartTime = 0;
+    }
+    getAppVersion(APP_VERSION).then((v) => (appVersion = v));
+    if (!isBrowserPreview()) {
+      api.getVaultPath().then((path) => (resolvedVaultPath = path)).catch(() => {});
+    }
     loadMemoryFactCount();
     api.appUpdateStatus()
       .then((s) => {
@@ -350,7 +514,8 @@
       updateInfo = await checkForUpdate();
       updateChecked = true;
     } catch (e) {
-      updateError = String(e instanceof Error ? e.message : e);
+      console.warn("Update check failed:", e);
+      updateError = friendlyUpdateError(e);
     } finally {
       updateChecking = false;
     }
@@ -386,15 +551,18 @@
     try {
       const results = await api.perfBenchmark();
       benchResults = results;
+      showToast("Diagnostics complete", "success");
     } catch (e) {
       domainError("Settings", "couldn't run benchmark", e);
       benchResults = null;
+      showToast(`Diagnostics failed: ${e instanceof Error ? e.message : e}`, "error");
     } finally {
       benchRunning = false;
     }
   }
 
   function formatLatency(us: number): string {
+    if (!Number.isFinite(us)) return "n/a";
     if (us < 1000) return `${us}us`;
     return `${(us / 1000).toFixed(1)}ms`;
   }
@@ -425,6 +593,13 @@
       docId = doc.id;
       return `created ${doc.id}`;
     });
+    // Fail fast: every later step needs docId. Without it the list would
+    // fill with cascading red that hides the one real failure.
+    if (!docId) {
+      selfTest = [...selfTest, { name: "Aborted", pass: false, detail: "Create failed (backend unreachable?) — remaining checks skipped." }];
+      selfTestRunning = false;
+      return;
+    }
     await check("Save + reload round-trip", async () => {
       await api.docSave(docId, undefined, "hello self-test world, edited");
       const reloaded = await api.docGet(docId);
@@ -516,6 +691,13 @@
       }
       return "deleted";
     });
+    const passed = selfTest.filter((t) => t.pass).length;
+    const total = selfTest.length;
+    selfTest = [...selfTest, {
+      name: `Result: ${passed}/${total} passed`,
+      pass: passed === total,
+      detail: passed === total ? "all green" : "see the first ✗ above — later failures may cascade from it",
+    }];
     selfTestRunning = false;
   }
 
@@ -745,13 +927,9 @@
         <div class="setting-row">
           <label for="setting-font-family">Editor Font</label>
           <select id="setting-font-family" bind:value={$settings.fontFamily}>
-            <option value="JetBrains Mono">JetBrains Mono</option>
-            <option value="Fira Code">Fira Code</option>
-            <option value="Source Code Pro">Source Code Pro</option>
-            <option value="IBM Plex Mono">IBM Plex Mono</option>
-            <option value="Cascadia Code">Cascadia Code</option>
-            <option value="Consolas">Consolas</option>
-            <option value="monospace">System Default</option>
+            {#each EDITOR_FONTS as font}
+              <option value={font}>{font === "monospace" ? "System Default" : font}</option>
+            {/each}
           </select>
         </div>
         <div class="setting-row">
@@ -782,7 +960,10 @@
     {:else if activeCategory === "ai"}
       <div class="settings-section">
         <h3>AI & Providers</h3>
-        <p class="setting-desc">Small slot: Ghost autocomplete and light tasks. Main slot: chat, Composer, Structurize.</p>
+         <p class="setting-desc">Small slot: Ghost autocomplete and light tasks. Main slot: chat, Composer, Structurize.</p>
+         {#if localModelStatus}
+           <p class="setting-desc" role="status">{localModelStatus}</p>
+         {/if}
         {#if isBrowserPreview()}
           <p class="setting-desc">On the web both slots talk to HTTP endpoints you configure below — there is no bundled local model here. Ghost needs a reachable small slot to suggest anything.</p>
         {/if}
@@ -842,13 +1023,7 @@
           <label for="setting-api-key">API Key</label>
           <input id="setting-api-key" type="password" bind:value={$settings.apiKey} placeholder="sk-..." />
         </div>
-        {#if !isBrowserPreview()}
-          <div class="setting-row">
-            <label for="setting-harness-dir">Sidecar Harness Directory</label>
-            <input id="setting-harness-dir" type="text" bind:value={$settings.sidecarHarnessDir} placeholder="Directory containing the harness repo" />
-          </div>
-          <p class="setting-desc">Used by the AI panel's Small Model toggle. Needs a harness checkout exposing a <code>server</code> module — leave empty and the toggle explains instead of failing silently.</p>
-        {/if}
+
         <div class="setting-row">
           <label for="setting-blank-mode-default">Blank Mode Default</label>
           <input id="setting-blank-mode-default" type="checkbox" bind:checked={$settings.blankModeDefault} />
@@ -881,6 +1056,12 @@
         </div>
         {#if !isBrowserPreview()}
           <div class="setting-row">
+            <span class="setting-label">Runtime check</span>
+            <button id="test-stt-setup" class="secondary-btn" onclick={testSttSetup} disabled={localModelTesting !== null}>
+              {localModelTesting === "stt" ? "Loading…" : "Test STT"}
+            </button>
+          </div>
+          <div class="setting-row">
             <label for="setting-stt-model">STT Model</label>
             <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" onblur={() => (sttModelError = validateSttModel($settings.sttModel))} />
           </div>
@@ -896,6 +1077,12 @@
           <input id="setting-tts-enabled" type="checkbox" bind:checked={$settings.ttsEnabled} onchange={onTtsToggle} />
         </div>
         {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <span class="setting-label">Runtime check</span>
+            <button id="test-tts-setup" class="secondary-btn" onclick={testTtsSetup} disabled={localModelTesting !== null}>
+              {localModelTesting === "tts" ? "Generating…" : "Test TTS"}
+            </button>
+          </div>
           <div class="setting-row">
             <label for="setting-tts-model">TTS Weights Repo</label>
             <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" onblur={() => (ttsModelError = validateTtsModel($settings.ttsModel))} />
@@ -981,7 +1168,7 @@
               step="0.1"
               bind:value={$settings.ttsSpeed}
             />
-            <span class="range-value">{$settings.ttsSpeed.toFixed(1)}x</span>
+            <span class="range-value">{Number($settings.ttsSpeed).toFixed(1)}x</span>
           </div>
           <p class="setting-desc">0.5x = slow, 1.0x = normal, 2.0x = fast</p>
         </div>
@@ -1014,6 +1201,12 @@
         </div>
         {#if !isBrowserPreview()}
           <div class="setting-row">
+            <span class="setting-label">Runtime check</span>
+            <button id="test-llm-setup" class="secondary-btn" onclick={testLlmSetup} disabled={localModelTesting !== null || !!$llmStarting}>
+              {localModelTesting === "llm" || $llmStarting ? "Testing…" : "Test bundled LLM"}
+            </button>
+          </div>
+          <div class="setting-row">
             <label for="setting-llm-model">LLM Model</label>
             <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" onblur={() => (llmModelError = validateLlmModel($settings.llmModel))} />
           </div>
@@ -1028,8 +1221,9 @@
         <h4>System</h4>
         {#if !isBrowserPreview()}
           <div class="setting-row">
-            <label for="setting-python-path">Python Path</label>
+            <label for="setting-python-path">Python command</label>
             <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" onblur={probePythonPath} />
+            <p class="setting-desc">Use <code>python</code>, <code>python3</code>, or <code>py</code> from PATH. Custom executable paths are disabled.</p>
           </div>
           {#if pythonError}
             <p class="update-error">{pythonError}</p>
@@ -1061,25 +1255,58 @@
       <div class="settings-section">
         <h3>Privacy & Security</h3>
         <div class="setting-row">
-          <label for="setting-lock-enabled">Document Locking</label>
-          <input id="setting-lock-enabled" type="checkbox" bind:checked={$settings.lockEnabled} />
+          <label for="setting-lock-enabled">Per-document locking</label>
+          <input
+            id="setting-lock-enabled"
+            type="checkbox"
+            checked={$settings.lockEnabled}
+            onchange={onLockToggle}
+          />
         </div>
-        <p class="setting-desc">Master switch. Off = no PIN gates, no lock menus, locked docs stop being excluded from AI/search. Locked flags stay stored and apply again if re-enabled.</p>
-        {#if $settings.lockEnabled}
+        <p class="setting-desc">Controls locked-document gates and exclusions. The configured app PIN separately gates the whole shell.</p>
+        {#if $settings.appLockPin}
           <div class="setting-row">
-            <label for="setting-app-lock-pin">App Lock PIN</label>
-            <input id="setting-app-lock-pin" type="password" bind:value={$settings.appLockPin} placeholder="Set PIN..." />
+            <span class="setting-label">App PIN</span>
+            <span class="value">Configured</span>
           </div>
           <div class="setting-row">
-            <label for="remove-app-lock-pin">Remove PIN</label>
-            <button
-              id="remove-app-lock-pin"
-              class="clear-btn"
-              disabled={!$settings.appLockPin}
-              onclick={() => { $settings = { ...$settings, appLockPin: "" }; }}
-            >Remove</button>
+            <button class="secondary-btn" onclick={() => (showPinSetup = !showPinSetup)}>Change PIN</button>
+            <button class="secondary-btn" disabled={!$appLockConfigured || pinSaving} onclick={() => lockAppNow()}>Lock app now</button>
+            <button id="remove-app-lock-pin" class="clear-btn" disabled={pinSaving} onclick={removeConfiguredPin}>Remove PIN</button>
           </div>
-          <p class="setting-desc">Type a new PIN to change it — it saves automatically and syncs to the OS keychain. At least {MIN_PIN_LENGTH} characters; repeated wrong guesses trigger a growing wait. Removing the PIN unlocks nothing by itself; clear per-doc locks from each doc.</p>
+        {:else}
+          <p class="setting-desc">No PIN is configured. Enabling locking will open a required create-and-confirm step.</p>
+          <div class="setting-row">
+            <button id="setup-app-lock-pin" class="secondary-btn" onclick={() => (showPinSetup = true)}>Set up PIN</button>
+          </div>
+        {/if}
+        {#if showPinSetup}
+          <div class="setting-row">
+            <label for="setting-app-lock-pin">New PIN</label>
+            <input id="setting-app-lock-pin" type="password" bind:value={pinDraft} disabled={pinSaving} />
+          </div>
+          <div class="setting-row">
+            <label for="setting-app-lock-pin-confirm">Confirm PIN</label>
+            <input id="setting-app-lock-pin-confirm" type="password" bind:value={pinConfirmation} disabled={pinSaving} />
+          </div>
+          {#if pinSetupError}
+            <p class="update-error" role="alert">{pinSetupError}</p>
+          {/if}
+          <div class="setting-row">
+            <button id="save-app-lock-pin" class="secondary-btn" disabled={pinSaving} onclick={savePin}>
+              {pinSaving ? "Saving…" : "Save PIN & enable"}
+            </button>
+            <button class="clear-btn" disabled={pinSaving} onclick={() => (showPinSetup = false)}>Cancel</button>
+          </div>
+          <p class="setting-desc">
+            At least {MIN_PIN_LENGTH} characters.
+            {#if isBrowserPreview()}
+              Browser preview keeps the PIN only for this tab session.
+            {:else}
+              The PIN is stored in the OS keychain, not localStorage.
+            {/if}
+            This is a session lock, not encryption.
+          </p>
         {/if}
         <div class="setting-row">
           <label for="setting-craft-profiling-enabled">Craft analytics recording</label>
@@ -1167,7 +1394,7 @@
         <h3>Vaults & Backup</h3>
         <div class="setting-row">
           <span class="setting-label">Current Vault</span>
-          <span class="value">{isBrowserPreview() ? "Browser localStorage (this browser only)" : $settings.vaultPath}</span>
+          <span class="value">{isBrowserPreview() ? "Browser localStorage (this browser only)" : resolvedVaultPath || $settings.vaultPath}</span>
         </div>
         <div class="setting-row">
           <label for="setting-backup-frequency">Backup Frequency</label>
@@ -1254,6 +1481,11 @@
         </div>
       </div>
 
+    {:else if activeCategory === "support"}
+      <div class="settings-embed">
+        <LazyWorkspace loader={() => import("./SupportPane.svelte")} label="Support" />
+      </div>
+
     {:else if activeCategory === "about"}
       <div class="settings-section">
         <img class="about-logo" src={aboutLogo} alt="Just Write ehis — pen wrote 'this' with E-tick" />
@@ -1264,7 +1496,7 @@
         </div>
         <div class="setting-row">
           <span class="setting-label">Vault Path</span>
-          <span class="value">{$settings.vaultPath}</span>
+          <span class="value">{resolvedVaultPath || $settings.vaultPath}</span>
         </div>
 
         <h3>Export setup</h3>

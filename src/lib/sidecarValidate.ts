@@ -7,7 +7,8 @@
  *  - stt/llm want a .gguf (bare name, models/-relative, or absolute);
  *  - tts wants a bundle dir (absolute or models/-relative), never a file.
  * Null = valid. Server-side existence/shape checks still apply at start
- * (fail closed with a clear error, never silent fallback).
+ * (fail closed with a clear error, never silent fallback). Python accepts
+ * only PATH command names; reachability is proven by the probe.
  */
 
 const LEGACY_STT_IDS = new Set(["moonshine-v2-q6", "moonshine-v2-q4", "moonshine/tiny"]);
@@ -68,9 +69,11 @@ export function validateLlmModel(value: string): string | null {
   return null;
 }
 
-/** Non-empty only — reachability is proven by the python probe, not by shape. */
 export function validatePythonPath(value: string): string | null {
-  return (value || "").trim()
-    ? null
-    : "Python path is empty — STT/TTS/memory sidecars need it; other features still work.";
+  const v = (value || "").trim().toLowerCase();
+  if (!v) return "Python path is empty — STT/TTS/memory sidecars need it; other features still work.";
+  if (!/^(python|python3|py)(\.exe)?$/.test(v)) {
+    return "Use python, python3, or py from PATH.";
+  }
+  return null;
 }

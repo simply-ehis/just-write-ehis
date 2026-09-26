@@ -86,7 +86,7 @@ pub fn run() {
                     }
                 }
             }
-            app.manage(sidecar::SidecarManager::new());
+            app.manage(commands::PinLockout::default());
             app.manage(sidecar::SttManager::new(8090));
             app.manage(sidecar::TtsManager::new(8091));
             app.manage(sidecar::LlmManager::new(8093));
@@ -163,7 +163,9 @@ pub fn run() {
             commands::open_external_file,
             commands::take_launch_file,
             commands::open_default_apps,
-            commands::doc_get,
+             commands::doc_get,
+             commands::widget_doc_get,
+             commands::widget_doc_save,
             commands::doc_save,
             commands::doc_delete,
             commands::doc_toggle_pin,
@@ -236,7 +238,8 @@ pub fn run() {
             commands::script_role_delete,
             commands::vault_rename_preview,
             commands::vault_rename_execute,
-            commands::atomic_save,
+             commands::atomic_save,
+             commands::widget_atomic_save,
             commands::setup_file_watcher,
             commands::memory_get_streak,
             commands::doc_search_full,
@@ -267,12 +270,7 @@ pub fn run() {
             commands::clear_snapshots,
             commands::clear_usage_events,
             commands::clear_tab_states,
-            commands::sidecar_start,
-            commands::sidecar_python_probe,
-            commands::sidecar_stop,
-            commands::sidecar_is_running,
-            commands::sidecar_set_endpoint,
-            commands::sidecar_query,
+             commands::sidecar_python_probe,
             commands::get_workspace_context,
             commands::get_vault_path,
             commands::stt_start,
@@ -324,8 +322,11 @@ pub fn run() {
             commands::ghost_merge,
             commands::ghost_dismiss,
             commands::atlas_get_stars,
-            commands::secret_set,
-            commands::secret_get,
+             commands::secret_set,
+             commands::secret_get,
+             commands::app_lock_configured,
+             commands::app_lock_verify,
+             commands::app_lock_reset,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| eprintln!("Tauri application error: {}", e));

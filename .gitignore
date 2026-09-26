@@ -7,6 +7,8 @@ src-tauri/target/
 # Keep the README so fresh clones know how to populate this dir.
 src-tauri/sidecars/models/*
 !src-tauri/sidecars/models/README.md
+src-tauri/sidecars/bin/*
+src-tauri/sidecars/.runtime-build-*
 
 # Bundled pandoc sidecar (233 MB for 3.11 Windows — fetched, not committed).
 # Release builds need it: see docs/EXPORT.md "Bundling pandoc as a sidecar".

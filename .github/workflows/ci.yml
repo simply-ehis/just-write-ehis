@@ -18,6 +18,19 @@ jobs:
       - run: npm ci
       - run: npm run check
 
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:source
+      - run: npm run test:widget
+      - run: npm run test:widget-proof
+
   build:
     runs-on: ubuntu-latest
     steps:

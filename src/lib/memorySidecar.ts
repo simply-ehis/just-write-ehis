@@ -6,7 +6,7 @@
  * closed, never pass secrets through silently.
  */
 import { api, isBrowserPreview } from "$lib/api";
-import { ensureSidecar, getPythonPath, getSidecarsDir } from "$lib/stores/audio";
+import { ensureSidecar, getSidecarsDir, resolvePythonPathProbed } from "$lib/stores/audio";
 
 /** Start the memory sidecar if needed. False = unavailable, don't proceed. */
 export async function ensureHarness(onProgress?: (elapsedSec: number) => void): Promise<boolean> {
@@ -17,7 +17,7 @@ export async function ensureHarness(onProgress?: (elapsedSec: number) => void): 
     kind: "memory",
     isRunning: () => api.memorySidecarRunning(),
     start: async () => {
-      await api.memorySidecarStart(getPythonPath(), await getSidecarsDir());
+      await api.memorySidecarStart(await resolvePythonPathProbed(), await getSidecarsDir());
     },
     health: () => api.memorySidecarHealth(),
     modelReady: () => true,
@@ -28,6 +28,7 @@ export async function ensureHarness(onProgress?: (elapsedSec: number) => void): 
       if (_m) onProgress?.(sec);
     },
     setProbed: () => {},
+    stop: stopHarness,
   });
 }
 
@@ -37,5 +38,6 @@ export async function stopHarness(): Promise<void> {
     await api.memorySidecarStop();
   } catch (e) {
     console.warn("memory sidecar stop failed (already down?):", e instanceof Error ? e.message : e);
+    throw e;
   }
 }

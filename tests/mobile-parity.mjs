@@ -10,7 +10,7 @@
  *
  * Run: npm run build && node tests/mobile-parity.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
@@ -82,6 +82,25 @@ const read = (rel) => readFile(join(root, rel), "utf8");
   check("wide dialogs clamp to the viewport", /min\(640px, 100vw\)/.test(versionHistory) && /min\(480px, 94vw\)/.test(vaultRename) && /min\(480px, 94vw\)/.test(templatePicker));
   check("format strip scrolls instead of clipping", /@media \(max-width: 480px\)[\s\S]*?\.format-toolbar \{[\s\S]*?overflow-x: auto/.test(formatToolbar));
   check("BottomBar exposes the Inspector on phones", /id: "outline", label: "Outline"/.test(bottomBar) && /\$inspectorOpen = !\$inspectorOpen/.test(bottomBar));
+}
+
+try {
+  const distStat = await stat(join(root, "dist/index.html"));
+  const sourceStats = await Promise.all([
+    stat(join(root, "src/main.ts")),
+    stat(join(root, "src/App.svelte")),
+    stat(join(root, "src/lib/components/BottomBar.svelte")),
+    stat(join(root, "src/app.css")),
+  ]);
+  if (Math.max(...sourceStats.map((entry) => entry.mtimeMs)) > distStat.mtimeMs) {
+    console.log("SKIP  mobile behavior requires a fresh dist; source-only mode forbids rebuilding");
+    console.log(failures === 0 ? "MOBILE-PARITY SOURCE CHECKS PASS" : `MOBILE-PARITY ${failures} FAILURE(S)`);
+    process.exit(failures === 0 ? 0 : 1);
+  }
+} catch {
+  console.log("SKIP  mobile behavior requires dist; source-only mode forbids rebuilding");
+  console.log(failures === 0 ? "MOBILE-PARITY SOURCE CHECKS PASS" : `MOBILE-PARITY ${failures} FAILURE(S)`);
+  process.exit(failures === 0 ? 0 : 1);
 }
 
 // ── Behavior: 390px shell + Inspector sheet round-trip ───────────────

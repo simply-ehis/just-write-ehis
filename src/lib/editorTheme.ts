@@ -9,6 +9,8 @@
  * theme from editorPalette(), which keeps the two editors identical
  * per combination. Unknown styles fall back to default, modes to dark.
  */
+import { EDITOR_FONT_VALUES } from "./settingsValidate";
+
 export interface EditorPalette {
   bg: string;
   fg: string;
@@ -78,3 +80,31 @@ export function editorPalette(style: string, mode = "dark"): EditorPalette {
 
 /** Autocorrect suggestion underline — theme warning via CSS var. */
 export const AUTOCORRECT_WAVY = "underline wavy var(--warning) 1px";
+
+export const EDITOR_FONTS = EDITOR_FONT_VALUES;
+
+export type EditorFont = (typeof EDITOR_FONTS)[number];
+
+export function editorFontStack(font: string): string {
+  // Keep a distinct fallback tail for each bundled family so a missing font
+  // asset does not make every editor choice render identically.
+  const selected = EDITOR_FONTS.includes(font as EditorFont)
+    ? (font as EditorFont)
+    : "JetBrains Mono";
+  switch (selected) {
+    case "JetBrains Mono":
+      return `"JetBrains Mono", "Cascadia Code", Consolas, monospace`;
+    case "Fira Code":
+      return `"Fira Code", Consolas, "Courier New", monospace`;
+    case "Source Code Pro":
+      return `"Source Code Pro", "Lucida Console", Consolas, monospace`;
+    case "IBM Plex Mono":
+      return `"IBM Plex Mono", "Courier New", Consolas, monospace`;
+    case "Cascadia Code":
+      return `"Cascadia Code", Consolas, monospace`;
+    case "Consolas":
+      return `Consolas, "Cascadia Code", monospace`;
+    case "monospace":
+      return `ui-monospace, Consolas, monospace`;
+  }
+}

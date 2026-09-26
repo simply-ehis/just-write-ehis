@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   /**
    * ReadAloudButton — Kokoro-82M TTS on desktop, browser voice on web.
    * Reads selected text (or entire doc) aloud.
@@ -8,8 +9,9 @@ import {
   ensureTts,
   synthesizeText,
   playWavBase64,
-  stopTtsPlayback,
-  ttsPlaying,
+   stopTtsPlayback,
+   stopWavPlayback,
+   ttsPlaying,
   ttsError,
   ttsModelLoaded,
   ttsProbed,
@@ -145,10 +147,6 @@ import { get } from 'svelte/store';
     // Lazy-load sidecar on first tap
     const ready = await ensureTts();
     if (!ready) return;
-    if ($ttsProbed && !$ttsModelLoaded) {
-      $ttsError = TTS_FETCH_HINT;
-      return;
-    }
     // Section flow (Reader): one call per section with highlight.
     const sections = !selText && getSections ? getSections().filter((s) => s.text.trim()) : null;
 
@@ -190,8 +188,17 @@ import { get } from 'svelte/store';
     else void stopTtsPlayback();
     loading = false;
     playing = false;
+     $ttsPlaying = false;
+   }
+
+   onDestroy(() => {
+    cancelled = true;
+    if (usingBrowser) stopBrowserSpeech();
+    else stopWavPlayback();
+    playing = false;
+    loading = false;
     $ttsPlaying = false;
-  }
+  });
 </script>
 
 <button

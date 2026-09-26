@@ -286,6 +286,9 @@
   --inspector-width: 280px;
 
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --editor-font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --editor-font-size: 15px;
+  --editor-line-height: 1.7;
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-heading: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -377,6 +380,29 @@ input, textarea, select {
   padding: 6px 10px;
 }
 
+/* Native dropdown lists render outside the themed control on Windows:
+   without an explicit option rule the popup is pure white in dark mode
+   (white-on-white, unreadable until hover-selected). color-scheme aligns
+   the OS widget chrome with the active mode. */
+select {
+  color-scheme: light;
+}
+:root[data-mode="dark"] select {
+  color-scheme: dark;
+}
+select option,
+select optgroup {
+  background-color: var(--bg-secondary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+select option:checked,
+select option:hover {
+  background-color: var(--bg-active);
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--accent);
@@ -420,25 +446,122 @@ input:focus, textarea:focus, select:focus {
   grid-template-columns: var(--sidebar-width) var(--inspector-width) 1fr var(--ai-panel-width);
 }
 
-/* Sidebar collapse: chrome stays, editor takes the width. */
+/* Sidebar collapse: chrome stays, editor takes the width.
+   Collapsed grids drop the sidebar track entirely (no 0px ghost column):
+   with display:none the auto-placed main-area would otherwise land in the
+   0px track and the shell reads as a black screen with no way back. */
 .app-shell.sidebar-collapsed {
-  grid-template-columns: 0px 1fr;
+  grid-template-columns: 1fr;
 }
 
 .app-shell.sidebar-collapsed.with-ai-panel {
-  grid-template-columns: 0px 1fr var(--ai-panel-width);
+  grid-template-columns: 1fr var(--ai-panel-width);
 }
 
 .app-shell.sidebar-collapsed.with-inspector {
-  grid-template-columns: 0px var(--inspector-width) 1fr;
+  grid-template-columns: var(--inspector-width) 1fr;
 }
 
 .app-shell.sidebar-collapsed.with-inspector.with-ai-panel {
-  grid-template-columns: 0px var(--inspector-width) 1fr var(--ai-panel-width);
+  grid-template-columns: var(--inspector-width) 1fr var(--ai-panel-width);
+}
+
+/* Explicit placement so auto-placement can never strand the editor in a
+   hidden track (the pre-fix black-screen bug). Row 1 = workspace,
+   row 2 = status bar (grid-column 1/-1 in .status-bar). */
+.app-shell .sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+.app-shell .main-area {
+  grid-column: 2;
+  grid-row: 1;
+}
+.app-shell.with-ai-panel .main-area {
+  grid-column: 2;
+}
+.app-shell.with-ai-panel .ai-panel {
+  grid-column: 3;
+  grid-row: 1;
+}
+.app-shell.with-inspector .inspector-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
+.app-shell.with-inspector .main-area {
+  grid-column: 3;
+}
+.app-shell.with-inspector.with-ai-panel .main-area {
+  grid-column: 3;
+}
+.app-shell.with-inspector.with-ai-panel .ai-panel {
+  grid-column: 4;
+  grid-row: 1;
+}
+@media (max-width: 768px) {
+  .app-shell .sidebar,
+  .app-shell .main-area,
+  .app-shell.with-ai-panel .main-area,
+  .app-shell.with-inspector .main-area,
+  .app-shell.with-ai-panel .ai-panel,
+  .app-shell.with-inspector .inspector-panel {
+    grid-column: 1;
+  }
+}
+.app-shell.sidebar-collapsed .main-area {
+  grid-column: 1;
+}
+.app-shell.sidebar-collapsed.with-inspector .main-area {
+  grid-column: 2;
+}
+.app-shell.sidebar-collapsed.with-inspector .inspector-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+.app-shell.sidebar-collapsed.with-ai-panel .main-area {
+  grid-column: 1;
+}
+.app-shell.sidebar-collapsed.with-ai-panel .ai-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
+.app-shell.sidebar-collapsed.with-inspector.with-ai-panel .main-area {
+  grid-column: 2;
+}
+.app-shell.sidebar-collapsed.with-inspector.with-ai-panel .inspector-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+.app-shell.sidebar-collapsed.with-inspector.with-ai-panel .ai-panel {
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .app-shell.sidebar-collapsed .sidebar {
   display: none;
+}
+
+/* Floating reopen affordance when the sidebar track is gone (Ctrl+B
+   still works, but a hidden sidebar must never be irreversible). */
+.sidebar-show-fab {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 60;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+}
+.sidebar-show-fab:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
 }
 
 .sidebar-collapse-btn {
@@ -578,8 +701,13 @@ input:focus, textarea:focus, select:focus {
 }
 
 .app-shell.zen {
-  grid-template-columns: 0px 1fr;
+  grid-template-columns: 1fr;
   grid-template-rows: 1fr;
+}
+
+.app-shell.zen .main-area {
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .app-shell.zen .sidebar,

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   /**
    * MicButton — Moonshine STT on desktop, browser dictation on web.
    * Press to record → press again to stop → transcribe → insert at cursor.
@@ -76,12 +77,6 @@ import { isBrowserPreview } from '$lib/api';
       if (voiceSupported()) offerBrowserVoice = true;
       return;
     }
-    if ($sttProbed && !$sttModelLoaded) {
-      $sttError = STT_FETCH_HINT;
-      if (voiceSupported()) offerBrowserVoice = true;
-      return;
-    }
-
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -251,9 +246,24 @@ import { isBrowserPreview } from '$lib/api';
     } finally {
       processing = false;
       $sttTranscribing = false;
-      pcmChunks = [];
+       pcmChunks = [];
+     }
+   }
+
+   onDestroy(() => {
+    try {
+      processorNode?.disconnect();
+      muteNode?.disconnect();
+      sourceNode?.disconnect();
+      micStream?.getTracks().forEach((track) => track.stop());
+      void audioCtx?.close();
+    } catch {
+      /* component teardown is best effort */
     }
-  }
+    browserHandle?.stop();
+    recording = false;
+    $sttRecording = false;
+  });
 </script>
 
 <button

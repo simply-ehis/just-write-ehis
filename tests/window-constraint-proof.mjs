@@ -3,8 +3,8 @@ import { watch } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import net from "node:net";
+import { spawn } from "node:child_process";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,24 +49,25 @@ console.log("CONSTRAINT 1A: two writers, one WAL vault");
 console.log(sqliteResult);
 expect("second WAL writer is locked", sqlite.code === 0 && sqliteResult.includes("SECOND_WRITE=LOCKED"), sqliteResult);
 
-async function bind(port) {
+async function bind(port, hold = false) {
   return new Promise((resolve) => {
     const server = net.createServer();
     server.once("error", (error) => resolve({ ok: false, code: error.code }));
-    server.listen(port, "127.0.0.1", () => server.close(() => resolve({ ok: true })));
+    server.listen(port, "127.0.0.1", () => {
+      if (hold) resolve({ ok: true, server });
+      else server.close(() => resolve({ ok: true }));
+    });
   });
 }
 
-const initial = await bind(8093);
+const initial = await bind(8093, true);
 if (initial.ok) {
-  const server = spawn("python", ["-m", "http.server", "8093", "--bind", "127.0.0.1"], { stdio: "ignore" });
-  await sleep(500);
   const second = await bind(8093);
   const result = second.ok ? "UNEXPECTED_SUCCESS" : second.code;
   console.log("CONSTRAINT 1B: fixed sidecar port 8093");
   console.log(`SECOND_BIND=${result}`);
   expect("fixed sidecar port rejects second bind", !second.ok, result);
-  server.kill();
+  initial.server.close();
   await sleep(150);
 } else {
   console.log("CONSTRAINT 1B: fixed sidecar port 8093");

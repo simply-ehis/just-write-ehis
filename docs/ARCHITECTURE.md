@@ -1,10 +1,10 @@
 PURPOSE: how the app is layered and how data flows through it
 OWNS: layer decisions, backend selection, cross-cutting rules
 READ-WHEN: adding a command/workspace, touching storage, AI, theming, or icons
-KEY-FILES: src/lib/api.ts (invoke router), src/lib/browserBackend.ts (preview), src/WidgetApp.svelte + src/lib/components/LazyWorkspace.svelte + src-tauri/tauri.conf.json (two-window shell), src-tauri/tauri.windows.conf.json + src-tauri/src/windows.rs (Windows integration), src-tauri/src/commands.rs + doc_store.rs, src/app.css (theme vars)
+KEY-FILES: src/lib/api.ts (invoke router), src/lib/browserBackend.ts (preview), src/WidgetApp.svelte + src/lib/components/LazyWorkspace.svelte + src-tauri/tauri.conf.json (two-window shell), src-tauri/tauri.windows.conf.json (Windows packaging), src-tauri/src/sidecar.rs + sidecars/build_sidecars.py (local runtimes), src-tauri/src/commands.rs + doc_store.rs, src/app.css (theme vars)
 INVARIANTS: files-on-disk truth; every api.ts command has a browserBackend case; one process has main/widget only; setup_file_watcher runs once from main; widget never initializes DB/watcher/sidecars/RAG; Windows OS registration is Windows-only and opt-in; no Lucide/emoji icons; all UI strings go through native title/aria-label tooltips on icon buttons
-GOTCHAS: app.css must stay imported by main.ts (the whole theme died once when it wasn't); widget capabilities must include label `widget`; Files is a virtual workspace and deep-links to Library; Windows associations are installer-owned; $lib alias only, no relative climbs; native transparent docking remains build-gated
-UPDATED: 2026-09-24
+GOTCHAS: app.css must stay imported by main.ts (the whole theme died once when it wasn't); widget capabilities must include label `widget`; Files is a virtual workspace and deep-links to Library; Windows associations are installer-owned; native model/sidecar packaging is release-gated; $lib alias only, no relative climbs
+UPDATED: 2026-09-25
 
 # Architecture
 
@@ -37,7 +37,7 @@ this statically (api ⊆ backend cases).
 | `doc_store.rs` | all SQL: docs, backlinks, snapshots, RAG chunks, metrics, dashboards |
 | `database.rs` | schema + ordered migrations (new columns go here, same pattern) |
 | `convert.rs` | md/txt/html built in (`pulldown-cmark`); docx/epub/pdf via pandoc |
-| `sidecar.rs` | python sidecars (small-model harness, Moonshine STT, Kokoro TTS) |
+| `sidecar.rs` | native-first process managers for memory, Moonshine STT, Kokoro TTS, and llama.cpp LLM; Python scripts are the source/dev fallback |
 | `models.rs` | shared structs (all `#[serde(default)]` for forward compat) |
 
 Hot save path: keystroke → SQLite WAL (crash-safe) → 5s debounce flush to
@@ -51,7 +51,7 @@ atomic saves keep external sync tools (Syncthing etc.) safe.
   restore), `writeBack` (AI→editor pipe), `saveState`, `notifications`.
 - Components are one-workspace-per-file plus shared pieces (`Icon`,
   `CommandPalette`, `TabBar`, `InspectorPanel`, `LockScreen`, …).
-- `Icon.svelte` is the **only** icon source: 40+ hand-authored stroke
+- `Icon.svelte` is the **only** icon source: 53 hand-authored stroke
   icons. Never Lucide, never emoji-as-icon (syntax glyphs like `☐`/`[[`
   inside menus are content, not icons, and stay).
 - `updates.ts` wraps the Tauri updater plugin (browser-safe no-ops).
@@ -60,11 +60,14 @@ atomic saves keep external sync tools (Syncthing etc.) safe.
 
 ## Lock semantics (the rule)
 
-Locked docs: **content invisible, titles visible.** Excluded from search,
-RAG, AI context (even the open doc), Home stats, smart tabs. Still listed
-in workspaces/graph/properties so they stay manageable. Unlocks live only
-in memory. At-rest secrecy is explicitly *not* this flag's job — that's the
-future encrypted vault (see `TODOS.md`).
+App locking is a session gate: it defaults off, requires a confirmed PIN,
+persists that PIN through the OS keychain, and blocks the main and widget
+shells until the session is unlocked. The same master switch enables
+per-document locks. Locked docs keep **content invisible, titles visible**;
+they are excluded from search, RAG, AI context (even the open doc), Home
+stats, and smart tabs. Unlocks live only in memory. At-rest secrecy is
+explicitly *not* this flag's job — that's the future encrypted vault (see
+`TODOS.md`).
 
 ## Companion window
 
@@ -82,6 +85,15 @@ any text is sent. The editor lookup is a CodeMirror decoration/hover pass over
 already-loaded fact keys; it never calls a model per hover. Browser preview
 persists the same mention/suggestion records but reports local extraction as
 skipped because the native model is unavailable there.
+
+## Local model flow
+
+Settings/runtime button → `stores/audio.ts` → Tauri command → `sidecar.rs`
+→ packaged native runtime (or Python source fallback) → model assets under
+`sidecars/models/`. STT health means the model loaded; TTS health means the
+bundle and runtime are usable before its intentional lazy synthesis; LLM
+health means llama.cpp is serving, and the Settings check then performs a
+real completion. Windows `tauri.windows.conf.json` runs `build_sidecars.py` first.
 
 ## Theming
 

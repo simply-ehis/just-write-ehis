@@ -1,7 +1,7 @@
 """
 Moonshine STT Server (torch-free)
 ================================
-Transcribes via in-process `transcribe_cpp` (pip: transcribe-cpp-native)
+Transcribes via in-process `transcribe_cpp` (pip: transcribe-cpp)
 against a local Moonshine-base GGUF — no PyTorch, no Ollama, no network
 at runtime. A vendored transcribe CLI binary is used as fallback if one
 is ever shipped (upstream native archives currently ship DLLs only).
@@ -39,13 +39,13 @@ import tempfile
 import wave
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(HERE, "models")
 DEFAULT_GGUF = os.path.join(MODELS_DIR, "moonshine-base-Q8_0.gguf")
 TARGET_SR = 16000
 
 # Legacy onnx ids from the torch era — not GGUF paths, ignore them.
-_LEGACY_IDS = {"moonshine-v2-q6", "moonshine-v2-q4", "moonshine/tiny"}
+_LEGACY_IDS = {"moonshine-v2-q6", "moonshine-v2-q4", "moonshine/tiny", "moonshine-base"}
 
 # transcribe.cpp CLI flag probing (whisper.cpp heritage: -m model, -f file).
 _CLI_PROBE = ["--help", "-h", "-?"]
@@ -68,8 +68,8 @@ def _resolve_model() -> str:
     if not override:
         return DEFAULT_GGUF
     if override in _LEGACY_IDS:
-        print(f"[stt] Legacy model id '{override}' is from the torch era — "
-              f"using bundled {os.path.basename(DEFAULT_GGUF)} instead.", flush=True)
+        print(f"[stt] Model alias '{override}' maps to bundled "
+              f"{os.path.basename(DEFAULT_GGUF)}.", flush=True)
         return DEFAULT_GGUF
     # Fail closed on traversal: `..` must resolve inside models/.
     if ".." in override.replace("\\", "/").split("/"):
@@ -226,7 +226,7 @@ class _Engine:
         self.cli = _find_transcribe_cli()
         if not self.cli:
             self.ready_error = (
-                "No STT engine: `pip install transcribe-cpp-native` "
+                "No STT engine: `pip install -r src-tauri/sidecars/requirements.txt` "
                 "(preferred), or vendor a transcribe CLI under sidecars/."
             )
         elif not os.path.isfile(self.model):
@@ -352,9 +352,15 @@ class SttHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            eng = _engine()
-            self._json({"status": "ok", "model_loaded": eng.loaded,
-                        "model": os.path.basename(eng.model)})
+            try:
+                eng = _engine()
+                self._json({"status": "ok" if eng.loaded else "error",
+                            "ready": eng.loaded, "model_loaded": eng.loaded,
+                            "model": os.path.basename(eng.model),
+                            "error": eng.ready_error})
+            except Exception as e:
+                self._json({"status": "error", "ready": False,
+                            "model_loaded": False, "model": "", "error": str(e)})
         else:
             self._json({"error": "not found"}, 404)
 

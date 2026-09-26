@@ -43,6 +43,10 @@ check("llm traversal rejected", v.validateLlmModel("../evil.gguf") !== null);
 
 check("empty python rejected", v.validatePythonPath("") !== null);
 check("python path ok", v.validatePythonPath("python") === null);
+check("python3 path ok", v.validatePythonPath("python3") === null);
+check("windows python command ok", v.validatePythonPath("python.exe") === null);
+check("absolute python path rejected", v.validatePythonPath("C:/Python312/python.exe") !== null);
+check("command injection rejected", v.validatePythonPath("python -c") !== null);
 
 console.log(failures === 0 ? "SIDECAR-VALIDATE ALL PASS" : `SIDECAR-VALIDATE ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

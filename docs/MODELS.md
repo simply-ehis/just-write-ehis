@@ -1,10 +1,10 @@
 PURPOSE: which model per job, how to swap it, what the licenses allow
-OWNERS: model picks, slot routing, sidecar model plumbing
+OWNS: model picks, slot routing, sidecar model plumbing
 READ-WHEN: AI answers badly, swapping STT/TTS/LLM models, adding a new slot
-KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/fetch_sidecars.py
+KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/build_sidecars.py
 INVARIANTS: small slot = ghost/light tasks; main slot = chat/composer/structurize; voice swaps apply on next sidecar start
-GOTCHAS: sidecars download weights on first run (network needed once); voice swaps need a sidecar restart; main slot needs a provider key — Test it before trusting it mid-sentence
-UPDATED: 2026-09-23
+GOTCHAS: release builds package Python runtimes and weights; source runs need a PATH Python command plus requirements; TTS is ready before its lazy first synthesis; model swaps require a sidecar restart
+UPDATED: 2026-09-25
 
 # MODELS.md — picks per job (researched Sept 2026)
 
@@ -22,10 +22,28 @@ Restart the sidecar (toggle the feature or restart the app) after a voice swap.
 Web exception: the browser build uses built-in speech recognition/synthesis,
 so STT/TTS model fields only affect the desktop sidecars.
 
+## Desktop runtime packaging
+
+The Windows release is self-contained for STT, TTS, AI memory, and the bundled
+LLM. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
+desktop build; that script creates `sidecars/bin/{stt,tts,memory}-server.exe`
+with PyInstaller. The Rust sidecar managers prefer those executables and pass
+`JWE_SIDECARS_DIR` so the packaged servers resolve the external model files
+without embedding hundreds of megabytes inside each executable. If a fixed
+port is held by an unverified process, startup fails closed instead of killing
+it.
+
+The Python-script fallback remains for source/development runs only. It
+requires `python`, `python3`, or `py` on PATH plus `requirements.txt`; custom
+interpreter executable paths are rejected. End users do not need a separate
+Python installation after a release build.
+
+## Model selection contract
+
 Changeability contract (every pick below must satisfy all three, verified):
 1. paste the name/id/repo into its Settings field — no code change;
 2. Settings → AI → **Test** confirms the endpoint serves it;
-3. no weights are bundled — `fetch_sidecars.py` downloads once, swapping never bloats the repo.
+3. release builds include the selected default weights; fresh source checkouts fetch defaults once with `fetch_sidecars.py`, and custom weights never enter git.
 
 ## Light LLM (small slot)
 
@@ -74,11 +92,12 @@ Settings → AI, then Test — the slot never assumes a provider.
   in the family, fetched by `fetch_sidecars.py --stt`.
 - **Swap**: paste a local `.gguf` path or a `models/<filename>.gguf` into
   Settings → AI → STT Model. Empty = bundled default.
-- The STT sidecar runs the **transcribe.cpp CLI** (whisper.cpp heritage) —
-  no PyTorch, no `moonshine-onnx`, no network at runtime. 16 kHz mono WAV
-  in, plain text out.
+- The STT sidecar runs `transcribe_cpp` in-process through the pinned
+  `transcribe-cpp-native` runtime — no PyTorch, no separate transcribe CLI,
+  and no network at runtime. 16 kHz mono WAV in, plain text out.
 - Model source: `memoravox/moonshine-base-gguf` on Hugging Face.
-- Binary source: `transcribe.cpp` release `v0.2.3` → `transcribe-cli(.exe)`.
+- The legacy value `moonshine-base` resolves to the bundled
+  `moonshine-base-Q8_0.gguf` for compatibility.
 - Evaluated and rejected, on record: Nemotron 0.6B streaming and Parakeet
   TDT 0.6B (both 2.5GB — 10× the weight for short captures), Voxtral
   Mini 4B (needs 16GB GPU), cloud streaming APIs (against local-first).
@@ -89,8 +108,9 @@ Settings → AI, then Test — the slot never assumes a provider.
 python src-tauri/sidecars/fetch_sidecars.py --stt
 ```
 
+The fetcher requires pinned SHA-256 values in `fetch_sidecars.py` for release downloads. For a local-only research fetch, set `JWE_ALLOW_UNPINNED_SIDECARS=1`; never use that override for a release.
+
 This downloads:
-- `transcribe-cli.exe` (Windows) + DLLs → `models/transcribe-cli/`
 - `moonshine-base-Q8_0.gguf` → `models/moonshine-base-Q8_0.gguf`
 
 ## TTS — Kokoro-82M only (locked, torch-free)
@@ -137,6 +157,8 @@ This downloads:
 
 ## Testing a slot
 
-Settings → AI → **Test** per slot pings `{endpoint}/health` and reports
-latency plus whether the configured model is loaded — do this before
-trusting a new model mid-sentence.
+Settings → AI & Providers exposes **Test STT**, **Test TTS**, and **Test
+bundled LLM**. STT performs a real model load, TTS generates a short test
+waveform (its model intentionally lazy-loads on first synthesis), and the
+LLM check performs a real completion after health verification. Run these
+after changing a model path or upgrading a local runtime.

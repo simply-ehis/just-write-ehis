@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (2026-09-25: settings, native models, and PIN repair)
+
+### Changed
+- Editor typography is shared from first paint through CodeMirror prose and Script editing, with bundled mono fonts and validated numeric settings.
+- STT/TTS/LLM health now reflects process readiness, lazy TTS model load, real LLM completion, bounded polling, cleanup after failure, and Settings runtime tests.
+- Release builds preflight model assets and package native STT/TTS/memory runtimes with PyInstaller; Rust prefers packaged executables, rejects untrusted renderer-supplied roots, and restricts development fallback interpreters to PATH command names.
+- App/document locking defaults off, requires confirmed PIN setup, fails closed on unknown keychain state, gates the main and widget shells, rejects empty-PIN verification, and adds session backoff/removal paths. AI memory loopback calls use a per-launch token.
+
+### Verification
+- `npm run check`, `npm run test:source`, `npm run test:assets`, `npm run test:resolve`, `npm run test:widget`, `npm run test:widget-proof`, and `npm run test:e2e` pass.
+- `npm run test:onboard` reports an explicit `SKIP` until a fresh frontend bundle exists; no frontend, PyInstaller, Tauri, or installer build was run.
+
 ## Unreleased (Area 8: export fidelity + pandoc bundle)
 
 ### Changed

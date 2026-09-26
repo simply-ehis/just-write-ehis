@@ -12,7 +12,7 @@
     showSettings,
     zenMode,
   } from "$lib/stores/app";
-  import { settings, ONBOARD_VERSION } from "$lib/stores/settings";
+  import { appLockConfigured, appLockPinStatus, settings, ONBOARD_VERSION } from "$lib/stores/settings";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import TabBar from "$lib/components/TabBar.svelte";
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
@@ -34,15 +34,23 @@
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import BottomBar from "$lib/components/BottomBar.svelte";
   import LockScreen from "$lib/components/LockScreen.svelte";
-import BootLoader from "$lib/components/BootLoader.svelte";
-import { applyAppearance } from "$lib/appearance";
-  import { unlockedDocs } from "$lib/stores/lock";
+  import BootLoader from "$lib/components/BootLoader.svelte";
+  import { applyAppearance, applyEditorTypography } from "$lib/appearance";
+  import {
+    unlockedDocs,
+    appUnlocked,
+    markAppUnlocked,
+    verifyPin,
+    pinLockoutRemaining,
+    resetPinConfiguration,
+  } from "$lib/stores/lock";
   import HelpOverlay from "$lib/components/HelpOverlay.svelte";
   import { showConflict } from "$lib/stores/conflict";
   import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
+  import { restoreMainWindow } from "$lib/windowState";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
   // currentWorkspace) pollute featuresUsed before the async boot block
@@ -70,6 +78,63 @@ import { applyAppearance } from "$lib/appearance";
     lockCoveredWorkspaces.includes($currentWorkspace)
   );
 
+  // Global app lock: when Document Locking is on and an App Lock PIN is set,
+  // the whole shell stays gated for this session until the PIN verifies.
+  // (Previously the PIN only gated per-doc locks, so it never asked.)
+  let appLockGate = $derived(
+    $appLockPinStatus === "ready" &&
+    ($appLockConfigured || $settings.lockEnabled) &&
+    !$appUnlocked
+  );
+  let appLockUnavailable = $derived($appLockPinStatus === "error");
+  let appPinInput = $state("");
+  let appPinError = $state("");
+  let appPinBusy = $state(false);
+  let appPinWaitSeconds = $state(0);
+  let lastBroadcastLockState = $state<boolean | null>(null);
+
+  $effect(() => {
+    if (!appLockGate) {
+      appPinWaitSeconds = 0;
+      return;
+    }
+    const updateWait = () => {
+      appPinWaitSeconds = Math.max(0, Math.ceil(pinLockoutRemaining() / 1000));
+    };
+    updateWait();
+    const timer = setInterval(updateWait, 500);
+    return () => clearInterval(timer);
+  });
+
+  $effect(() => {
+    const unlocked = $appUnlocked;
+    if (unlocked === lastBroadcastLockState) return;
+    lastBroadcastLockState = unlocked;
+    if (!isBrowserPreview()) void emit("app-lock-state", unlocked).catch(() => {});
+  });
+
+  async function unlockApp() {
+    if (appPinBusy || appPinWaitSeconds > 0) return;
+    appPinBusy = true;
+    appPinError = "";
+    try {
+      if (await verifyPin(appPinInput)) {
+        markAppUnlocked();
+        appPinInput = "";
+      } else {
+        appPinWaitSeconds = Math.max(1, Math.ceil(pinLockoutRemaining() / 1000));
+        appPinError = appPinWaitSeconds > 0
+          ? `Wrong PIN. Try again in ${appPinWaitSeconds}s.`
+          : "Wrong PIN. Try again.";
+        appPinInput = "";
+      }
+    } catch (error) {
+      appPinError = error instanceof Error ? error.message : String(error);
+    } finally {
+      appPinBusy = false;
+    }
+  }
+
   let ready = $state(false);
   let isMobile = $state(false);
   let sidebarVisible = $state(false);
@@ -80,6 +145,8 @@ import { applyAppearance } from "$lib/appearance";
   let typingIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let disposeWidgetBridge: (() => void) | null = null;
   let disposeNativeFileListener: (() => void) | null = null;
+  let disposeAppLockListener: (() => void) | null = null;
+  let disposeAppLockRequest: (() => void) | null = null;
 
   function handleEditorTyping() {
     if (!$settings.autoHideChrome || $zenMode || $showSettings) return;
@@ -258,6 +325,7 @@ import { applyAppearance } from "$lib/appearance";
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    if (appLockGate || $appLockPinStatus !== "ready") return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "F11") {
       e.preventDefault();
@@ -279,12 +347,13 @@ import { applyAppearance } from "$lib/appearance";
   }
 
   $effect(() => {
-    if ($currentWorkspace) trackFeature($currentWorkspace);
+    if ($appLockPinStatus === "ready" && !appLockGate && $currentWorkspace) trackFeature($currentWorkspace);
   });
 
   // Apply the Settings → General style + mode + accent to the root.
   $effect(() => {
     applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride);
+    applyEditorTypography($settings.fontFamily, $settings.fontSize, $settings.lineHeight);
   });
 
   // Per-workspace last place: remember the open doc when leaving a
@@ -293,6 +362,7 @@ import { applyAppearance } from "$lib/appearance";
   let prevWorkspace = $state("home");
 
   $effect(() => {
+    if (appLockGate || $appLockPinStatus !== "ready") return;
     const ws = $currentWorkspace;
     if (ws === prevWorkspace) return;
     const outgoing = prevWorkspace;
@@ -323,7 +393,7 @@ import { applyAppearance } from "$lib/appearance";
     if ($aiPanelOpen) trackFeature("ai-panel");
   });
 
-  import { listen } from "@tauri-apps/api/event";
+  import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { checkForUpdate } from "$lib/updates";
   import { showBanner, showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
@@ -390,7 +460,23 @@ import { applyAppearance } from "$lib/appearance";
     }
   }
 
+  async function recoverLockConfiguration() {
+    await resetPinConfiguration();
+    showToast("Lock configuration reset; set up a new PIN when ready", "info");
+  }
+
+  async function waitForAppAccess(): Promise<void> {
+    for (;;) {
+      if ($appLockPinStatus === "ready" && ((!$appLockConfigured && !$settings.lockEnabled) || $appUnlocked)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+
   onMount(() => {
+    // Main-window geometry first (fire-and-forget, never blocks boot):
+    // fresh installs open at ~80% of the work area instead of overlapping
+    // the taskbar, and returning users get their own size/position back.
+    void restoreMainWindow();
     checkMobile();
     window.addEventListener('resize', checkMobile);
     window.visualViewport?.addEventListener('resize', checkMobile);
@@ -417,24 +503,46 @@ import { applyAppearance } from "$lib/appearance";
     }, 20000);
     (async () => {
     try {
+      if (!isBrowserPreview()) {
+        const [appLockListener, appLockRequest] = await Promise.all([
+          bootStep("app-lock-unlock", 8000, () => listen<{ requestId: string; pin: string }>("app-lock-unlock-request", async (event) => {
+            const requestId = event.payload?.requestId;
+            const pin = event.payload?.pin;
+            if (typeof requestId !== "string" || typeof pin !== "string") return;
+            let verified = false;
+            try {
+              verified = await verifyPin(pin);
+              if (verified) markAppUnlocked();
+            } catch {
+              verified = false;
+            }
+            await emitTo("widget", "app-lock-unlock-result", {
+              requestId,
+              verified,
+              retry_after_ms: pinLockoutRemaining(),
+            }).catch(() => {});
+          })),
+          bootStep("app-lock-request", 8000, () => listen("app-lock-request", () => {
+            void emit("app-lock-state", $appUnlocked).catch(() => {});
+          })),
+        ]);
+        disposeAppLockListener = appLockListener;
+        disposeAppLockRequest = appLockRequest;
+      }
+      await waitForAppAccess();
       // File watching only exists under the Tauri shell; the browser
       // preview persists to localStorage instead.
       if (!isBrowserPreview()) {
-        // Independent subscriptions boot concurrently: one slow IPC must
-        // not serialize the rest (previously sequential awaits).
         const [bridge, nativeFile] = await Promise.all([
           bootStep("widget-bridge", 8000, () => initializeMainWindowBridge()),
           bootStep("native-file-listener", 8000, () => listenForNativeFileOpen()),
           bootStep("file-watcher", 8000, () => api.setupFileWatcher()),
           bootStep("file-changed-listener", 8000, () => listen<string>("file-changed", (event) => {
             const changedPath = event.payload;
-            // If the changed file matches the current doc, show conflict banner
             if ($currentDoc && changedPath.includes($currentDoc.id)) {
               showConflict($currentDoc.id, changedPath, new Date().toISOString());
             }
           })),
-          // System-tray "Quick capture to Inbox" (§4.8): surface the window
-          // on the inbox and focus its capture box.
           bootStep("tray-capture-listener", 8000, () => listen("tray-capture", () => {
             $showSettings = false;
             $currentWorkspace = "inbox";
@@ -546,8 +654,10 @@ import { applyAppearance } from "$lib/appearance";
       window.removeEventListener('mousemove', handleMouseNearTop);
       window.removeEventListener('replay-onboarding', replayOnboarding);
        if (typingIdleTimer) clearTimeout(typingIdleTimer);
-       disposeNativeFileListener?.();
-       disposeWidgetBridge?.();
+        disposeNativeFileListener?.();
+        disposeAppLockListener?.();
+        disposeAppLockRequest?.();
+        disposeWidgetBridge?.();
 
     };
   });
@@ -561,7 +671,48 @@ import { applyAppearance } from "$lib/appearance";
   });
 </script>
 
-{#if ready}
+{#if $appLockPinStatus === "loading"}
+  <div class="empty-state">
+    <BootLoader />
+  </div>
+{:else if appLockUnavailable}
+  <div class="app-lock-unavailable" role="alert">
+    <h1>PIN storage unavailable</h1>
+    <p>Just Write ehis could not read the app-lock secret store. The shell stayed closed to protect your documents.</p>
+    <div class="app-lock-actions">
+      <button class="app-lock-btn" onclick={() => location.reload()}>Retry</button>
+      <button class="app-lock-btn" onclick={() => void recoverLockConfiguration()}>Reset lock configuration</button>
+    </div>
+  </div>
+{:else if appLockGate}
+  <div class="app-lock-overlay" role="dialog" aria-label="App locked" aria-modal="true">
+    <div class="app-lock-card">
+      <div class="app-lock-title">Just Write ehis is locked</div>
+      <p class="app-lock-sub">Enter the app PIN configured in Settings → Privacy & Security.</p>
+      <div class="app-lock-row">
+        <input
+          type="password"
+          bind:value={appPinInput}
+          placeholder="Enter PIN"
+          aria-label="App lock PIN"
+          autocomplete="current-password"
+          disabled={appPinBusy || appPinWaitSeconds > 0}
+          onkeydown={(e) => { if (e.key === "Enter") unlockApp(); }}
+        />
+        <button class="app-lock-btn" onclick={unlockApp} disabled={appPinBusy || appPinWaitSeconds > 0}>
+          {appPinBusy ? "…" : appPinWaitSeconds > 0 ? `Wait ${appPinWaitSeconds}s` : "Unlock"}
+        </button>
+      </div>
+      {#if appPinError}
+        <p class="app-lock-error">{appPinError}</p>
+      {/if}
+    </div>
+  </div>
+{:else if !ready}
+  <div class="empty-state">
+    <BootLoader />
+  </div>
+{:else}
   <div
     class="app-shell"
     class:with-ai-panel={$aiPanelOpen && !isMobile}
@@ -579,6 +730,14 @@ import { applyAppearance } from "$lib/appearance";
     <Sidebar class={isMobile ? (sidebarVisible ? 'open' : '') : ''} />
 
     <div class="main-area">
+      {#if !$sidebarOpen && ($showSettings || $zenMode) && !isMobile}
+        <button
+          class="sidebar-show-fab"
+          onclick={() => ($sidebarOpen = true)}
+          title="Show sidebar (Ctrl+B)"
+          aria-label="Show sidebar"
+        >☰</button>
+      {/if}
       {#if !$showSettings}
         <TabBar />
         {#if !isMobile}
@@ -662,22 +821,19 @@ import { applyAppearance } from "$lib/appearance";
       <StatusBar />
     {/if}
   </div>
-{:else}
-  <div class="empty-state">
-    <BootLoader />
-  </div>
 {/if}
 
-<Banner />
-<Toast />
-{#if isMobile}
-  <BottomBar />
+{#if ready && $appLockPinStatus === "ready" && !appLockGate}
+  <Banner />
+  <Toast />
+  {#if isMobile}
+    <BottomBar />
+  {/if}
+  <HelpOverlay />
+  {#if showOnboarding}
+    <OnboardingOverlay onComplete={() => { showOnboarding = false; }} />
+  {/if}
 {/if}
-<HelpOverlay />
-{#if showOnboarding}
-  <OnboardingOverlay onComplete={() => { showOnboarding = false; }} />
-{/if}
-
 <style>
   .sidebar-overlay {
     display: none;
@@ -718,6 +874,88 @@ import { applyAppearance } from "$lib/appearance";
     color: var(--text-secondary);
     background: var(--surface-overlay);
     border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .app-lock-unavailable {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+  .app-lock-unavailable h1,
+  .app-lock-unavailable p {
+    margin: 0;
+  }
+  .app-lock-unavailable p {
+    max-width: 420px;
+    color: var(--text-muted);
+  }
+  .app-lock-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+  }
+  .app-lock-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg-primary);
+  }
+  .app-lock-card {
+    width: min(380px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 24px;
+    text-align: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+  }
+  .app-lock-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .app-lock-sub {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .app-lock-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .app-lock-row input {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
+    text-align: center;
+  }
+  .app-lock-btn {
+    height: 36px;
+    padding: 0 18px;
+    border-radius: var(--radius-md);
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+    font-size: 13px;
+  }
+  .app-lock-error {
+    margin: 0;
+    font-size: 12px;
+    color: var(--error);
   }
 
 </style>

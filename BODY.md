@@ -29,12 +29,14 @@
 | TabBar | `src/lib/components/TabBar.svelte` | Tab strip: open docs per workspace |
 | BreadcrumbBar | `src/lib/components/BreadcrumbBar.svelte` | Doc path breadcrumb |
 | StatusBar | `src/lib/components/StatusBar.svelte` | Bottom strip: word count, save state, workspace |
+
+Brand assets: `public/logo.svg` and `public/logo-light.svg` feed generated PNG/ICO/ICNS assets used by Sidebar, Home, boot, onboarding, favicon, manifest, and the Tauri bundle.
 | EditorPane | `src/lib/components/EditorPane.svelte` | CodeMirror 6 editor with dark theme |
 | LogsWorkspace | `src/lib/components/LogsWorkspace.svelte` | Calendar strip, day list, quick capture, daily notes |
 | JustWriteWorkspace | `src/lib/components/JustWriteWorkspace.svelte` | Typewriter mode, focus dimming, session timer |
 | NodeMapWorkspace | `src/lib/components/NodeMapWorkspace.svelte` | Canvas graph: d3-force layout, node inspector, overlays, filters |
 | AiPanel | `src/lib/components/AiPanel.svelte` | Right dock: Chat/Composer/Ghost modes |
-| SettingsPane | `src/lib/components/SettingsPane.svelte` | 9-category settings: general, editor, AI, privacy, vaults, sync, capture, keybindings, about |
+| SettingsPane | `src/lib/components/SettingsPane.svelte` | 12-category settings: general, editor, AI, tips, craft, stats, privacy, vaults, capture, keybindings, support, about |
 | EmptyState | `src/lib/components/EmptyState.svelte` | Per-workspace empty state with hints |
 
 ## Organs
@@ -61,22 +63,23 @@
 | BrowserBackend | muscle | frontend | `src/lib/browserBackend.ts` | api.ts safeInvoke fallback | ✅ wired |
 | Icon | skin | ui | `src/lib/components/Icon.svelte` | all components (single icon source) | ✅ wired |
 | Updates | muscle | frontend | `src/lib/updates.ts` | SettingsPane About + App startup check | ✅ wired |
-| Update status cmd | muscle | engine | `commands.rs::app_update_status` | api.ts → SettingsPane | ✅ wired (not compiled — see BUILD_CHECKLIST) |
+| Update status cmd | muscle | engine | `src-tauri/src/commands.rs` | api.ts → SettingsPane (`app_update_status`) | ✅ wired (not compiled — see BUILD_CHECKLIST) |
 | Convert engine | bone | engine | `src-tauri/src/convert.rs` | commands convert/compile/status | ✅ wired (not compiled — see BUILD_CHECKLIST) |
 | Download helper | tendon | frontend | `src/lib/download.ts` | EditorPane + NovelWorkspace | ✅ wired |
 | Book parser | bone | frontend | `src/lib/bookparse.ts` | ReaderWorkspace (lazy import) | ✅ wired |
 | Provider test | tendon | frontend | `src/lib/providerTest.ts` | SettingsPane AI slot buttons | ✅ wired |
-| Harness memory | muscle | engine+ui | `sidecars/harness/*` + `memory_server.py`, `sidecar.rs` MemoryManager, `harness.ts`, AiPanel gates, Privacy UI | ✅ wired (not compiled — see BUILD_CHECKLIST) |
-| Story Memory schema | bone | engine | `src-tauri/src/database.rs` + `models.rs` | `bible_mentions` + `bible_suggestions` migration | ✅ wired |
-| Story Memory extraction | muscle | engine | `src-tauri/src/commands.rs` + `src/lib/storyMemory.ts` | `LlmManager` local-only command + debounced save queue | ✅ wired |
-| Story Memory lookup | muscle | frontend | `src/lib/storyMemoryEditor.ts` + `EditorPane.svelte` + `JustWriteWorkspace.svelte` | CodeMirror fact-key decorations + hover card | ✅ wired |
-| Story Memory review UI | skin | ui | `src/lib/components/NovelWorkspace.svelte` + `StoryMemoryHoverCard.svelte` | Bible appearances, suggestions, contradictions, scene jumps | ✅ wired |
+| Harness memory | muscle | engine+ui | `src/lib/memorySidecar.ts` | memory_server.py + sidecar.rs MemoryManager + AiPanel gates + Privacy UI | ✅ wired (not compiled — see BUILD_CHECKLIST) |
+| Story Memory schema | bone | engine | `src-tauri/src/database.rs` | `bible_mentions` + `bible_suggestions` migration in models.rs | ✅ wired |
+| Story Memory extraction | muscle | engine | `src/lib/storyMemory.ts` | commands.rs `LlmManager` local-only extraction + debounced save queue | ✅ wired |
+| Story Memory lookup | muscle | frontend | `src/lib/storyMemoryEditor.ts` | EditorPane + JustWriteWorkspace CodeMirror decorations and hover card | ✅ wired |
+| Story Memory review UI | skin | ui | `src/lib/components/NovelWorkspace.svelte` | StoryMemoryHoverCard: appearances, suggestions, contradictions, scene jumps | ✅ wired |
 | Place stamp | tendon | frontend | `src/lib/stamp.ts` | LogsWorkspace (opt-in daily stamp) | ✅ wired |
-| Lock store | tendon | frontend | `src/lib/stores/lock.ts` | TabBar, App gate, AiPanel, EditorPane | ✅ wired |
+| Lock store + app gate | tendon | frontend | `src/lib/stores/lock.ts` | SettingsPane keychain setup → App session gate → TabBar/LockScreen/AiPanel/EditorPane | ✅ wired (source-tested; native gate build pending) |
+| Native sidecar packager | tendon | build | `src-tauri/sidecars/build_sidecars.py` | `package.json` → `tauri.windows.conf.json` → `sidecar.rs` native-first launchers | ✅ wired (not built by user instruction) |
+| Window state | muscle | frontend | `src/lib/windowState.ts` | App startup → main-window geometry | ✅ wired (source-tested) |
 | Last-place store | tendon | frontend | `src/lib/stores/lastPlace.ts` | App workspace-restore effect | ✅ wired |
 | LockScreen | skin | ui | `src/lib/components/LockScreen.svelte` | App content-pane overlay | ✅ wired |
 | CanvasWorkspace | skin | ui | `src/lib/components/CanvasWorkspace.svelte` | App.svelte (canvas route) | ✅ wired |
-| Brand mark | asset | ui | `public/logo.svg` (black) + `public/logo-light.svg` (white) + generated PNG/ICO/ICNS | Sidebar, Home nav, boot, onboarding, favicon, manifest, Tauri bundle | ✅ wired |
 | App stores | bone | frontend | `src/lib/stores/app.ts` | all components | ✅ wired |
 | Settings store | bone | frontend | `src/lib/stores/settings.ts` | SettingsPane | ✅ wired |
 | WriteBack store | tendon | frontend | `src/lib/stores/writeBack.ts` | AiPanel → EditorPane | ✅ wired |
@@ -91,13 +94,14 @@
 | JustWriteWorkspace | skin | ui | `src/lib/components/JustWriteWorkspace.svelte` | App.svelte | ✅ wired |
 | NodeMapWorkspace | skin | ui | `src/lib/components/NodeMapWorkspace.svelte` | App.svelte | ✅ wired |
 | AiPanel | skin | ui | `src/lib/components/AiPanel.svelte` | App.svelte | ✅ wired |
+| SupportPane | skin | ui | `src/lib/components/SupportPane.svelte` | SettingsPane support category | ✅ wired |
 | SettingsPane | skin | ui | `src/lib/components/SettingsPane.svelte` | App.svelte | ✅ wired |
 | EmptyState | skin | ui | `src/lib/components/EmptyState.svelte` | App.svelte | ✅ wired |
 | LazyWorkspace | skin | ui | `src/lib/components/LazyWorkspace.svelte` | App.svelte (map/canvas/novel/script/projects/reader/properties) + SettingsPane (skills/craft/stats) | ✅ wired |
 | QuickCaptureOverlay | skin | ui | `src/lib/components/QuickCaptureOverlay.svelte` | App.svelte + StatusBar (Ctrl+Shift+F) | ✅ wired |
 | DockSplit | skin | ui | `src/lib/components/DockSplit.svelte` | Novel/Inbox/Projects/Canvas (vertical) + Reader notes (horizontal) — persisted drag dividers | ✅ wired |
 | Split target store | tendon | frontend | `src/lib/stores/split.ts` | JustWriteWorkspace → AiPanel (Main/Split write-back) | ✅ wired |
-| Settings sections | skin | ui | `SettingsPane` embeds `SkillsPage`/`CraftPage`/`UsageMemory` | `src/lib/stores/settings.ts::settingsCategory` + CommandPalette/Home deep-links | ✅ wired (moved out of sidebar 2026-09-19) |
+| Settings sections | skin | ui | `src/lib/components/SettingsPane.svelte` | embeds SkillsPage/CraftPage/UsageMemory via settings.ts settingsCategory + CommandPalette/Home deep-links | ✅ wired (moved out of sidebar 2026-09-19) |
 
 ---
 

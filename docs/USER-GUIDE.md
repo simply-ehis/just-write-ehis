@@ -3,8 +3,8 @@ OWNS: feature tour, shortcuts, privacy model in plain language
 READ-WHEN: onboarding copy changes; answering "where is X / how do I Y"
 KEY-FILES: HelpOverlay (? shortcut sheet), SettingsPane (every toggle lives here)
 INVARIANTS: every setting stated here must exist in Settings; no documented feature may be a stub
-GOTCHAS: browser preview stores in localStorage; desktop stores files+SQLite — same UI, different persistence
-UPDATED: 2026-09-24
+GOTCHAS: browser preview stores in localStorage; desktop stores files+SQLite — same UI, different persistence; app PIN is a session gate, not encryption
+UPDATED: 2026-09-25
 
 # User guide
 
@@ -40,11 +40,15 @@ autocomplete; auto-suppressed for private workspaces).
 
 - **Per-workspace local-only** (Settings → Privacy): Logs is local-only by
   default. Blocked calls refuse loudly, including Ghost.
-- **Per-doc lock** (right-click a tab → Lock; needs a PIN from Settings):
-  locked content is excluded from search, AI, stats, and smart tabs, and
-  the pane PIN-gates. Titles stay visible in lists so docs stay manageable.
-  Unlocks last for the session only. Files on disk stay plaintext —
-  lock is a gate, not encryption.
+- **App & document lock** (Settings → Privacy): locking starts off and cannot
+  be enabled until you create and confirm a PIN. On desktop the PIN is kept in
+  the OS keychain; in browser preview it lasts only for the current tab
+  session. Once enabled, launch shows an app-wide PIN gate. **Lock app now**
+  tests it without restarting; repeated wrong guesses trigger a growing wait.
+- **Per-doc lock** (right-click a tab → Lock): locked content is excluded from
+  search, AI, stats, and smart tabs, and the pane PIN-gates. Titles stay
+  visible in lists so docs stay manageable. Unlocks last for the session only.
+  Files on disk stay plaintext — both locks are gates, not encryption.
 - **AI memory** (Settings → Privacy): opt-in cross-session facts recalled
   into chats; opt-in secret scrubbing that blocks the call (never silently
   passes) when the sidecar is missing. Wipe anytime via Clear History.

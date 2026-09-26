@@ -10,22 +10,30 @@
   let wordCount = $derived($currentDoc?.word_count ?? 0);
   let stats = $state<{ totalDocs: number; totalWords: number; totalBacklinks: number } | null>(null);
   let streak = $state<[number, number] | null>(null);
+  let todayWords = $state(0);
   let rhythm = $state<[number, number][]>([]);
 
   async function loadStats() {
     try {
-      const [docs, words, backlinks] = await api.docGetStats();
+      const [docStats, streakResult, rhythmResult, heatmap] = await Promise.all([
+        api.docGetStats(),
+        api.memoryGetStreak(),
+        api.dashboardTodayRhythm(),
+        api.dashboardStreakHeatmap(),
+      ]);
+      const [docs, words, backlinks] = docStats;
       stats = { totalDocs: docs, totalWords: words, totalBacklinks: backlinks };
-      streak = await api.memoryGetStreak();
-      rhythm = await api.dashboardTodayRhythm();
+      streak = streakResult;
+      rhythm = rhythmResult;
+      const today = new Date().toISOString().slice(0, 10);
+      todayWords = heatmap.find((day) => day.date === today)?.words ?? 0;
     } catch (e) {
       warnOnce("Status bar stats", e);
     }
   }
 
   $effect(() => {
-    // Refresh stats (and today's rhythm) as the open doc changes.
-    void $currentDoc?.id;
+    void [$currentDoc?.id, $currentDoc?.word_count, $saveState];
     loadStats();
   });
 
@@ -75,6 +83,12 @@
           <path d={sparkPath} fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
         </svg>
       {/if}
+    </div>
+  {/if}
+  {#if $settings.streakGoal > 0}
+    <div class="item streak" title="Words written today against your daily goal">
+      <Icon name="chart" size={12} />
+      <span>{todayWords.toLocaleString()} / {$settings.streakGoal.toLocaleString()} today</span>
     </div>
   {/if}
   {#if stats}

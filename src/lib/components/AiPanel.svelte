@@ -15,6 +15,7 @@
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
+  import { ensureLlm, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
   import Icon from "$lib/components/Icon.svelte";
 
   /**
@@ -95,37 +96,45 @@
     return { prompt: nextPrompt, system: nextSystem, notices };
   }
 
-  async function toggleSidecar() {
-    // The small local model only exists in the desktop app — never fake
-    // the green "running" dot on the web.
-    if (isBrowserPreview()) {
-      showToast("Small local model needs the desktop app — point the small slot at an HTTP endpoint instead", "warning");
-      return;
-    }
-    if (sidecarRunning) {
-      await api.sidecarStop();
-      sidecarRunning = false;
-      return;
-    }
-    const harnessDir = $settings.sidecarHarnessDir.trim();
-    if (!harnessDir) {
-      showToast("Set the harness directory in Settings → AI & Providers first", "warning");
-      return;
-    }
+  async function toggleBundledLlm() {
+    if (llmToggleBusy) return;
+    llmToggleBusy = true;
     try {
-      await api.sidecarStart($settings.pythonPath || "python", harnessDir);
-      sidecarRunning = true;
-    } catch (e) {
-      showToast(`Sidecar failed to start: ${e instanceof Error ? e.message : e}`, "error");
+      if (isBrowserPreview()) {
+        showToast("The bundled LLM is desktop-only — configure an HTTP endpoint for the web build", "warning");
+        return;
+      }
+      if ($llmRunning) {
+        await stopLlm();
+        showToast("Bundled LLM stopped", "info");
+        return;
+      }
+      const ready = await ensureLlm();
+      showToast(
+        ready ? "Bundled LLM ready" : $llmError || "Bundled LLM failed to start",
+        ready ? "success" : "error",
+      );
+    } finally {
+      llmToggleBusy = false;
     }
   }
 
 let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let blankMode = $state(false);
   let minimized = $state(false);
 
-  // Initialize blankMode from settings
+  // Follow the Settings default only when the default itself changes — a
+  // blanket sync here used to clobber the session toggle on every unrelated
+  // settings write (e.g. changing font size reset blank mode).
+  let lastBlankDefault = $state<boolean | null>(null);
   $effect(() => {
-    blankMode = $settings.blankModeDefault;
+    const d = $settings.blankModeDefault;
+    if (lastBlankDefault === null) {
+      lastBlankDefault = d;
+      blankMode = d;
+    } else if (d !== lastBlankDefault) {
+      lastBlankDefault = d;
+      blankMode = d;
+    }
   });
 
   // Persist blankMode toggle to settings
@@ -166,8 +175,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   let generating = $state(false);
   let composerPrompt = $state("");
   let composerOutput = $state("");
-  let sidecarRunning = $state(false);
-  let sidecarConfidence = $state<number | null>(null);
+  let llmToggleBusy = $state(false);
   let abortController = $state<AbortController | null>(null);
   let lastSendTime = $state(0);
   let lastUserMessage = $state("");
@@ -218,16 +226,24 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   async function probeGhostSlot() {
     if (ghostProbe.running) return;
     ghostProbe = { running: true, text: "" };
+    const startedAt = Date.now();
     try {
-      const r = await testProvider($settings.smallModelEndpoint, $settings.smallModelName);
+      if (!isBrowserPreview() && $settings.llmEnabled) {
+        if (!(await ensureLlm())) throw new Error($llmError || "Bundled LLM failed to start");
+        const text = (await api.llmCompletion("Reply with exactly: READY", 8, 0)).trim();
+        if (!text) throw new Error("Bundled LLM returned no text");
+        ghostProbe = { running: false, text: `${Date.now() - startedAt}ms · ${text}` };
+        return;
+      }
+      const result = await testProvider($settings.smallModelEndpoint, $settings.smallModelName);
       ghostProbe = {
         running: false,
-        text: r.ok
-          ? `${r.latencyMs}ms · model ${r.modelFound ? "found" : "not found"} (${r.models.slice(0, 3).join(", ") || "no models listed"})`
-          : `Unreachable: ${r.error}`,
+        text: result.ok
+          ? `${result.latencyMs}ms · model ${result.modelFound ? "found" : "not found"} (${result.models.slice(0, 3).join(", ") || "no models listed"})`
+          : `Unreachable: ${result.error}`,
       };
-    } catch (e) {
-      ghostProbe = { running: false, text: `Unreachable: ${e instanceof Error ? e.message : e}` };
+    } catch (error) {
+      ghostProbe = { running: false, text: `Unavailable: ${error instanceof Error ? error.message : error}` };
     }
   }
 
@@ -316,10 +332,12 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   }
 
   onMount(async () => {
-    try {
-      sidecarRunning = await api.sidecarIsRunning();
-    } catch (e) {
-      console.warn("Sidecar status check failed:", e);
+    if (!isBrowserPreview()) {
+      try {
+        llmRunning.set(await api.llmIsRunning());
+      } catch (error) {
+        warnOnce("Bundled LLM status", error);
+      }
     }
     // Surface a dead endpoint the moment the panel opens — not mid-sentence.
     try {
@@ -681,9 +699,15 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           <Icon name="plus" size={15} />
         </button>
       {/if}
-      <button class="sidecar-toggle" class:active={sidecarRunning} onclick={toggleSidecar} title={sidecarRunning ? "Small model running" : "Start small model"}>
-        <span class="sidecar-dot" class:running={sidecarRunning}></span>
-        <span>Small Model</span>
+      <button
+        class="sidecar-toggle"
+        class:active={$llmRunning}
+        onclick={toggleBundledLlm}
+        disabled={llmToggleBusy || !!$llmStarting}
+        title={$llmRunning ? "Bundled LLM running — click to stop" : "Start bundled LLM"}
+      >
+        <span class="sidecar-dot" class:running={$llmRunning}></span>
+        <span>{$llmStarting || "Bundled LLM"}</span>
       </button>
       <button class="toggle-blank" class:active={blankMode} onclick={toggleBlank}>
         {blankMode ? "Blank" : "Context"}

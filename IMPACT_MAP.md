@@ -38,13 +38,13 @@
 | AI structurize | `models.rs` (StructurizeRequest/Response), `commands.rs` (ai_structurize), `lib.rs` (registration), `api.ts` (method), `AiPanel.svelte` (Structurize tab + directive highlighting + review) | Medium |
 | Performance diagnostics | `doc_store.rs` (perf_benchmark), `commands.rs` (perf_benchmark), `lib.rs` (registration), `api.ts` (method), `SettingsPane.svelte` (About panel with §14 budget metrics) | Low |
 | Browser preview backend | `browserStore.ts` (localStorage docs/snaps/tabs/conv/bible), `browserBackend.ts` (all Tauri commands), `api.ts` (safeInvoke + isBrowserPreview), `App.svelte` (preview banner, Tauri-only watcher guard) | Medium |
-| Unified icon system | `Icon.svelte` (41 hand-authored stroke icons), Sidebar/BottomBar/TabBar/AiPanel/EditorPane/NodeMap/Inbox/Properties/FileBrowser/Home/Status/Settings/Palette/Empty/Onboarding/Projects/VersionHistory/JustWrite | Low |
+| Unified icon system | `Icon.svelte` (53 hand-authored stroke icons), Sidebar/BottomBar/TabBar/AiPanel/EditorPane/NodeMap/Inbox/Properties/FileBrowser/Home/Status/Settings/Palette/Empty/Onboarding/Projects/VersionHistory/JustWrite | Low |
 | Inbox multi-select triage | `InboxWorkspace.svelte` (select-all, bulk move/delete bar) | Low |
 | Conflict diff view | `ConflictBanner.svelte` (local vs latest-snapshot line diff modal) | Low |
 | Feature self-test + e2e | `SettingsPane.svelte` (Run Feature Self-Test), `tests/e2e-browser.mjs`, `package.json` (check, test:e2e scripts) | Low |
 | In-app updates (Tauri updater) | `Cargo.toml` (+updater/+process), `lib.rs` (plugin init + command), `tauri.conf.json` (updater cfg, artifacts, bundle on), `capabilities/default.json` (core/updater/process), `updates.ts`, `SettingsPane.svelte` (About → App Updates), `App.svelte` (startup check), `settings.ts` (autoCheckUpdates), `docs/UPDATES.md` | Medium |
 | Manuscript export pipeline | `convert.rs` (md/txt/html built in, docx/epub/pdf via pandoc), `commands.rs` (convert_run/compile_run/convert_status), `Cargo.toml` (+pulldown-cmark/+base64), `browserBackend.ts` (TS mirror), `api.ts`, `download.ts`, `EditorPane.svelte` (format menu from live status), `NovelWorkspace.svelte` (compile format + download), `docs/EXPORT.md` | Medium |
-| Per-doc lock + AI/stats exclusion | `database.rs` (locked col migration), `models.rs` (Doc.locked), `doc_store.rs` (14 selects + 11 mappings, set_locked, filters in search/RAG/context/dashboards/smart-tabs), `commands.rs` + `lib.rs` (doc_set_locked), `lock.ts`, `LockScreen.svelte`, `App.svelte` (pane gate), `TabBar.svelte` (menu + badge), `AiPanel`/`EditorPane` (AI gates), `InboxWorkspace` (preview redaction), browser mirror | High |
+| App lock + per-doc lock + AI/stats exclusion | `settings.ts` (lock default-off + keychain hydration), `lock.ts` (confirmed PIN setup/removal, shared retry/recovery), `SettingsPane.svelte` (master switch + setup/confirmation + remove/lock-now), `App.svelte` (whole-app gate + pre-access event bridge), `WidgetApp.svelte` (narrow lock verification/expanded recovery), `database.rs`/`models.rs`/`doc_store.rs`/`commands.rs` (locked persistence, shared PinLockout, keychain verification, backend exclusion), `LockScreen.svelte`, `TabBar.svelte`, `AiPanel`/`EditorPane`, `InboxWorkspace`, browser secret mirror; `tests/settings-validate.mjs` | High |
 | Craft metrics repair + skill nudge | `database.rs` (craft_metrics schema rebuild), `models.rs` (CraftMetric fix), `EditorPane`/`JustWriteWorkspace` (filter-word + write-heartbeat recording), `browserBackend` (metric store), `SkillNudges.svelte` (once-ever creep warning) | Medium |
 | Beat order = compile order | `doc_store.rs` (frontmatter `order` sort in beat board), `NovelWorkspace.svelte` (project picker — projectId was never assigned, Studio was dead — + scene/act drag-reorder persisted via frontmatter) | Medium |
 | Home pinned + last place + sparkline | `doc_store.rs`/`commands.rs` (doc_list_pinned, today_rhythm), `HomePane.svelte` (Pinned section), `lastPlace.ts` + `App.svelte` (per-workspace restore), `StatusBar.svelte` (SVG sparkline), browser mirror | Low |
@@ -54,9 +54,12 @@
 | Theme repair + light mode | `main.ts` (stylesheet import restored), `app.css` (missing 20+ vars defined + light palette), `App.svelte` + `index.html` (data-theme), logo variant switching | Medium |
 | E-reader | `bookparse.ts` (epub/jszip, docx/OOXML, pdf/pdf.js lazy chunk), `ReaderWorkspace.svelte` (parse-on-import), `tests/fixtures/*` + `make-fixtures.py`, `package.json` (+jszip/+pdfjs-dist) | Medium |
 | Dictionary + place stamp | `autocorrect.ts` (language gate), `settings.ts` + `SettingsPane.svelte` (selector), `stamp.ts` + `LogsWorkspace.svelte` (opt-in Nominatim/Open-Meteo stamp) | Low |
-| Model slots + voice models | `AiPanel.svelte` (chat/composer/structurize → main slot), `providerTest.ts` + Settings test buttons, `settings.ts` + audio store (sttModel/ttsModel), `sidecar.rs` + `commands.rs` + `api.ts` (model argv), both `.py` sidecars (argv overrides), `docs/MODELS.md` picks | Medium |
-| AI memory harness (vendored) | `sidecars/harness/*` (MIT, attributed) + `memory_server.py`, `sidecar.rs` MemoryManager, `commands.rs` + `lib.rs` (8 commands), `api.ts`, `harness.ts`, `AiPanel.svelte` (recall/scrub/learn), `SettingsPane.svelte` (Privacy UI + wipe), `docs/HARNESS.md` | Medium |
-| Companion widget | `tauri.conf.json` (transparent 56px figure, runtime resize/dock), `capabilities/*.json` (window + autostart ACL), `Cargo.toml`/`Cargo.lock` + npm autostart plugin, `main.ts` (static App import, lazy WidgetApp), `WidgetApp.svelte`, `LazyWorkspace.svelte`, all canonical workspace components, `LibraryWorkspace.svelte` (Files deep-link), `widgetBridge.ts`, `App.svelte`, `SettingsPane.svelte`, `settings.ts` + `settingsValidate.ts`, `lib.rs`, `docs/WIDGET.md` | High |
+| Model slots + voice models | `AiPanel.svelte` (real bundled-LLM toggle + ghost completion), `SettingsPane.svelte` (Test STT/TTS/LLM), `settings.ts` + `stores/audio.ts` (health/readiness/errors/model fields), `sidecar.rs` (resource/native-runtime resolution, verified orphan cleanup, model health), `commands.rs`/`api.ts` (trusted PATH interpreter fallback), `stt_server.py`/`tts_server.py`, `build_sidecars.py` + `tauri.windows.conf.json` (Windows PyInstaller runtime bundle), `tests/ensure-poll.mjs`/`tests/sidecar-validate.mjs`/`tests/sidecar-resolve.py`, `docs/MODELS.md` | High |
+| Settings truth + appearance propagation | `index.html` (first-paint typography), `appearance.ts`, `editorTheme.ts`, `SettingsPane.svelte`, `EditorPane.svelte`, `JustWriteWorkspace.svelte`, `ScriptWorkspace.svelte`, `settingsValidate.ts`, bundled `@fontsource` packages, `StatusBar.svelte`, `write-probe.mjs`/`tabs-functional.mjs`/`settings-validate.mjs` | Medium |
+| Native Python sidecar packaging | `package.json` (`build:sidecars`), `src-tauri/tauri.windows.conf.json` (Windows before-build + resources), `sidecars/build_sidecars.py`, `sidecars/{stt,tts,memory}_server.py` (`JWE_SIDECARS_DIR`), `sidecar.rs` (native-first/fallback), `src-tauri/sidecars/bin/*` (generated, ignored), `docs/MODELS.md`, `docs/TESTING.md` | High |
+| AI memory harness (vendored) | `sidecars/harness/*` (MIT, attributed) + `memory_server.py` (per-launch loopback token), `sidecar.rs` MemoryManager, `commands.rs` + `lib.rs` (8 commands), `api.ts`, `memorySidecar.ts`, `AiPanel.svelte` (recall/scrub/learn), `SettingsPane.svelte` (Privacy UI + wipe), `docs/HARNESS.md` | Medium |
+| Support & diagnostics | `src/lib/components/SupportPane.svelte`, `src/lib/support.ts`, `SettingsPane.svelte` support category, `tests/support-unit.mjs` | Low |
+| Companion widget | `tauri.conf.json` (transparent 56px figure, runtime resize/dock), `capabilities/*.json` (window + autostart ACL), `Cargo.toml`/`Cargo.lock` + npm autostart plugin, `main.ts` (static App import, lazy WidgetApp), `WidgetApp.svelte`, `LazyWorkspace.svelte`, all canonical workspace components, `LibraryWorkspace.svelte` (Files deep-link), `widgetBridge.ts` (main-authoritative unlock + handoff ack), `App.svelte`, `SettingsPane.svelte`, `settings.ts` + `settingsValidate.ts`, `lib.rs` (widget doc commands), `docs/WIDGET.md` | High |
 | Mobile shell (Area 15) | `index.html` (viewport-fit=cover, theme-color), `app.css` (44px controls, touch reveal, safe-area insets, dialog clamps), `App.svelte` (visualViewport breakpoint, mobile AI/Inspector sheets), `BottomBar.svelte` (Outline entry, insets), `tests/mobile-parity.mjs`, `package.json` (test:mobile), `docs/MOBILE.md` | Low |
 | Windows OS integration | `tauri.windows.conf.json` (NSIS .txt/.md associations), `windows/hooks.nsh` (autostart cleanup), `Cargo.toml`/`Cargo.lock` (Windows-only single-instance/autostart), `src/windows.rs`, `commands.rs` (`open_external_file`, `take_launch_file`, `open_default_apps`), `lib.rs` (single-instance handoff), `api.ts`/`browserBackend.ts`, `nativeLaunch.ts`, `widgetAutostart.ts`, `App.svelte`, `SettingsPane.svelte`, `docs/WINDOWS-INTEGRATION.md` | High |
 | Cross-cutting sweep (Area 16) | `text.ts` (NEW: countWords/formatRelativeTime; EditorPane, JustWrite, RhythmPanel, RhythmHeatmap, Sidebar, Inbox, browserStore), `status.ts` (STATUSES/BOARD_STATUSES; PropertiesView, ProjectsWorkspace), `stores/app.ts` (workspaceIcons single source; dead `workspaceStates` removed), `import.ts` (dead manifest exports), `browserBackend.ts` (memory-only secrets), `stores/lock.ts` + `LockScreen.svelte` + `SettingsPane.svelte` (4-char PIN + lockout), `WikilinkPreview.svelte` (locked gate), `doc_store.rs` (resolve_in_vault confinement, 4 tests), `main.ts`, `capabilities/*.json`, `tests/e2e-browser.mjs` (chunk/capability-aware checks) | High |
@@ -80,6 +83,37 @@ App.svelte
 `main.ts?widget=1` → `WidgetApp.svelte` (dynamic import) → `LazyWorkspace.svelte` (selected canonical workspace),
 `EmptyState.svelte`, normal workspace/settings stores, save state, and main/widget events.
 `main.ts` dynamically imports `App.svelte` and mounts it after the route is selected. The jsdom probes may not resolve Vite's lazy CSS preload in that environment; browser preview and the recorded Playwright flow exercise the real bundle.
+
+Local model flow:
+
+```text
+Settings self-test / mic / read-aloud / AI panel
+  → stores/audio.ts readiness and request state
+  → Tauri commands
+  → sidecar.rs native-first process manager
+  → sidecars/bin/{stt,tts,memory}-server.exe
+  → JWE_SIDECARS_DIR + sidecars/models
+```
+
+```text
+npm run tauri build (Windows)
+  → npm run build
+  → tauri.windows.conf.json beforeBuild
+  → npm run build:sidecars
+  → isolated venv + PyInstaller
+  → ignored sidecars/bin executables
+  → Tauri resources
+```
+
+PIN flow:
+
+```text
+Settings → Privacy → create + confirm PIN
+  → OS keychain via api.secretSet
+  → settings.appLockPin (memory only; excluded from localStorage/export)
+  → App.svelte session gate + per-document LockScreen
+  → growing retry backoff
+```
 
 ---
 

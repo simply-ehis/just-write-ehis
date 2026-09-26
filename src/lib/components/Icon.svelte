@@ -4,7 +4,10 @@
    * Hand-authored 24px stroke icons in the Phosphor regular spirit.
    * Usage: <Icon name="search" size={16} label="Search" />
    * `label` renders <title> for native tooltips + screen readers.
+   * Settings → Icon Set switches the stroke: phosphor (2px, round) vs
+   * tabler (1.5px, square) — previously the setting was stored but never read.
    */
+  import { settings } from "$lib/stores/settings";
   let {
     name,
     size = 16,
@@ -16,6 +19,8 @@
     label?: string;
     class?: string;
   } = $props();
+  let strokeWidth = $derived($settings.iconSet === "tabler" ? 1.5 : 2);
+  let strokeLinecap = $derived($settings.iconSet === "tabler" ? "square" as const : "round" as const);
 
   const paths: Record<string, string> = {
     home: '<path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-6h4v6"/>',
@@ -93,8 +98,8 @@
   viewBox="0 0 24 24"
   fill="none"
   stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
+  stroke-width={strokeWidth}
+  stroke-linecap={strokeLinecap}
   stroke-linejoin="round"
   aria-hidden={label ? undefined : "true"}
   role={label ? "img" : undefined}

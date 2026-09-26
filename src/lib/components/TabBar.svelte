@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentDoc, openTabs, workspaces, currentWorkspace } from "$lib/stores/app";
+  import { currentDoc, openTabs, workspaces, currentWorkspace, sidebarOpen } from "$lib/stores/app";
   import { transferDocsToWorkspace } from "$lib/stores/uiState";
   import { globalLoading } from "$lib/stores/loading";
   import { api } from "$lib/api";
@@ -237,6 +237,16 @@
 
 <div class="tab-bar" role="toolbar" aria-label="Open documents" tabindex="-1" bind:this={tabContainer}>
   <div class="loading-line" class:active={$globalLoading}></div>
+  {#if !$sidebarOpen}
+    <button
+      class="tab-sidebar-btn"
+      onclick={() => ($sidebarOpen = true)}
+      title="Show sidebar (Ctrl+B)"
+      aria-label="Show sidebar"
+    >
+      <Icon name="menu" size={14} />
+    </button>
+  {/if}
   {#each $openTabs as doc (doc.id)}
     {@const isPinned = pinnedIds.has(doc.id)}
     {@const isDraggedOver = dragOverId === doc.id && draggedId !== doc.id}
@@ -481,6 +491,28 @@
   }
 
   .new-tab-btn:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+
+  /* In-flow sidebar reopen: closing the sidebar only collapses its track
+     (the editor takes the width, nothing is covered) and this button —
+     next to the Breadcrumb toggle — always offers the way back. */
+  .tab-sidebar-btn {
+    align-self: center;
+    flex-shrink: 0;
+    margin-left: 4px;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+  }
+
+  .tab-sidebar-btn:hover {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
   }

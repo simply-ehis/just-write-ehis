@@ -3,8 +3,8 @@ OWNS: signing keys, endpoints, latest.json shape, release checklist
 READ-WHEN: enabling updates, cutting a release, debugging update failures
 KEY-FILES: src-tauri/tauri.conf.json (plugins.updater), src/lib/updates.ts, Settings → About → App Updates
 INVARIANTS: signing cannot be disabled; UI reports "not configured" until setup is done; Android uses store tracks
-GOTCHAS: private key via env only (.env files don't work); keep tauri.conf + Cargo versions in sync
-UPDATED: 2026-09-25
+GOTCHAS: private key via env only (.env files don't work); keep tauri.conf + Cargo versions in sync; private repo ⇒ private releases ⇒ updater 404s (see section above)
+UPDATED: 2026-09-26
 
 # UPDATES.md — App self-updates (Tauri updater)
 
@@ -62,6 +62,32 @@ with the site.
 4. Desktop installs pick the update up on next launch (or via
    Settings → About → Check for Updates). On Windows the app exits
    itself to let the installer run.
+
+## Private repo? Read this first (2026-09-25)
+
+GitHub Releases inherit repo visibility: a **private repo means private
+releases**, and the Tauri updater fetches `latest.json` with no auth, so a
+private-repo feed always 404s. Symptoms: Settings → About → Check for
+Updates fails, and the app now reports "updates aren't available for this
+build" instead of a raw fetch error (see `friendlyUpdateError` in
+`src/lib/updates.ts`). The signing key and endpoint config are NOT the
+problem — reachability is.
+
+Options, cheapest first:
+
+1. **Public static host for release artifacts (recommended).** Keep the
+   code repo private; publish `latest.json` + signed installer artifacts
+   to a public static host (Cloudflare Pages/R2 free tier). Point
+   `plugins.updater.endpoints` there. Code stays private, updates work.
+2. **GitHub with auth headers.** Tauri supports custom headers on the
+   updater endpoint, but a token baked into a shipped app is readable by
+   anyone — treat it as public anyway. Only for throwaway internal builds.
+3. **No auto-update.** Leave the feed unpublished; installs update by
+   downloading the new setup exe manually. The app's "not available"
+   state covers this honestly.
+
+Until one of the above is live, every install behaves as "updates
+unavailable" — expected, not broken.
 
 ## Notes & limits
 

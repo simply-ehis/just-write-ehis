@@ -4,7 +4,8 @@
   import { currentMonitor, getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
   import { api, isBrowserPreview } from "$lib/api";
   import { currentDoc, currentWorkspace, openTabs, workspaces, type WorkspaceId } from "$lib/stores/app";
-  import { settings } from "$lib/stores/settings";
+  import { appLockConfigured, appLockPinStatus, settings } from "$lib/stores/settings";
+  import { appUnlocked, markAppUnlocked, pinLockoutRemaining, verifyPin } from "$lib/stores/lock";
   import { saveState } from "$lib/stores/saveState";
   import { showConflict } from "$lib/stores/conflict";
   import { showToast } from "$lib/stores/notifications";
@@ -14,7 +15,7 @@
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import { warnOnce } from "$lib/errors";
-  import { applyAppearance } from "$lib/appearance";
+  import { applyAppearance, applyEditorTypography } from "$lib/appearance";
 
   const COLLAPSED_SIZE = 56;
   const EXPANDED_WIDTH = 520;
@@ -26,6 +27,18 @@
   let widgetVisible = $state(isBrowserPreview());
   let loadedWorkspace = $state<WorkspaceId | "">("");
   let prepareError = $state("");
+  let widgetPin = $state("");
+  let widgetPinError = $state("");
+  let widgetPinBusy = $state(false);
+  let widgetPinWait = $state(0);
+  type UnlockResult = { requestId: string; verified: boolean; retry_after_ms: number; error?: string };
+  let pendingUnlock: { id: string; resolve: (result: UnlockResult) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  let unlockSequence = 0;
+  let widgetLocked = $derived(
+    $appLockPinStatus === "ready" &&
+    ($appLockConfigured || $settings.lockEnabled) &&
+    !$appUnlocked
+  );
   let prepareLoading = $state(false);
   let loadRequest = 0;
   let collapseTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,21 +90,86 @@
   );
 
   $effect(() => {
+    if (!widgetLocked) {
+      widgetPinWait = 0;
+      return;
+    }
+    const updateWait = () => {
+      widgetPinWait = Math.max(0, Math.ceil(pinLockoutRemaining() / 1000));
+    };
+    updateWait();
+    const timer = setInterval(updateWait, 500);
+    return () => clearInterval(timer);
+  });
+
+  $effect(() => {
     applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride);
+    applyEditorTypography($settings.fontFamily, $settings.fontSize, $settings.lineHeight);
   });
 
   $effect(() => {
     const workspace = selectedWorkspace;
-    if (!widgetVisible || workspace === loadedWorkspace) return;
+    if (!widgetVisible || widgetLocked || $appLockPinStatus !== "ready" || workspace === loadedWorkspace) return;
     loadedWorkspace = workspace;
     void prepareWorkspace(workspace);
   });
 
   $effect(() => {
-    if (!isBrowserPreview() && widgetVisible) {
+    if (!isBrowserPreview() && widgetVisible && !widgetLocked) {
       void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
     }
   });
+
+  $effect(() => {
+    if (!isBrowserPreview() && widgetVisible && widgetLocked) {
+      void placeWidget(false, $settings.widgetDockEdge, $settings.widgetDockOffset);
+    }
+  });
+
+  function requestMainUnlock(pin: string): Promise<UnlockResult> {
+    return new Promise((resolve) => {
+      const requestId = `unlock-${++unlockSequence}`;
+      const timer = setTimeout(() => {
+        if (pendingUnlock?.id !== requestId) return;
+        pendingUnlock = null;
+        resolve({ requestId, verified: false, retry_after_ms: 0, error: "Main app did not respond" });
+      }, 5000);
+      pendingUnlock = { id: requestId, resolve, timer };
+      void emitTo("main", "app-lock-unlock-request", { requestId, pin }).catch(() => {
+        if (pendingUnlock?.id !== requestId) return;
+        clearTimeout(timer);
+        pendingUnlock = null;
+        resolve({ requestId, verified: false, retry_after_ms: 0, error: "Main app is unavailable" });
+      });
+    });
+  }
+
+  async function unlockWidget() {
+    if (widgetPinBusy || widgetPinWait > 0) return;
+    widgetPinBusy = true;
+    widgetPinError = "";
+    try {
+      const result: UnlockResult = isBrowserPreview()
+        ? { requestId: "browser", verified: await verifyPin(widgetPin), retry_after_ms: pinLockoutRemaining() }
+        : await requestMainUnlock(widgetPin);
+      if (result.verified) {
+        markAppUnlocked();
+        widgetPin = "";
+      } else {
+        widgetPinWait = Math.max(1, Math.ceil(result.retry_after_ms / 1000));
+        widgetPinError = result.error
+          ? result.error
+          : widgetPinWait > 0
+            ? `Wrong PIN. Try again in ${widgetPinWait}s.`
+            : "Wrong PIN. Try again.";
+        widgetPin = "";
+      }
+    } catch (error) {
+      widgetPinError = error instanceof Error ? error.message : String(error);
+    } finally {
+      widgetPinBusy = false;
+    }
+  }
 
   async function prepareWorkspace(workspace: WorkspaceId) {
     const request = ++loadRequest;
@@ -202,7 +280,6 @@
       } else {
         await emitTo("main", "widget-open-workspace", selectedWorkspace);
       }
-      await closeWidget();
     } catch (e) {
       showToast(`Couldn't open in app: ${e instanceof Error ? e.message : e}`, "error");
     }
@@ -260,10 +337,29 @@
         await track(widget.onFocusChanged(({ payload }) => {
           if (!payload) handleWindowBlur();
         }));
-        await track(listen("widget-show", () => {
-          widgetVisible = true;
-          settings.update((current) => ({ ...current, companionWidgetVisible: true }));
-          void promptWidgetAutostart();
+         await track(listen<boolean>("app-lock-state", (event) => {
+           appUnlocked.set(event.payload);
+           if (event.payload) appLockPinStatus.set("ready");
+         }));
+         await track(listen<UnlockResult>("app-lock-unlock-result", (event) => {
+           const pending = pendingUnlock;
+           if (!pending || pending.id !== event.payload?.requestId) return;
+           clearTimeout(pending.timer);
+           pendingUnlock = null;
+           pending.resolve(event.payload);
+         }));
+         await track(listen("main-window-shown", () => {
+           void closeWidget();
+         }));
+         await track(listen<string>("widget-open-failed", (event) => {
+           showToast(event.payload || "Couldn't open in app", "error");
+         }));
+         void emitTo("main", "app-lock-request").catch(() => {});
+         await track(listen("widget-show", () => {
+           widgetVisible = true;
+           settings.update((current) => ({ ...current, companionWidgetVisible: true }));
+           void emitTo("main", "app-lock-request").catch(() => {});
+           void promptWidgetAutostart();
           void placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
         }));
         await track(listen("widget-hide", () => {
@@ -285,10 +381,11 @@
           }
         }));
         widgetVisible = await widget.isVisible();
-        if (widgetVisible) {
-          settings.update((current) => ({ ...current, companionWidgetVisible: true }));
-          await placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
-        }
+         if (widgetVisible) {
+           settings.update((current) => ({ ...current, companionWidgetVisible: true }));
+           void emitTo("main", "app-lock-request").catch(() => {});
+           await placeWidget($settings.widgetCollapsed, $settings.widgetDockEdge, $settings.widgetDockOffset);
+         }
       } catch (e) {
         showToast(`Companion window bridge failed: ${e instanceof Error ? e.message : e}`, "error");
       }
@@ -296,8 +393,9 @@
 
     return () => {
       disposed = true;
-      if (collapseTimer) clearTimeout(collapseTimer);
-      cleanups.forEach((cleanup) => cleanup());
+       if (collapseTimer) clearTimeout(collapseTimer);
+       if (pendingUnlock) clearTimeout(pendingUnlock.timer);
+       cleanups.forEach((cleanup) => cleanup());
     };
   });
 </script>
@@ -306,7 +404,26 @@
   <title>Just Write ehis — {selectedLabel}</title>
 </svelte:head>
 
-{#if $settings.widgetCollapsed}
+{#if $appLockPinStatus === "loading"}
+  <div class="widget-lock" role="status">Checking app lock…</div>
+{:else if $appLockPinStatus === "error"}
+  <div class="widget-lock" role="alert">PIN storage unavailable.</div>
+{:else if widgetLocked}
+  <div class="widget-lock" role="dialog" aria-label="App locked" aria-modal="true">
+    <strong>Locked</strong>
+    <input
+      type="password"
+      bind:value={widgetPin}
+      aria-label="App lock PIN"
+      disabled={widgetPinBusy || widgetPinWait > 0}
+      onkeydown={(event) => { if (event.key === "Enter") void unlockWidget(); }}
+    />
+    <button onclick={() => void unlockWidget()} disabled={widgetPinBusy || widgetPinWait > 0}>
+      {widgetPinWait > 0 ? `Wait ${widgetPinWait}s` : widgetPinBusy ? "…" : "Unlock"}
+    </button>
+    {#if widgetPinError}<span>{widgetPinError}</span>{/if}
+  </div>
+{:else if $settings.widgetCollapsed}
   <div
     class="widget-figure"
     role="button"
@@ -372,6 +489,10 @@
 
 <style>
   :global(html), :global(body), :global(#app) { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+  .widget-lock { display: grid; place-items: center; align-content: center; gap: 8px; width: 100%; height: 100%; padding: 16px; background: var(--surface-base); color: var(--text-primary); text-align: center; font-size: 12px; }
+  .widget-lock input { width: min(220px, 80%); height: 32px; text-align: center; }
+  .widget-lock button { min-height: 32px; padding: 0 12px; }
+  .widget-lock span { color: var(--error); font-size: 11px; }
   .widget-figure { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-raised); box-shadow: 0 8px 24px rgb(0 0 0 / 24%); color: var(--text-primary); cursor: grab; user-select: none; }
   .widget-figure:active { cursor: grabbing; }
   .widget-figure img { width: 42px; height: 42px; object-fit: contain; }

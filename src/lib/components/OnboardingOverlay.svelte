@@ -328,7 +328,8 @@ Delete this doc whenever you're ready. Happy writing.
         {:else}
           <div class="input-group">
             <label for="onboard-vault-path">Vault Path</label>
-            <input id="onboard-vault-path" type="text" bind:value={vaultPath} placeholder="~/WritingVault" />
+            <input id="onboard-vault-path" type="text" value={vaultPath} readonly />
+            <p class="setting-desc">The desktop vault is managed automatically at ~/WritingVault. Custom vault migration is not available yet.</p>
           </div>
         {/if}
         <label class="check-row seed-row">

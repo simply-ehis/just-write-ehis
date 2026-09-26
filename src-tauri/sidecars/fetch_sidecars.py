@@ -5,10 +5,11 @@ fetch_sidecars.py
 One-shot fetcher for STT/TTS offline sidecar weights + binaries.
 
 Usage:
-  python src-tauri/sidecars/fetch_sidecars.py --stt   # transcribe-cli + moonshine-base GGUF
+  python src-tauri/sidecars/fetch_sidecars.py --stt   # moonshine-base GGUF
   python src-tauri/sidecars/fetch_sidecars.py --tts   # kokoro-multi-lang-v1_0 bundle
 
 All downloads are pinned to specific releases/SHAs; no network at runtime.
+Release fetches refuse unpinned artifacts unless JWE_ALLOW_UNPINNED_SIDECARS=1 is set for local-only development.
 """
 
 import argparse
@@ -54,14 +55,13 @@ LLM_GGUF_URL = (
 )
 LLM_GGUF_PATH = MODELS_DIR / "lfm2.5-350m-q4_k_m.gguf"
 
-# Optional: known SHA-256 checksums (empty = skip verify).
-# Run `sha256sum <file>` after first download and paste here to pin.
 SHA256 = {
     "stt_gguf": "",
     "tts_bundle": "",
     "llm_server": "",
     "llm_gguf": "",
 }
+ALLOW_UNPINNED = os.environ.get("JWE_ALLOW_UNPINNED_SIDECARS") == "1"
 
 
 def _sha256(path: Path) -> str:
@@ -84,39 +84,52 @@ def _remote_size(url: str) -> int | None:
         return None
 
 
+def _verify_download(dest: Path, label: str, expected_sha: str) -> None:
+    if expected_sha:
+        actual = _sha256(dest)
+        if actual != expected_sha:
+            dest.unlink(missing_ok=True)
+            raise RuntimeError(f"[{label}] SHA mismatch: expected {expected_sha}, got {actual}")
+        return
+    if not ALLOW_UNPINNED:
+        raise RuntimeError(
+            f"[{label}] has no pinned SHA-256; fill SHA256 in fetch_sidecars.py "
+            "or set JWE_ALLOW_UNPINNED_SIDECARS=1 for a local-only fetch"
+        )
+    print(f"[{label}] No pinned SHA — checksum verification explicitly disabled.", flush=True)
+
+
 def _download(url: str, dest: Path, label: str, expected_sha: str = "") -> None:
     """Download with resume + retries. Big bundles (300MB+) die mid-flight
     on flaky links; urlretrieve can't resume, so stream with Range."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Fast path: byte-identical file already on disk — skip entirely.
+    if not expected_sha and not ALLOW_UNPINNED:
+        raise RuntimeError(
+            f"[{label}] has no pinned SHA-256; fill SHA256 in fetch_sidecars.py "
+            "or set JWE_ALLOW_UNPINNED_SIDECARS=1 for a local-only fetch"
+        )
     total = _remote_size(url)
     if total and dest.exists() and dest.stat().st_size == total:
-        print(f"[{label}] Up to date ({total:,} bytes) — skipping.", flush=True)
-    else:
-        attempts = 4
-        for attempt in range(1, attempts + 1):
-            try:
-                _download_once(url, dest, label)
-                break
-            except Exception as e:
-                print(f"[{label}] Attempt {attempt}/{attempts} failed: {e} "
-                      f"— resuming.", flush=True)
-                if attempt == attempts:
-                    raise RuntimeError(f"[{label}] Download failed after "
-                                       f"{attempts} attempts: {e}")
-        total = _remote_size(url)
-        if total is not None and dest.stat().st_size != total:
-            raise RuntimeError(
-                f"[{label}] retrieval incomplete: got {dest.stat().st_size} "
-                f"out of {total} bytes")
-        print(f"[{label}] Saved -> {dest} ({dest.stat().st_size:,} bytes)", flush=True)
-        if expected_sha:
-            actual = _sha256(dest)
-            if actual != expected_sha:
-                dest.unlink()
-                raise RuntimeError(f"[{label}] SHA mismatch: expected {expected_sha}, got {actual}")
-        else:
-            print(f"[{label}] No pinned SHA — skipping checksum verify.", flush=True)
+        _verify_download(dest, label, expected_sha)
+        print(f"[{label}] Up to date ({total:,} bytes).", flush=True)
+        return
+    attempts = 4
+    for attempt in range(1, attempts + 1):
+        try:
+            _download_once(url, dest, label)
+            break
+        except Exception as e:
+            print(f"[{label}] Attempt {attempt}/{attempts} failed: {e} "
+                  f"— resuming.", flush=True)
+            if attempt == attempts:
+                raise RuntimeError(f"[{label}] Download failed after "
+                                   f"{attempts} attempts: {e}")
+    total = _remote_size(url)
+    if total is not None and dest.stat().st_size != total:
+        raise RuntimeError(
+            f"[{label}] retrieval incomplete: got {dest.stat().st_size} "
+            f"out of {total} bytes")
+    _verify_download(dest, label, expected_sha)
     print(f"[{label}] Saved -> {dest} ({dest.stat().st_size:,} bytes)", flush=True)
 
 
@@ -142,10 +155,25 @@ def _download_once(url: str, dest: Path, label: str) -> None:
                 f.write(chunk)
 
 
+def _validate_member_name(name: str, root: Path) -> None:
+    normalized = name.replace("\\", "/")
+    relative = Path(normalized)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError(f"unsafe archive member: {name}")
+    target = (root / relative).resolve()
+    if os.path.commonpath([str(root.resolve()), str(target)]) != str(root.resolve()):
+        raise RuntimeError(f"archive member escapes destination: {name}")
+
+
 def _extract_tar_bz2(archive: Path, dest_dir: Path, label: str) -> None:
     print(f"[{label}] Extracting {archive} …", flush=True)
     dest_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive, "r:bz2") as tf:
+        members = tf.getmembers()
+        for member in members:
+            _validate_member_name(member.name, dest_dir)
+            if member.issym() or member.islnk():
+                raise RuntimeError(f"archive link is not allowed: {member.name}")
         tf.extractall(dest_dir)
     print(f"[{label}] Extracted to {dest_dir}", flush=True)
 
@@ -153,10 +181,8 @@ def _extract_tar_bz2(archive: Path, dest_dir: Path, label: str) -> None:
 def fetch_stt() -> None:
     """Fetch the Moonshine-base GGUF.
 
-    NOTE: upstream transcribe.cpp native archives ship DLLs only (no CLI
-    binary), so there is no CLI to fetch. The STT server runs inference
-    in-process via `pip install -r requirements.txt` (transcribe-cpp-native)
-    against this GGUF — see stt_server.py.
+    The STT server runs inference in-process through the `transcribe-cpp`
+    binding; there is no separate CLI asset to fetch.
     """
     # Moonshine-base GGUF only.
     _download(STT_GGUF_URL, STT_GGUF_PATH, "STT-GGUF", SHA256["stt_gguf"])
@@ -203,17 +229,24 @@ def fetch_tts() -> None:
     print("[TTS] Done.", flush=True)
 
 
-def fetch_llm() -> None:
-    """Fetch llama.cpp server binary + LFM 2.5-350M GGUF."""
+def _extract_zip(archive: Path, dest_dir: Path) -> None:
     import zipfile
 
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive, "r") as zf:
+        for name in zf.namelist():
+            _validate_member_name(name, dest_dir)
+        zf.extractall(dest_dir)
+
+
+def fetch_llm() -> None:
+    """Fetch llama.cpp server binary + LFM 2.5-350M GGUF."""
     # 1) llama.cpp server release (contains llama-server.exe + DLLs)
     server_archive = MODELS_DIR / "llama-server.zip"
     _download(LLM_SERVER_URL, server_archive, "LLM-SERVER", SHA256["llm_server"])
     print(f"[LLM] Extracting {server_archive} …", flush=True)
     LLM_SERVER_DIR.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(server_archive, "r") as zf:
-        zf.extractall(LLM_SERVER_DIR)
+    _extract_zip(server_archive, LLM_SERVER_DIR)
     # Find llama-server.exe anywhere under the extracted tree and copy to models/
     server_exe = next(LLM_SERVER_DIR.rglob("llama-server.exe"), None)
     if server_exe:
@@ -249,7 +282,7 @@ def main() -> None:
     except (AttributeError, ValueError, OSError):
         pass
     ap = argparse.ArgumentParser(description="Fetch STT/TTS/LLM sidecar assets")
-    ap.add_argument("--stt", action="store_true", help="Fetch STT (transcribe-cli + GGUF)")
+    ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
     ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle)")
     ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server + LFM 2.5-350M GGUF)")
     args = ap.parse_args()

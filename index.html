@@ -30,13 +30,20 @@
         var mode = s.themeMode === "light" || (s.themeMode !== "dark" && legacy === "light") ? "light" : "dark";
         document.documentElement.dataset.theme = style;
         document.documentElement.dataset.mode = mode;
+        var st = document.documentElement.style;
         if (typeof s.accentOverride === "string" && /^#[0-9a-fA-F]{6}$/.test(s.accentOverride)) {
           var hex = s.accentOverride.toLowerCase();
-          var st = document.documentElement.style;
           st.setProperty("--accent", hex);
           st.setProperty("--accent-primary", hex);
           st.setProperty("--accent-write", hex);
         }
+        var editorFonts = ["JetBrains Mono", "Fira Code", "Source Code Pro", "IBM Plex Mono", "Cascadia Code", "Consolas", "monospace"];
+        var editorFont = editorFonts.includes(s.fontFamily) ? s.fontFamily : "JetBrains Mono";
+        var fontSize = Math.min(32, Math.max(10, Number(s.fontSize) || 15));
+        var lineHeight = Math.min(3, Math.max(1, Number(s.lineHeight) || 1.7));
+        st.setProperty("--editor-font-family", editorFont === "monospace" ? "monospace" : '"' + editorFont + '", "Cascadia Code", Consolas, monospace');
+        st.setProperty("--editor-font-size", fontSize + "px");
+        st.setProperty("--editor-line-height", String(lineHeight));
       } catch (e) {}
     </script>
     <script>

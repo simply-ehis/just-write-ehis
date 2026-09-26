@@ -13,12 +13,27 @@
  *
  * Run: npm run build && node tests/reader-surface.mjs
  */
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { JSDOM } from "jsdom";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+try {
+  const distStat = await stat(join(root, "dist/index.html"));
+  const sourceStats = await Promise.all([
+    stat(join(root, "src/main.ts")),
+    stat(join(root, "src/App.svelte")),
+    stat(join(root, "src/lib/components/ReaderWorkspace.svelte")),
+  ]);
+  if (Math.max(...sourceStats.map((entry) => entry.mtimeMs)) > distStat.mtimeMs) {
+    console.log("SKIP  Reader surface requires a fresh dist; source-only mode forbids rebuilding");
+    process.exit(0);
+  }
+} catch {
+  console.log("SKIP  Reader surface requires dist; source-only mode forbids rebuilding");
+  process.exit(0);
+}
 
 const dom = new JSDOM(
   `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,

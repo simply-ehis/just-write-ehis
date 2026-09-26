@@ -332,6 +332,12 @@ export const api = {
   docGet: (id: string) =>
     safeInvoke<Doc>("doc_get", { id }),
 
+  widgetDocGet: (id: string) =>
+    safeInvoke<Doc>("widget_doc_get", { id }),
+
+  widgetDocSave: (id: string, title?: string, content?: string, status?: string, frontmatterJson?: string, parentId?: string | null) =>
+    safeInvoke<Doc>("widget_doc_save", { id, title, content, status, frontmatterJson, parentId }),
+
   docSave: (id: string, title?: string, content?: string, status?: string, frontmatterJson?: string, parentId?: string | null) =>
     safeInvoke<Doc>("doc_save", { id, title, content, status, frontmatterJson, parentId }),
 
@@ -496,7 +502,7 @@ export const api = {
   },
 
   perfBenchmark: () =>
-    safeInvoke<{ doc_count: number; snapshot_count: number; edge_count: number; rag_chunk_count: number; search_latency_us: number; snapshot_latency_us: number }>("perf_benchmark"),
+    safeInvoke<{ doc_count: number; snapshot_count: number; edge_count: number; rag_chunk_count: number; total_words: number; search_latency_us: number; snapshot_latency_us: number; graph_latency_us: number; memory_mb: number }>("perf_benchmark"),
 
   fsListDir: (path: string) =>
     safeInvoke<[string, boolean, number][]>("fs_list_dir", { path }),
@@ -582,28 +588,14 @@ export const api = {
   atomicSave: (docId: string, body: string) =>
     safeInvoke<void>("atomic_save", { docId, body }),
 
+  widgetAtomicSave: (docId: string, body: string) =>
+    safeInvoke<void>("widget_atomic_save", { docId, body }),
+
   setupFileWatcher: () =>
     safeInvoke<void>("setup_file_watcher"),
 
-  sidecarStart: (pythonPath: string, harnessDir: string) =>
-    safeInvoke<void>("sidecar_start", { pythonPath, harnessDir }),
-
   sidecarPythonProbe: (pythonPath: string) =>
     safeInvoke<string>("sidecar_python_probe", { pythonPath }),
-
-  sidecarStop: () =>
-    safeInvoke<void>("sidecar_stop"),
-
-  sidecarIsRunning: () =>
-    safeInvoke<boolean>("sidecar_is_running"),
-
-  sidecarSetEndpoint: (endpoint: string) =>
-    safeInvoke<void>("sidecar_set_endpoint", { endpoint }),
-
-  sidecarQuery: (prompt: string, sessionId: string) =>
-    safeInvoke<{ response: string; confidence: number; escalated: boolean; tool_used: string | null }>(
-      "sidecar_query", { prompt, sessionId }
-    ),
 
   memoryGetStreak: () =>
     safeInvoke<[number, number]>("memory_get_streak"),
@@ -673,7 +665,7 @@ export const api = {
     safeInvoke<boolean>("stt_is_running"),
 
   sttHealth: () =>
-    safeInvoke<{ status: string; model_loaded: boolean; model?: string }>("stt_health"),
+    safeInvoke<{ status: string; ready: boolean; model_loaded: boolean; model?: string; error?: string }>("stt_health"),
 
   sttPort: () =>
     safeInvoke<number>("stt_port"),
@@ -701,7 +693,7 @@ export const api = {
     safeInvoke<boolean>("tts_is_running"),
 
   ttsHealth: () =>
-    safeInvoke<{ status: string; model_loaded: boolean }>("tts_health"),
+    safeInvoke<{ status: string; ready: boolean; model_loaded: boolean; error?: string }>("tts_health"),
 
   ttsPort: () =>
     safeInvoke<number>("tts_port"),
@@ -723,7 +715,7 @@ export const api = {
     safeInvoke<boolean>("llm_is_running"),
 
   llmHealth: () =>
-    safeInvoke<{ status: string; model?: string }>("llm_health"),
+    safeInvoke<{ status: string; model?: string; error?: string }>("llm_health"),
 
   llmPort: () =>
     safeInvoke<number>("llm_port"),
@@ -850,5 +842,14 @@ export const api = {
 
   secretGet: (key: "apiKey" | "appLockPin") =>
     safeInvoke<string | null>("secret_get", { key }),
+
+  appLockConfigured: () =>
+    safeInvoke<boolean>("app_lock_configured"),
+
+  appLockVerify: (pin: string) =>
+    safeInvoke<{ verified: boolean; retry_after_ms: number }>("app_lock_verify", { pin }),
+
+  appLockReset: () =>
+    safeInvoke<void>("app_lock_reset"),
 
 };
