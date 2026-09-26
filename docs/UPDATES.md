@@ -20,13 +20,17 @@ with the site.
 ## One-time setup (maintainer)
 
 1. **Signing keypair** — done (rotated 2026-09-26; no releases ever shipped
-   under the old key, so nothing trusts it). The private key lives at the
-   repo root as `just-write-ehis.key` (gitignored, never commit it). It is
-   **passwordless** by decision — no `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-   needed, and headless builds can't hang on a password prompt. Losing it
-   means existing installs can never update again — back it up off-machine.
-   (The retired password-locked key is backed up outside the repo; delete
-   it once the first signed build succeeds.)
+   under any older key, so nothing trusts them). The private key lives at
+   the repo root as `just-write-ehis.key` (gitignored, never commit it) and
+   its password in `just-write-ehis.key.password` (also gitignored — back
+   both up off-machine; losing them means existing installs can never
+   update again). Builds MUST set both vars in-session
+   (`TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`)
+   and MUST unset machine-level `TAURI_SIGNING_PRIVATE_KEY_PATH` (it points
+   at another project's key and makes signing fail). Passwordless keys are
+   avoided: the signer CLI prompts on the Windows console for them and
+   hangs headless builds. (Superseded keys are backed up outside the repo;
+   delete them once the first signed build succeeds.)
 2. **Public key** — set in `src-tauri/tauri.conf.json` →
    `plugins.updater.pubkey`. Matches the root key file.
 3. **`plugins.updater.endpoints`** — set to the private repo's release

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-lock-verify"
+description = "Enables the app_lock_verify command without any pre-configured scope."
+commands.allow = ["app_lock_verify"]
+
+[[permission]]
+identifier = "deny-app-lock-verify"
+description = "Denies the app_lock_verify command without any pre-configured scope."
+commands.deny = ["app_lock_verify"]

@@ -28,6 +28,7 @@ Thumbs.db
 # Local logs
 *.log
 just-write-ehis.key
+just-write-ehis.key.password
 
 # Patchi local config
 .patchi/

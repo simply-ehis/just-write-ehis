@@ -11,6 +11,7 @@ use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::process::Command;
 use ammonia;
+use serde::Serialize;
 use crate::windows::PendingLaunchFile;
 
 #[tauri::command]
