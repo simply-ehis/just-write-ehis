@@ -129,6 +129,12 @@ export async function hasPin(): Promise<boolean> {
 
 export async function verifyPin(pin: string): Promise<boolean> {
   await requirePinStorage();
+  // Fail fast with a plain message when no PIN exists: without this every
+  // guess records a lockout failure and the UI spins in retry/backoff
+  // against a secret that was never set.
+  if (!get(appLockConfigured)) {
+    throw new Error("No PIN is set. Set one in Settings → Privacy & Security first.");
+  }
   const { api } = await import("$lib/api");
   const result = await api.appLockVerify(pin);
   if (result.verified) {

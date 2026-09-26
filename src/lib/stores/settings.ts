@@ -433,15 +433,23 @@ async function initSecrets(): Promise<void> {
   try {
     const { api } = await withTimeout(apiLazy(), "secret backend");
     if (isWidgetRoute()) {
-      let configured = !get(settings).lockEnabled;
-      for (let attempt = 0; attempt < 50 && !configured; attempt += 1) {
-        configured = await withTimeout(api.appLockConfigured(), "app lock status");
-        if (!configured && get(settings).lockEnabled) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+      // "Configured" means exactly one thing: the backend holds a usable
+      // PIN. It must NEVER default from the master switch — that locked the
+      // widget behind a PIN nobody set (phantom lock with no escape).
+      let configured = false;
+      let reachable = false;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          configured = await withTimeout(api.appLockConfigured(), "app lock status");
+          reachable = true;
+          break;
+        } catch (error) {
+          console.warn(`app lock status probe failed (attempt ${attempt + 1}):`, error);
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
       }
       appLockConfigured.set(configured);
-      appLockPinStatus.set(configured ? "ready" : "error");
+      appLockPinStatus.set(reachable ? "ready" : "error");
       secretsMigrated = true;
       preserveLegacySecrets = false;
       return;
@@ -480,13 +488,19 @@ async function initSecrets(): Promise<void> {
       await readSecret("appLockPin");
       await writeSecret("appLockPin");
     }
-    const lockConfigured = get(settings).lockEnabled || !!get(settings).appLockPin.trim();
-    const pinMissing = lockConfigured && get(settings).appLockPin.trim().length < APP_LOCK_MIN_PIN_LENGTH;
-    const lockStateValid = !lockConfigured || (lockPinReady && !pinMissing);
-    appLockConfigured.set(lockConfigured && lockStateValid);
-    const stripped = stripPersistedSecrets();
+    // Authoritative answer first: does the backend hold a usable PIN? The
+    // master switch must never imply a PIN — that produced lock gates for a
+    // PIN nobody set. No PIN configured is a healthy state, never an error.
+    let lockConfigured = get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH;
+    try {
+      lockConfigured = await withTimeout(api.appLockConfigured(), "app lock status");
+    } catch (error) {
+      console.warn("app lock status probe failed; falling back to the migrated local PIN:", error);
+    }
+    appLockConfigured.set(lockConfigured);
+    stripPersistedSecrets();
     preserveLegacySecrets = false;
-    appLockPinStatus.set(!lockConfigured || (lockStateValid && stripped) ? "ready" : "error");
+    appLockPinStatus.set("ready");
 
     for (const key of keys) {
       if (key === "appLockPin") continue;
@@ -497,15 +511,13 @@ async function initSecrets(): Promise<void> {
     preserveLegacySecrets = false;
     if (migrationFailed) scheduleSecretSync(get(settings));
   } catch (error) {
-    if (isWidgetRoute()) {
-      appLockConfigured.set(false);
-      appLockPinStatus.set(get(settings).lockEnabled ? "error" : "ready");
-      preserveLegacySecrets = false;
-      secretsMigrated = true;
-      return;
-    }
-    appLockConfigured.set(get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH);
-    appLockPinStatus.set(get(settings).lockEnabled ? "error" : "ready");
+    // Total hydration failure: backend state is genuinely unknown. Fail
+    // closed ONLY when a PIN might exist (local usable PIN) — a bare
+    // master switch with no PIN is not a lockout, and must never block the
+    // shell. Both error screens carry Retry/Reset escapes.
+    const localUsable = get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH;
+    appLockConfigured.set(localUsable);
+    appLockPinStatus.set(localUsable ? "error" : "ready");
     preserveLegacySecrets = false;
     secretsMigrated = true;
     const stripped = stripPersistedSecrets();
@@ -519,9 +531,6 @@ export const settings = writable<AppSettings>(loadSettings());
 let lastSettings = get(settings);
 
 settings.subscribe((value) => {
-  if (get(appLockPinStatus) === "ready" && value.lockEnabled && value.appLockPin.trim().length < APP_LOCK_MIN_PIN_LENGTH) {
-    appLockPinStatus.set("error");
-  }
   lastSettings = value;
   saveSettings(value);
 });

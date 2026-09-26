@@ -31,4 +31,18 @@ async function bootstrap() {
   });
 }
 
-void bootstrap();
+// A failed chunk load otherwise leaves #app permanently empty (a true
+// blank screen with no toast and no console access for most users). Render
+// the failure as text so it is always diagnosable and recoverable.
+void bootstrap().catch((error) => {
+  console.error("Startup failed to load:", error);
+  const target = document.getElementById("app");
+  if (target) {
+    const reason = error instanceof Error ? error.message : String(error);
+    target.innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;padding:24px;">' +
+      "<h1>Just Write ehis couldn't start</h1>" +
+      `<p>The app shell failed to load (${reason}). Reloading usually fixes this; reinstalling repairs a damaged install.</p>` +
+      '<button onclick="location.reload()" style="padding:8px 20px;cursor:pointer;">Reload</button></div>';
+  }
+});

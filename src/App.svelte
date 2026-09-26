@@ -78,12 +78,13 @@
     lockCoveredWorkspaces.includes($currentWorkspace)
   );
 
-  // Global app lock: when Document Locking is on and an App Lock PIN is set,
-  // the whole shell stays gated for this session until the PIN verifies.
-  // (Previously the PIN only gated per-doc locks, so it never asked.)
+  // Global app lock: only when an App Lock PIN actually exists (backend
+  // truth) AND the Document Locking switch is on. Either alone must never
+  // gate — the switch alone produced locks for a PIN nobody set.
   let appLockGate = $derived(
     $appLockPinStatus === "ready" &&
-    ($appLockConfigured || $settings.lockEnabled) &&
+    $appLockConfigured &&
+    $settings.lockEnabled &&
     !$appUnlocked
   );
   let appLockUnavailable = $derived($appLockPinStatus === "error");

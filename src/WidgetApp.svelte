@@ -34,9 +34,13 @@
   type UnlockResult = { requestId: string; verified: boolean; retry_after_ms: number; error?: string };
   let pendingUnlock: { id: string; resolve: (result: UnlockResult) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   let unlockSequence = 0;
+  // Same rule as the main shell: a real configured PIN plus the master
+  // switch. The switch alone (or a defaulted "configured") locked the
+  // widget behind a PIN nobody set, with no way out.
   let widgetLocked = $derived(
     $appLockPinStatus === "ready" &&
-    ($appLockConfigured || $settings.lockEnabled) &&
+    $appLockConfigured &&
+    $settings.lockEnabled &&
     !$appUnlocked
   );
   let prepareLoading = $state(false);
@@ -407,7 +411,13 @@
 {#if $appLockPinStatus === "loading"}
   <div class="widget-lock" role="status">Checking app lock…</div>
 {:else if $appLockPinStatus === "error"}
-  <div class="widget-lock" role="alert">PIN storage unavailable.</div>
+  <div class="widget-lock" role="alert">
+    <strong>PIN storage unavailable.</strong>
+    <div class="widget-lock-actions">
+      <button onclick={() => location.reload()}>Retry</button>
+      <button onclick={() => void closeWidget()} title="Hide the widget">Hide widget</button>
+    </div>
+  </div>
 {:else if widgetLocked}
   <div class="widget-lock" role="dialog" aria-label="App locked" aria-modal="true">
     <strong>Locked</strong>
@@ -422,6 +432,10 @@
       {widgetPinWait > 0 ? `Wait ${widgetPinWait}s` : widgetPinBusy ? "…" : "Unlock"}
     </button>
     {#if widgetPinError}<span>{widgetPinError}</span>{/if}
+    <div class="widget-lock-actions">
+      <button onclick={() => void openInApp()} title="Open in the main app">Open main app</button>
+      <button onclick={() => void closeWidget()} title="Hide the widget">Hide widget</button>
+    </div>
   </div>
 {:else if $settings.widgetCollapsed}
   <div
@@ -492,6 +506,7 @@
   .widget-lock { display: grid; place-items: center; align-content: center; gap: 8px; width: 100%; height: 100%; padding: 16px; background: var(--surface-base); color: var(--text-primary); text-align: center; font-size: 12px; }
   .widget-lock input { width: min(220px, 80%); height: 32px; text-align: center; }
   .widget-lock button { min-height: 32px; padding: 0 12px; }
+  .widget-lock-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
   .widget-lock span { color: var(--error); font-size: 11px; }
   .widget-figure { display: grid; place-items: center; width: 56px; height: 56px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-raised); box-shadow: 0 8px 24px rgb(0 0 0 / 24%); color: var(--text-primary); cursor: grab; user-select: none; }
   .widget-figure:active { cursor: grabbing; }
