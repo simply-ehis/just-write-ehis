@@ -77,7 +77,7 @@
     "updater": {
       "active": true,
       "dialog": false,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkwNzczQzdDNzQzNUMzNEIKUldSTHd6VjBmRHgza0g3RGt6SHhEL1A2TVdDaVYwOWpLK1g5K1ZPbTZnWVlSMlVhVE05UlEzdnkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQzk4NzQzMjJGMEU5MDIKUldRQzZmQWlRNGZKLytVL0hiYVZHcVorWTc1eEkxaG9tT2VPZHA2NWg4a2ZSSzJlNTNKc0F6WnAK",
       "endpoints": [
         "https://github.com/simply-ehis/just-write-ehis/releases/latest/download/latest.json"
       ],

@@ -19,9 +19,14 @@ with the site.
 
 ## One-time setup (maintainer)
 
-1. **Signing keypair** — done. The private key lives at the repo root as
-   `just-write-ehis.key` (gitignored, never commit it). Losing it means
-   existing installs can never update again — back it up off-machine.
+1. **Signing keypair** — done (rotated 2026-09-26; no releases ever shipped
+   under the old key, so nothing trusts it). The private key lives at the
+   repo root as `just-write-ehis.key` (gitignored, never commit it). It is
+   **passwordless** by decision — no `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+   needed, and headless builds can't hang on a password prompt. Losing it
+   means existing installs can never update again — back it up off-machine.
+   (The retired password-locked key is backed up outside the repo; delete
+   it once the first signed build succeeds.)
 2. **Public key** — set in `src-tauri/tauri.conf.json` →
    `plugins.updater.pubkey`. Matches the root key file.
 3. **`plugins.updater.endpoints`** — set to the private repo's release
