@@ -210,10 +210,9 @@ impl Database {
             conn.execute_batch(
                 "DELETE FROM bible_facts WHERE id NOT IN (SELECT MIN(id) FROM bible_facts GROUP BY doc_id, key);
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_bible_facts_doc_key_unique ON bible_facts(doc_id, key);",
-            ).map_err(|e| e)?;
+            )?;
         }
 
-        // Create vector virtual table for semantic search
         conn.execute_batch(
             "CREATE VIRTUAL TABLE IF NOT EXISTS rag_vec USING vec0(
                 chunk_id TEXT PRIMARY KEY,
@@ -221,7 +220,15 @@ impl Database {
             );"
         )?;
 
-        // Migration: add content_hash to snapshots if missing
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
+                title,
+                content,
+                workspace,
+                tokenize = 'porter unicode61'
+            );"
+        )?;
+
         let has_hash: bool = conn.prepare(
             "SELECT content_hash FROM snapshots LIMIT 1"
         ).is_ok();
@@ -231,7 +238,6 @@ impl Database {
             )?;
         }
 
-        // Migration: add pinned, goal_words, deadline to docs if missing (A11.5, A11.8)
         let has_pinned: bool = conn.prepare(
             "SELECT pinned FROM docs LIMIT 1"
         ).is_ok();
@@ -243,7 +249,6 @@ impl Database {
             )?;
         }
 
-        // Migration: add locked to docs if missing (per-doc lock)
         let has_locked: bool = conn.prepare(
             "SELECT locked FROM docs LIMIT 1"
         ).is_ok();
@@ -253,7 +258,6 @@ impl Database {
             )?;
         }
 
-        // Canvas board (A11.1): freeform cards + connections.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS canvas_nodes (
                  id TEXT PRIMARY KEY,
@@ -275,10 +279,6 @@ impl Database {
              CREATE INDEX IF NOT EXISTS idx_canvas_edges_target ON canvas_edges(target_id);"
         )?;
 
-        // Migration: repair craft_metrics schema. The original table was
-        // created as (id, doc_id, metrics_json, ts) but every reader/writer
-        // uses (id, doc_id, metric_type, value, created_at) — so no valid
-        // row could ever have been written; rebuild empty is lossless.
         let has_metric_type: bool = conn.prepare(
             "SELECT metric_type FROM craft_metrics LIMIT 1"
         ).is_ok();

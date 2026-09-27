@@ -10,6 +10,13 @@
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
   import { onMount } from "svelte";
+  import FocusMode from "$lib/components/FocusMode.svelte";
+  import KeyboardShortcuts from "$lib/components/KeyboardShortcuts.svelte";
+  import KnowledgeGraph from "$lib/components/KnowledgeGraph.svelte";
+  import PluginManager from "$lib/components/PluginManager.svelte";
+  import ExportPresets from "$lib/components/ExportPresets.svelte";
+  import VoiceCommand from "$lib/components/VoiceCommand.svelte";
+  import TagManager from "$lib/components/TagManager.svelte";
 
   // Tab underlines track the app theme (see --ws-* in app.css).
   const wsAccents: Record<string, string> = {
@@ -292,6 +299,16 @@
     <div class="tab-placeholder">No open documents</div>
     <button class="new-tab-btn" onclick={newTabDoc} title="New document in this workspace" aria-label="New document">+ New</button>
   {/if}
+
+  <div class="tab-bar-actions">
+    <FocusMode />
+    <KnowledgeGraph />
+    <ExportPresets />
+    <VoiceCommand />
+    <TagManager />
+    <PluginManager />
+    <KeyboardShortcuts />
+  </div>
 </div>
 
 <!-- Context menu -->
@@ -515,6 +532,15 @@
   .tab-sidebar-btn:hover {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+  }
+
+  .tab-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+    padding: 0 8px;
+    flex-shrink: 0;
   }
 
   .context-menu {

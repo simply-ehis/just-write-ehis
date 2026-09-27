@@ -177,6 +177,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the add_doc_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-add-doc-tag",
+          "markdownDescription": "Enables the add_doc_tag command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ai_generate command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ai-generate",
@@ -651,6 +657,12 @@
           "markdownDescription": "Enables the fs_write_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_doc_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-doc-tags",
+          "markdownDescription": "Enables the get_doc_tags command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_reopen_never_finish command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-reopen-never-finish",
@@ -921,6 +933,18 @@
           "markdownDescription": "Enables the reader_update_position command without any pre-configured scope."
         },
         {
+          "description": "Enables the reindex_fts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reindex-fts",
+          "markdownDescription": "Enables the reindex_fts command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_doc_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-doc-tag",
+          "markdownDescription": "Enables the remove_doc_tag command without any pre-configured scope."
+        },
+        {
           "description": "Enables the script_character_add command without any pre-configured scope.",
           "type": "string",
           "const": "allow-script-character-add",
@@ -979,6 +1003,18 @@
           "type": "string",
           "const": "allow-script-timeline-get",
           "markdownDescription": "Enables the script_timeline_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_by_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-by-tag",
+          "markdownDescription": "Enables the search_by_tag command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_docs_fts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-docs-fts",
+          "markdownDescription": "Enables the search_docs_fts command without any pre-configured scope."
         },
         {
           "description": "Enables the secret_get command without any pre-configured scope.",
@@ -1213,6 +1249,12 @@
           "type": "string",
           "const": "allow-widget-doc-save",
           "markdownDescription": "Enables the widget_doc_save command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the add_doc_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-add-doc-tag",
+          "markdownDescription": "Denies the add_doc_tag command without any pre-configured scope."
         },
         {
           "description": "Denies the ai_generate command without any pre-configured scope.",
@@ -1689,6 +1731,12 @@
           "markdownDescription": "Denies the fs_write_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the get_doc_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-doc-tags",
+          "markdownDescription": "Denies the get_doc_tags command without any pre-configured scope."
+        },
+        {
           "description": "Denies the get_reopen_never_finish command without any pre-configured scope.",
           "type": "string",
           "const": "deny-get-reopen-never-finish",
@@ -1959,6 +2007,18 @@
           "markdownDescription": "Denies the reader_update_position command without any pre-configured scope."
         },
         {
+          "description": "Denies the reindex_fts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reindex-fts",
+          "markdownDescription": "Denies the reindex_fts command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_doc_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-doc-tag",
+          "markdownDescription": "Denies the remove_doc_tag command without any pre-configured scope."
+        },
+        {
           "description": "Denies the script_character_add command without any pre-configured scope.",
           "type": "string",
           "const": "deny-script-character-add",
@@ -2017,6 +2077,18 @@
           "type": "string",
           "const": "deny-script-timeline-get",
           "markdownDescription": "Denies the script_timeline_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_by_tag command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-by-tag",
+          "markdownDescription": "Denies the search_by_tag command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_docs_fts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-docs-fts",
+          "markdownDescription": "Denies the search_docs_fts command without any pre-configured scope."
         },
         {
           "description": "Denies the secret_get command without any pre-configured scope.",

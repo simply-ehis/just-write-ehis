@@ -328,6 +328,11 @@ pub fn run() {
              commands::keychain::app_lock_configured,
              commands::keychain::app_lock_verify,
              commands::keychain::app_lock_reset,
+             commands::convert_document_cmd,
+             commands::get_doc_tags,
+             commands::add_doc_tag,
+             commands::remove_doc_tag,
+             commands::search_by_tag,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| eprintln!("Tauri application error: {}", e));

@@ -603,6 +603,30 @@ export const api = {
   docSearchFull: (query: string, workspace?: string) =>
     safeInvoke<SearchResult[]>("doc_search_full", { query, workspace }),
 
+  searchDocsFts: (query: string, workspace?: string) =>
+    safeInvoke<SearchResult[]>("search_docs_fts", { query, workspace }),
+
+  reindexFts: () =>
+    safeInvoke<number>("reindex_fts"),
+
+  convertDocument: (docId: string, format: string) =>
+    safeInvoke<{ filename: string; base64: string }>("convert_document_cmd", { docId, format }),
+
+  batchExport: (docIds: string[], format: string) =>
+    safeInvoke<{ filename: string; base64: string }>("batch_export", { docIds, format }),
+
+  getDocTags: (docId: string) =>
+    safeInvoke<string[]>("get_doc_tags", { docId }),
+
+  addDocTag: (docId: string, tag: string) =>
+    safeInvoke<void>("add_doc_tag", { docId, tag }),
+
+  removeDocTag: (docId: string, tag: string) =>
+    safeInvoke<void>("remove_doc_tag", { docId, tag }),
+
+  searchByTag: (tag: string) =>
+    safeInvoke<Doc[]>("search_by_tag", { tag }),
+
   docGetStats: () =>
     safeInvoke<[number, number, number]>("doc_get_stats"),
 

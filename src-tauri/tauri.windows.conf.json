@@ -15,8 +15,32 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["txt", "md"],
-        "description": "Text document"
+        "ext": ["txt", "text", "rtf", "log"],
+        "description": "Plain text document"
+      },
+      {
+        "ext": ["md", "markdown", "mdown", "mkd", "mkdn", "mdwn"],
+        "description": "Markdown document"
+      },
+      {
+        "ext": ["rst", "org", "adoc", "asciidoc"],
+        "description": "reStructuredText / Org-mode / AsciiDoc document"
+      },
+      {
+        "ext": ["json", "yaml", "yml", "toml", "ini", "cfg", "conf", "xml", "csv", "tsv"],
+        "description": "Configuration or data file"
+      },
+      {
+        "ext": ["html", "htm", "css", "js", "ts", "jsx", "tsx"],
+        "description": "Web or script file"
+      },
+      {
+        "ext": ["py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt", "scala"],
+        "description": "Source code file"
+      },
+      {
+        "ext": ["sh", "bash", "zsh", "ps1", "bat", "cmd"],
+        "description": "Shell script"
       }
     ],
     "windows": {

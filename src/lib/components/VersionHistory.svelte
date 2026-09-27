@@ -76,20 +76,33 @@
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
-  function getDiffPreview(): string {
-    if (!selectedSnapshot || !$currentDoc?.content) return '';
+  function getDiffLines(): { type: 'same' | 'add' | 'del'; text: string }[] {
+    if (!selectedSnapshot || !$currentDoc?.content) return [];
     const oldText = selectedSnapshot.content ?? '';
     const newText = $currentDoc.content ?? '';
     const oldLines = oldText.split('\n');
     const newLines = newText.split('\n');
-    let diff = '';
     const maxLen = Math.max(oldLines.length, newLines.length);
-    for (let i = 0; i < Math.min(maxLen, 50); i++) {
-      if (oldLines[i] !== newLines[i]) {
-        diff += `- ${oldLines[i] ?? '(empty)'}\n+ ${newLines[i] ?? '(empty)'}\n`;
+    const result: { type: 'same' | 'add' | 'del'; text: string }[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      const oldLine = oldLines[i];
+      const newLine = newLines[i];
+      if (oldLine === newLine) {
+        result.push({ type: 'same', text: oldLine ?? '' });
+      } else {
+        if (oldLine !== undefined) result.push({ type: 'del', text: oldLine });
+        if (newLine !== undefined) result.push({ type: 'add', text: newLine });
       }
     }
-    return diff || 'No changes detected';
+    return result;
+  }
+
+  function getDiffStats(): { added: number; removed: number } {
+    const lines = getDiffLines();
+    return {
+      added: lines.filter(l => l.type === 'add').length,
+      removed: lines.filter(l => l.type === 'del').length,
+    };
   }
 </script>
 
@@ -142,7 +155,18 @@
             </div>
             <div class="diff-section">
               <h4>Changes from current:</h4>
-              <pre class="diff-content">{getDiffPreview()}</pre>
+              <div class="diff-stats">
+                <span class="diff-add">+{getDiffStats().added}</span>
+                <span class="diff-del">-{getDiffStats().removed}</span>
+              </div>
+              <div class="diff-content">
+                {#each getDiffLines() as line}
+                  <div class="diff-line" class:diff-add={line.type === 'add'} class:diff-del={line.type === 'del'}>
+                    <span class="diff-marker">{line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}</span>
+                    <span class="diff-text">{line.text}</span>
+                  </div>
+                {/each}
+              </div>
             </div>
             <div class="content-section">
               <h4>Snapshot content:</h4>

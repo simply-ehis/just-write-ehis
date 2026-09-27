@@ -3,9 +3,6 @@
   "productName": "Just Write ehis",
   "version": "0.2.1",
   "identifier": "com.just-write-ehis.app",
-  "publisher": "simply-ehis",
-  "homepage": "https://github.com/simply-ehis/just-write-ehis#readme",
-  "repository": "https://github.com/simply-ehis/just-write-ehis.git",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -50,7 +47,6 @@
     "active": true,
     "publisher": "simply-ehis",
     "homepage": "https://github.com/simply-ehis/just-write-ehis#readme",
-    "repository": "https://github.com/simply-ehis/just-write-ehis.git",
     "copyright": "Copyright (C) 2026 simply-ehis",
     "shortDescription": "A personal super app for writing and everything around writing",
     "longDescription": "Just Write ehis is a local-first desktop writing application built with Tauri 2 and Svelte 5. It provides a distraction-free writing environment with integrated AI features, voice input/output, document management, and knowledge organization tools.",

@@ -651,6 +651,20 @@ mod convert_tests {
         assert!(!out.contains("![["));
     }
 
+    pub fn convert_document(doc_id: &str, format: &str, vault: &std::path::Path) -> Result<(String, Vec<u8>), String> {
+        let doc_path = vault.join(doc_id).with_extension("md");
+        let content = std::fs::read_to_string(&doc_path).map_err(|e| e.to_string())?;
+        match format {
+            "md" | "markdown" => Ok((format!("{}.md", doc_id), content.into_bytes())),
+            "txt" | "text" => Ok((format!("{}.txt", doc_id), content.into_bytes())),
+            "html" => {
+                let html = markdown_to_html(&content);
+                Ok((format!("{}.html", doc_id), html.into_bytes()))
+            }
+            _ => Err(format!("Unsupported export format: {}", format)),
+        }
+    }
+
     #[test]
     fn manuscript_sections_stay_bare() {
         // Compile bodies must carry NO yaml blocks of their own — only the

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remove-doc-tag"
+description = "Enables the remove_doc_tag command without any pre-configured scope."
+commands.allow = ["remove_doc_tag"]
+
+[[permission]]
+identifier = "deny-remove-doc-tag"
+description = "Denies the remove_doc_tag command without any pre-configured scope."
+commands.deny = ["remove_doc_tag"]

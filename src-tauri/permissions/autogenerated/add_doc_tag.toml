@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-doc-tag"
+description = "Enables the add_doc_tag command without any pre-configured scope."
+commands.allow = ["add_doc_tag"]
+
+[[permission]]
+identifier = "deny-add-doc-tag"
+description = "Denies the add_doc_tag command without any pre-configured scope."
+commands.deny = ["add_doc_tag"]

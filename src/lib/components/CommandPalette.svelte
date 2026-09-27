@@ -149,8 +149,7 @@
       return;
     }
     try {
-      const found = await api.docSearchFull(asked);
-      // Stale-response guard: a newer keystroke wins, never an older reply.
+      const found = await api.searchDocsFts(asked);
       if (query.trim() === asked) results = found;
     } catch (e) {
       domainError('Palette', "couldn't search", e);

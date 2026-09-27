@@ -8,7 +8,7 @@ use zerocopy::IntoBytes;
 use tauri::Emitter;
 
 fn uuid_v7() -> String {
-    Uuid::now_v7().to_string()
+    Uuid::new_v4().to_string()
 }
 
 /// Compute the on-disk path for a doc based on workspace, kind, title, and vault root.
@@ -872,6 +872,113 @@ impl Database {
 
         Ok(stmt.drain(..).map(|doc| SearchResult {
             rank: doc.activity_score,
+            snippet: None,
+            doc,
+        }).collect())
+    }
+
+    pub fn reindex_fts(&self) -> Result<u64, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM docs_fts", []).map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, content, workspace FROM docs WHERE locked = 0"
+        ).map_err(|e| e.to_string())?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }).map_err(|e| e.to_string())?;
+        let mut count = 0u64;
+        for row in rows {
+            let (id, title, content, workspace) = row.map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT INTO docs_fts(rowid, title, content, workspace) VALUES ((SELECT rowid FROM docs WHERE id = ?1), ?2, ?3, ?4)",
+                params![id, title, content, workspace],
+            ).map_err(|e| e.to_string())?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    pub fn search_docs_fts(&self, query: &str, workspace: Option<&str>) -> Result<Vec<SearchResult>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let fts_query = query.split_whitespace()
+            .map(|w| format!("\"{}\"", w.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut stmt = if let Some(ws) = workspace {
+            let mut s = conn.prepare(
+                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
+                 FROM docs_fts
+                 JOIN docs d ON d.id = (SELECT id FROM docs WHERE rowid = docs_fts.rowid)
+                 WHERE docs_fts MATCH ?1 AND d.workspace = ?2 AND d.locked = 0
+                 ORDER BY rank LIMIT 50"
+            ).map_err(|e| e.to_string())?;
+            let rows = s.query_map(params![fts_query, ws], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+        } else {
+            let mut s = conn.prepare(
+                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
+                 FROM docs_fts
+                 JOIN docs d ON d.id = (SELECT id FROM docs WHERE rowid = docs_fts.rowid)
+                 WHERE docs_fts MATCH ?1 AND d.locked = 0
+                 ORDER BY rank LIMIT 50"
+            ).map_err(|e| e.to_string())?;
+            let rows = s.query_map(params![fts_query], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+        };
+        Ok(stmt.drain(..).map(|doc| SearchResult {
+            rank: 0.0,
             snippet: None,
             doc,
         }).collect())
