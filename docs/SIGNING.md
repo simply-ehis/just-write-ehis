@@ -56,3 +56,18 @@ Keep shipping unsigned; the Support page ("What happens next" + install
 notes) is the right place to tell users to expect the warning and why
 it's safe. Do not self-sign to make the dialog prettier — a
 self-signed prompt trains the exact click-through habit attackers rely on.
+
+## Unsigned branding (no cert needed)
+
+Without any certificate, `simply-ehis` still appears everywhere Windows
+lets an unsigned app identify itself — all wired in this repo:
+
+- `tauri.conf.json → bundle.publisher`: feeds the installer's
+  Add/Remove Programs `Publisher` value (via the bundler's
+  `MANUFACTURER`), the installer metadata, and the old-version
+  upgrade detector (it matches DisplayName + Publisher).
+- `src-tauri/Cargo.toml → authors/description`: embeds CompanyName and
+  file description in the exe's Details tab.
+- The UAC elevation prompt itself keeps saying "Unknown publisher"
+  until a real certificate signs the binaries — that line is the one
+  thing money buys.

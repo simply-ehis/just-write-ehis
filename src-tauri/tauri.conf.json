@@ -45,6 +45,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "simply-ehis",
     "targets": "nsis",
     "externalBin": ["binaries/pandoc"],
     "icon": [

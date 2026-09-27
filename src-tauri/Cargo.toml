@@ -2,6 +2,8 @@
 name = "just-write-ehis"
 version = "0.2.1"
 edition = "2021"
+authors = ["simply-ehis"]
+description = "Just Write ehis — a personal super app for writing and everything around writing"
 
 [lib]
 name = "just_write_ehis_lib"
