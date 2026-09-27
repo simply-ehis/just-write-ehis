@@ -1,14 +1,13 @@
 /**
- * support — Support page data + feedback composers (GitHub issue + email).
+ * support — Support page data + GitHub issue composer.
  *
  * Pure module (no Svelte, no DOM): safe to unit-test in plain node.
  *
- * Nothing is ever sent automatically — opening the tracker, the mail app,
- * or copying the draft is always an explicit tap.
+ * Nothing is ever sent automatically — opening the tracker or copying the
+ * draft is always an explicit tap.
  */
 
-export const SUPPORT_EMAIL = "hehisehis@gmail.com";
-/** Public tracker backing the "Open GitHub issue" path. */
+/** Public tracker backing the feedback path. */
 export const GITHUB_OWNER = "simply-ehis";
 export const GITHUB_REPO = "just-write-ehis";
 export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues`;
@@ -81,23 +80,6 @@ function buildFeedbackBody(
 }
 
 /**
- * Compose the feedback email. Returns the mailto: URL and whether the
- * message was truncated.
- */
-export function buildFeedbackMailto(
-  draft: FeedbackDraft,
-  snapshot: string
-): { url: string; truncated: boolean } {
-  const subject = buildFeedbackSubject(draft);
-  const { body, truncated } = buildFeedbackBody(draft, snapshot, MAX_LINK_BODY);
-  const url =
-    `mailto:${SUPPORT_EMAIL}` +
-    `?subject=${encodeURIComponent(subject)}` +
-    `&body=${encodeURIComponent(body)}`;
-  return { url, truncated };
-}
-
-/**
  * Compose a prefilled GitHub issue URL (title + body query params).
  * Opens the tracker with everything filled in; the user still presses
  * Submit there. Returns the URL and whether the message was truncated.
@@ -118,5 +100,5 @@ export function buildIssueUrl(
 /** Plain-text version of the same draft for the copy-to-clipboard fallback. */
 export function buildFeedbackText(draft: FeedbackDraft, snapshot: string): string {
   const subject = `[${SEVERITY_LABELS[draft.severity] ?? "Feedback"}] ${((draft.subject || "").trim() || "Untitled feedback")}`;
-  return [`To: ${SUPPORT_EMAIL}`, `Subject: ${subject}`, "", draft.message.trim() || "(no details written)", "", snapshot].join("\n");
+  return [`Subject: ${subject}`, "", draft.message.trim() || "(no details written)", "", snapshot].join("\n");
 }

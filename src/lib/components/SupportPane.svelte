@@ -1,9 +1,9 @@
 <script lang="ts">
   /**
    * SupportPane — Settings → Support: about the maker, getting help, and
-   * sending feedback by email. The repo is private (no public tracker), so
-   * feedback is composed into the user's own mail app or copied — nothing
-   * is ever sent automatically; the tap is the consent.
+   * sending feedback through the public GitHub issue tracker. Feedback is
+   * composed into a prefilled issue (or copied) — nothing is ever sent
+   * automatically; the tap is the consent.
    */
   import { onMount } from "svelte";
   import { settings } from "$lib/stores/settings";
@@ -14,11 +14,11 @@
   import {
     COMPANY_BLURB,
     COMPANY_NAME,
+    GITHUB_OWNER,
+    GITHUB_REPO,
     SEVERITY_LABELS,
-    SUPPORT_EMAIL,
     SUPPORT_SITE_URL,
     buildDiagnosticsSnapshot,
-    buildFeedbackMailto,
     buildFeedbackText,
     buildIssueUrl,
     type FeedbackSeverity,
@@ -59,26 +59,7 @@
         showToast("Issue tracker opened with your feedback", "success");
       }
     } catch (e) {
-      showToast(`Couldn't open the tracker: ${e instanceof Error ? e.message : e} — use email or Copy`, "error");
-    } finally {
-      sending = false;
-    }
-  }
-
-  function openEmailApp() {
-    if (sending) return;
-    sending = true;
-    try {
-      const { url, truncated } = buildFeedbackMailto({ subject, message, severity }, snapshot());
-      window.location.href = url;
-      showToast(
-        truncated
-          ? "Email app opened — message was long, paste the rest manually"
-          : "Email app opened with your feedback",
-        truncated ? "warning" : "success"
-      );
-    } catch (e) {
-      showToast(`Couldn't open the email app: ${e instanceof Error ? e.message : e} — use Copy instead`, "error");
+      showToast(`Couldn't open the tracker: ${e instanceof Error ? e.message : e} — use Copy instead`, "error");
     } finally {
       sending = false;
     }
@@ -87,7 +68,7 @@
   async function copyFeedback() {
     try {
       await navigator.clipboard.writeText(buildFeedbackText({ subject, message, severity }, snapshot()));
-      showToast("Feedback copied — paste it into an email to support", "success");
+      showToast("Feedback copied — paste it into a new GitHub issue", "success");
     } catch (e) {
       showToast(`Couldn't copy: ${e instanceof Error ? e.message : e}`, "error");
     }
@@ -97,15 +78,6 @@
     try {
       await navigator.clipboard.writeText(snapshot());
       showToast("Diagnostics copied to clipboard", "success");
-    } catch (e) {
-      showToast(`Couldn't copy: ${e instanceof Error ? e.message : e}`, "error");
-    }
-  }
-
-  async function copyEmail() {
-    try {
-      await navigator.clipboard.writeText(SUPPORT_EMAIL);
-      showToast("Support address copied", "success");
     } catch (e) {
       showToast(`Couldn't copy: ${e instanceof Error ? e.message : e}`, "error");
     }
@@ -149,9 +121,8 @@
     <span class="value">{appVersion}</span>
   </div>
   <div class="setting-row">
-    <span class="setting-label">Support inbox</span>
-    <span class="value">{SUPPORT_EMAIL}</span>
-    <button class="secondary-btn" onclick={copyEmail}>Copy</button>
+    <span class="setting-label">Issue tracker</span>
+    <span class="value">github.com/{GITHUB_OWNER}/{GITHUB_REPO}/issues</span>
   </div>
 </div>
 
@@ -162,12 +133,12 @@
     <span class="setting-label">Diagnostics snapshot</span>
     <button class="secondary-btn" onclick={copyDiagnostics}>Copy diagnostics</button>
   </div>
-  <p class="setting-desc">Version, platform, and theme — paste it into your support email so the problem is reproducible. No documents or secrets are included.</p>
+  <p class="setting-desc">Version, platform, and theme — paste it into your issue so the problem is reproducible. No documents or secrets are included.</p>
 </div>
 
   <div class="settings-section">
   <h3>Send feedback</h3>
-  <p class="setting-desc">Bug, idea, or question — open a prefilled GitHub issue, or your own email app with everything filled in. Nothing leaves this device until you press Send there.</p>
+  <p class="setting-desc">Bug, idea, or question — open a prefilled GitHub issue with everything filled in. Nothing leaves this device until you press Submit there.</p>
   <div class="setting-row">
     <label for="support-severity">Kind</label>
     <select id="support-severity" bind:value={severity}>
@@ -192,14 +163,13 @@
     <button class="primary-btn" onclick={openIssueTracker} disabled={sending}>
       {sending ? "Opening…" : "Open GitHub issue"}
     </button>
-    <button class="secondary-btn" onclick={openEmailApp} disabled={sending}>Open email app</button>
-    <button class="secondary-btn" onclick={copyFeedback}>Copy instead</button>
+    <button class="secondary-btn" onclick={copyFeedback}>Copy issue text</button>
   </div>
 </div>
 
 <div class="settings-section">
   <h3>What happens next</h3>
-  <p class="setting-desc">GitHub issues are public — anyone can read them, so keep secrets and private document text out. Prefer private? Use the email path instead; it goes straight to the maker. Useful reports include the diagnostics snapshot above plus the exact steps that reproduce the problem.</p>
+  <p class="setting-desc">Your draft opens as a new public GitHub issue with everything filled in — review it there before submitting. Issues are public, so keep secrets and private document text out. Useful reports include the diagnostics snapshot above plus the exact steps that reproduce the problem.</p>
 </div>
 
 <style>

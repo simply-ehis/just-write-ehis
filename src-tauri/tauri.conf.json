@@ -46,6 +46,9 @@
   "bundle": {
     "active": true,
     "publisher": "simply-ehis",
+    "homepage": "https://github.com/simply-ehis/just-write-ehis",
+    "copyright": "Copyright (C) 2026 simply-ehis",
+    "shortDescription": "Just Write ehis — a personal super app for writing and everything around writing",
     "targets": "nsis",
     "externalBin": ["binaries/pandoc"],
     "icon": [
