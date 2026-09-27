@@ -2,6 +2,8 @@
 
 A personal super app for **writing and everything around writing** — docs, fiction, scripts, knowledge, reading, and an AI that knows your work. Writing is the identity; everything else serves it.
 
+> License: GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). Made by simply-ehis: report bugs via Settings → Support or [GitHub Issues](https://github.com/simply-ehis/just-write-ehis/issues).
+
 > Spec: the canonical `canonical-spec-v1.11.md` (Amendments 1–11 + deltas in `docs/SPEC-STATUS.md`). Deviations need a spec amendment, not a chat message.
 
 ## Recent Production Readiness Additions (v0.2.1)

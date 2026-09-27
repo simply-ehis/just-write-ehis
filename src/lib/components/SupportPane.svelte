@@ -20,6 +20,7 @@
     buildDiagnosticsSnapshot,
     buildFeedbackMailto,
     buildFeedbackText,
+    buildIssueUrl,
     type FeedbackSeverity,
   } from "$lib/support";
 
@@ -42,6 +43,26 @@
       theme: $settings.theme,
       themeMode: $settings.themeMode,
     });
+  }
+
+  function openIssueTracker() {
+    if (sending) return;
+    sending = true;
+    try {
+      const { url, truncated } = buildIssueUrl({ subject, message, severity }, snapshot());
+      const win = window.open(url, "_blank", "noopener");
+      if (!win) {
+        showToast("Popup blocked — copy the issue text instead, or allow popups", "warning");
+      } else if (truncated) {
+        showToast("Tracker opened — message was long, paste the rest manually", "warning");
+      } else {
+        showToast("Issue tracker opened with your feedback", "success");
+      }
+    } catch (e) {
+      showToast(`Couldn't open the tracker: ${e instanceof Error ? e.message : e} — use email or Copy`, "error");
+    } finally {
+      sending = false;
+    }
   }
 
   function openEmailApp() {
@@ -144,9 +165,9 @@
   <p class="setting-desc">Version, platform, and theme — paste it into your support email so the problem is reproducible. No documents or secrets are included.</p>
 </div>
 
-<div class="settings-section">
+  <div class="settings-section">
   <h3>Send feedback</h3>
-  <p class="setting-desc">Bug, idea, or question — it opens your own email app with everything filled in. Nothing leaves this device until you press Send there.</p>
+  <p class="setting-desc">Bug, idea, or question — open a prefilled GitHub issue, or your own email app with everything filled in. Nothing leaves this device until you press Send there.</p>
   <div class="setting-row">
     <label for="support-severity">Kind</label>
     <select id="support-severity" bind:value={severity}>
@@ -168,16 +189,17 @@
     rows="7"
   ></textarea>
   <div class="export-import-row">
-    <button class="primary-btn" onclick={openEmailApp} disabled={sending}>
-      {sending ? "Opening…" : "Open email app"}
+    <button class="primary-btn" onclick={openIssueTracker} disabled={sending}>
+      {sending ? "Opening…" : "Open GitHub issue"}
     </button>
+    <button class="secondary-btn" onclick={openEmailApp} disabled={sending}>Open email app</button>
     <button class="secondary-btn" onclick={copyFeedback}>Copy instead</button>
   </div>
 </div>
 
 <div class="settings-section">
   <h3>What happens next</h3>
-  <p class="setting-desc">Your email goes straight to the maker — there is no tracker to watch and no account needed. Useful reports include the diagnostics snapshot above plus the exact steps that reproduce the problem.</p>
+  <p class="setting-desc">GitHub issues are public — anyone can read them, so keep secrets and private document text out. Prefer private? Use the email path instead; it goes straight to the maker. Useful reports include the diagnostics snapshot above plus the exact steps that reproduce the problem.</p>
 </div>
 
 <style>

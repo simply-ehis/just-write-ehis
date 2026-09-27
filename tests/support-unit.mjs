@@ -49,6 +49,20 @@ check("long draft truncates loudly", r.truncated === true && r.url.includes(enco
 const text = v.buildFeedbackText({ subject: "Hi", message: "hello", severity: "other" }, snap);
 check("text fallback has headers + body", text.includes(`To: ${v.SUPPORT_EMAIL}`) && text.includes("[Other] Hi") && text.includes("hello"));
 
+// GitHub issue routing (public tracker path).
+const issue = v.buildIssueUrl(
+  { subject: "Crash on save", message: "Steps: open, type, save.", severity: "bug" },
+  snap
+);
+check("issue targets repo tracker", issue.url.startsWith("https://github.com/simply-ehis/just-write-ehis/issues/new?"));
+check("issue title carries severity", issue.url.includes(encodeURIComponent("[Bug report] Crash on save")));
+check("issue body carries message + snapshot", issue.url.includes(encodeURIComponent("Steps: open, type, save.")) && issue.url.includes(encodeURIComponent("app version: 0.2.1")));
+check("issue short draft not truncated", issue.truncated === false);
+const issueLong = v.buildIssueUrl({ subject: "t", message: long, severity: "other" }, snap);
+check("issue long draft truncates loudly", issueLong.truncated === true);
+const issueEmpty = v.buildIssueUrl({ subject: "  ", message: "   ", severity: "question" }, snap);
+check("issue empty falls back", issueEmpty.url.includes(encodeURIComponent("[Question] Untitled feedback")));
+
 // Contact surface is never empty (placeholders are explicit, not blank).
 check("support email set", typeof v.SUPPORT_EMAIL === "string" && v.SUPPORT_EMAIL.includes("@"));
 check("company name set", typeof v.COMPANY_NAME === "string" && v.COMPANY_NAME.length > 0);

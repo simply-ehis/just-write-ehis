@@ -1,17 +1,17 @@
 /**
- * support — Support page data + feedback mailto composer.
+ * support — Support page data + feedback composers (GitHub issue + email).
  *
  * Pure module (no Svelte, no DOM): safe to unit-test in plain node.
  *
- * The repo is private, so there is no public issue tracker. Feedback
- * travels by email; nothing is ever sent automatically — opening the mail
- * app (or copying the draft) is always an explicit tap.
- *
- * Feedback travels by email; nothing is ever sent automatically — opening
- * the mail app (or copying the draft) is always an explicit tap.
+ * Nothing is ever sent automatically — opening the tracker, the mail app,
+ * or copying the draft is always an explicit tap.
  */
 
 export const SUPPORT_EMAIL = "hehisehis@gmail.com";
+/** Public tracker backing the "Open GitHub issue" path. */
+export const GITHUB_OWNER = "simply-ehis";
+export const GITHUB_REPO = "just-write-ehis";
+export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues`;
 export const COMPANY_NAME = "simply-ehis";
 export const COMPANY_BLURB =
   "Simply Ehis is one independent developer making personal software — starting with Just Write ehis, a super app for writing and everything around it.";
@@ -53,33 +53,64 @@ export function buildDiagnosticsSnapshot(snap: DiagnosticsSnapshot): string {
   ].join("\n");
 }
 
-const MAX_MAILTO_BODY = 1500;
+const MAX_LINK_BODY = 1500;
+
+function buildFeedbackSubject(draft: FeedbackDraft): string {
+  return `[${SEVERITY_LABELS[draft.severity] ?? "Feedback"}] ${((draft.subject || "").trim() || "Untitled feedback")}`.slice(0, 200);
+}
+
+/** Shared body builder: truncates loudly (link URLs have practical length limits). */
+function buildFeedbackBody(
+  draft: FeedbackDraft,
+  snapshot: string,
+  maxLen: number
+): { body: string; truncated: boolean } {
+  let message = draft.message.trim() || "(no details written)";
+  let truncated = false;
+  if (message.length > maxLen) {
+    message = message.slice(0, maxLen);
+    truncated = true;
+  }
+  const body = [
+    message,
+    ...(truncated ? ["", "(message truncated to fit the link — paste the rest manually)"] : []),
+    "",
+    snapshot,
+  ].join("\n");
+  return { body, truncated };
+}
 
 /**
- * Compose the feedback email. Long messages are truncated (mailto URLs
- * have practical length limits) and the cut is marked loudly, never
- * silent. Returns the mailto: URL and whether truncation happened.
+ * Compose the feedback email. Returns the mailto: URL and whether the
+ * message was truncated.
  */
 export function buildFeedbackMailto(
   draft: FeedbackDraft,
   snapshot: string
 ): { url: string; truncated: boolean } {
-  const subject = `[${SEVERITY_LABELS[draft.severity] ?? "Feedback"}] ${((draft.subject || "").trim() || "Untitled feedback")}`.slice(0, 200);
-  let message = draft.message.trim() || "(no details written)";
-  let truncated = false;
-  if (message.length > MAX_MAILTO_BODY) {
-    message = message.slice(0, MAX_MAILTO_BODY);
-    truncated = true;
-  }
-  const body = [
-    message,
-    ...(truncated ? ["", "(message truncated to fit the email link — paste the rest manually)"] : []),
-    "",
-    snapshot,
-  ].join("\n");
+  const subject = buildFeedbackSubject(draft);
+  const { body, truncated } = buildFeedbackBody(draft, snapshot, MAX_LINK_BODY);
   const url =
     `mailto:${SUPPORT_EMAIL}` +
     `?subject=${encodeURIComponent(subject)}` +
+    `&body=${encodeURIComponent(body)}`;
+  return { url, truncated };
+}
+
+/**
+ * Compose a prefilled GitHub issue URL (title + body query params).
+ * Opens the tracker with everything filled in; the user still presses
+ * Submit there. Returns the URL and whether the message was truncated.
+ */
+export function buildIssueUrl(
+  draft: FeedbackDraft,
+  snapshot: string
+): { url: string; truncated: boolean } {
+  const subject = buildFeedbackSubject(draft);
+  const { body, truncated } = buildFeedbackBody(draft, snapshot, MAX_LINK_BODY);
+  const url =
+    `${GITHUB_ISSUES_URL}/new` +
+    `?title=${encodeURIComponent(subject)}` +
     `&body=${encodeURIComponent(body)}`;
   return { url, truncated };
 }
