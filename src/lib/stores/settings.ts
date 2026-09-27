@@ -336,7 +336,9 @@ function loadSettings(): AppSettings {
       // migrate forward (exact matches only); deliberate custom values stay.
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         const raw = parsed as Record<string, unknown>;
-        raw.vaultPath = defaultSettings.vaultPath;
+        if (typeof raw.vaultPath !== "string" || !raw.vaultPath) {
+          raw.vaultPath = defaultSettings.vaultPath;
+        }
         // Style×mode migration (2026-09): legacy single `theme` values map
         // onto the split fields before validation drops them as unknown.
         if (raw.theme === "dark" || raw.theme === "light" || raw.theme === "brutalist" || raw.theme === "glass") {
@@ -529,10 +531,15 @@ async function initSecrets(): Promise<void> {
 
 export const settings = writable<AppSettings>(loadSettings());
 let lastSettings = get(settings);
+let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 settings.subscribe((value) => {
   lastSettings = value;
-  saveSettings(value);
+  if (settingsSaveTimer) clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(() => {
+    saveSettings(value);
+    settingsSaveTimer = null;
+  }, 300);
 });
 
 if (typeof window !== "undefined") {
@@ -571,7 +578,7 @@ export function openSettingsAt(category: SettingsCategory) {
  * the per-workspace map (that switch was previously stored but never read).
  */
 export function isWorkspacePrivate(workspaceId: string): boolean {
-  const s = loadSettings();
+  const s = get(settings);
   if (workspaceId === "logs" && s.logsLocalOnly) return true;
   return s.workspacePrivacy[workspaceId] === true;
 }

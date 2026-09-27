@@ -19,9 +19,15 @@ export default defineConfig({
     target: process.env.TAURI_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_DEBUG,
-    // No preload polyfill: Tauri ships a modern webview and the PWA targets
-    // modern mobile browsers, so native dynamic import handles lazy chunks.
-    // (The polyfill's fetch-preload also breaks headless smoke tests.)
     modulePreload: { polyfill: false },
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          codemirror: ["codemirror", "@codemirror/state", "@codemirror/view", "@codemirror/commands", "@codemirror/search", "@codemirror/lang-markdown"],
+          d3: ["d3-dispatch", "d3-force", "d3-quadtree", "d3-timer"],
+          pdfjs: ["pdfjs-dist"],
+        },
+      },
+    },
   },
 });

@@ -4,6 +4,25 @@
   "version": "0.2.1",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "description": "A personal super app for writing and everything around writing",
+  "author": "simply-ehis",
+  "homepage": "https://github.com/simply-ehis/just-write-ehis#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simply-ehis/just-write-ehis.git"
+  },
+  "bugs": {
+    "url": "https://github.com/simply-ehis/just-write-ehis/issues"
+  },
+  "keywords": [
+    "writing",
+    "editor",
+    "desktop",
+    "tauri",
+    "svelte",
+    "local-first",
+    "privacy"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

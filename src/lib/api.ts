@@ -723,7 +723,7 @@ export const api = {
   llmCompletion: (prompt: string, maxTokens: number, temperature: number) =>
     safeInvoke<string>("llm_completion", { prompt, maxTokens, temperature }),
 
-  llmChatCompletion: (messages: any[], maxTokens: number, temperature: number) =>
+  llmChatCompletion: (messages: { role: string; content: string }[], maxTokens: number, temperature: number) =>
     safeInvoke<string>("llm_chat_completion", { messages, maxTokens, temperature }),
 
   appUpdateStatus: () =>

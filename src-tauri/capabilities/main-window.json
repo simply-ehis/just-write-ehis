@@ -5,6 +5,8 @@
   "windows": ["main"],
   "permissions": [
     "main",
+    "allow-tabs-get",
+    "allow-tabs-set",
     "updater:default",
     "process:default",
     "autostart:default",

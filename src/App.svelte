@@ -467,8 +467,10 @@
   }
 
   async function waitForAppAccess(): Promise<void> {
+    const deadline = Date.now() + 15000;
     for (;;) {
       if ($appLockPinStatus === "ready" && ((!$appLockConfigured && !$settings.lockEnabled) || $appUnlocked)) return;
+      if (Date.now() > deadline) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -641,8 +643,6 @@
         reportBootMs();
       } finally {
         clearTimeout(bootFailsafe);
-        // ready is set even if a step threw outside bootStep.
-        ready = true;
         reportBootMs();
       }
     })();

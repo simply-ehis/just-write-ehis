@@ -215,7 +215,7 @@ import { countWords } from "$lib/text";
     lastPreviewTitle = linkTitle;
     // Find doc by title
     api.docListByWorkspace("write").then((docs) => {
-      const match = docs.find((d: any) => d.title === linkTitle);
+      const match = docs.find((d) => d.title === linkTitle);
       if (match) {
         previewDocId = match.id;
         previewDocTitle = match.title;
@@ -403,7 +403,7 @@ import { countWords } from "$lib/text";
   });
   }
 
-  function createEditor(doc: any) {
+  function createEditor(doc: Doc | null) {
     if (editorView) {
       editorView.destroy();
     }

@@ -170,6 +170,17 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_bible_mentions_doc ON bible_mentions(doc_id);
             CREATE INDEX IF NOT EXISTS idx_bible_suggestions_scope ON bible_suggestions(bible_doc_id);
             CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);
+            CREATE INDEX IF NOT EXISTS idx_docs_updated_at ON docs(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_docs_locked ON docs(locked);
+            CREATE INDEX IF NOT EXISTS idx_docs_pinned ON docs(pinned);
+            CREATE INDEX IF NOT EXISTS idx_docs_activity_score ON docs(activity_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_docs_title ON docs(title COLLATE NOCASE);
+            CREATE INDEX IF NOT EXISTS idx_docs_workspace_status ON docs(workspace, status);
+            CREATE INDEX IF NOT EXISTS idx_bible_mentions_doc_fact ON bible_mentions(doc_id, fact_key);
+            CREATE INDEX IF NOT EXISTS idx_bible_suggestions_source_status ON bible_suggestions(source_doc_id, status);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_doc_created ON snapshots(doc_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_doc_event ON usage_events(doc_id, event);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(ts);
 
             CREATE TABLE IF NOT EXISTS rag_chunks (
                 id TEXT PRIMARY KEY,
@@ -188,7 +199,7 @@ impl Database {
 
         let has_suggestion_status: bool = conn.prepare("SELECT status FROM bible_suggestions LIMIT 1").is_ok();
         if !has_suggestion_status {
-            let _ = conn.execute_batch("ALTER TABLE bible_suggestions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';");
+            conn.execute_batch("ALTER TABLE bible_suggestions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';")?;
         }
         let has_fact_scope_key: bool = conn.query_row(
             "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_bible_facts_doc_key_unique'",
@@ -215,9 +226,9 @@ impl Database {
             "SELECT content_hash FROM snapshots LIMIT 1"
         ).is_ok();
         if !has_hash {
-            let _ = conn.execute_batch(
+            conn.execute_batch(
                 "ALTER TABLE snapshots ADD COLUMN content_hash TEXT;"
-            );
+            )?;
         }
 
         // Migration: add pinned, goal_words, deadline to docs if missing (A11.5, A11.8)
@@ -225,11 +236,11 @@ impl Database {
             "SELECT pinned FROM docs LIMIT 1"
         ).is_ok();
         if !has_pinned {
-            let _ = conn.execute_batch(
+            conn.execute_batch(
                 "ALTER TABLE docs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE docs ADD COLUMN goal_words INTEGER;
                  ALTER TABLE docs ADD COLUMN deadline TEXT;"
-            );
+            )?;
         }
 
         // Migration: add locked to docs if missing (per-doc lock)
@@ -237,9 +248,9 @@ impl Database {
             "SELECT locked FROM docs LIMIT 1"
         ).is_ok();
         if !has_locked {
-            let _ = conn.execute_batch(
+            conn.execute_batch(
                 "ALTER TABLE docs ADD COLUMN locked INTEGER NOT NULL DEFAULT 0;"
-            );
+            )?;
         }
 
         // Canvas board (A11.1): freeform cards + connections.
@@ -272,7 +283,7 @@ impl Database {
             "SELECT metric_type FROM craft_metrics LIMIT 1"
         ).is_ok();
         if !has_metric_type {
-            let _ = conn.execute_batch(
+            conn.execute_batch(
                 "DROP TABLE IF EXISTS craft_metrics;
                  CREATE TABLE craft_metrics (
                      id TEXT PRIMARY KEY,
@@ -283,7 +294,7 @@ impl Database {
                      FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
                  );
                  CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);"
-            );
+            )?;
         }
 
         Ok(())

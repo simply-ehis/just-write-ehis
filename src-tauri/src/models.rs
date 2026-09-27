@@ -385,3 +385,14 @@ pub struct AtlasStar {
     pub updated_at: String,
     pub embedding: Vec<f32>,
 }
+
+pub fn normalize_memory_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .flat_map(|c| c.to_lowercase())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}

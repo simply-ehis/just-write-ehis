@@ -434,6 +434,7 @@ impl SttManager {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -446,23 +447,26 @@ impl SttManager {
         let resp = client.post(format!("{}/transcribe", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
         result.text.ok_or_else(|| result.error.unwrap_or_else(|| "transcription failed".into()))
     }
 
     pub async fn stream_start(&self) -> Result<(), String> {
         let client = http_client(30);
-        client.post(format!("{}/stream/start", self.base_url()))
+        let resp = client.post(format!("{}/stream/start", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         Ok(())
     }
 
     pub async fn stream_chunk(&self, audio_b64: &str, format: &str) -> Result<(), String> {
         let client = http_client(30);
         let body = serde_json::json!({ "audio": audio_b64, "format": format });
-        client.post(format!("{}/stream/chunk", self.base_url()))
+        let resp = client.post(format!("{}/stream/chunk", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         Ok(())
     }
 
@@ -470,6 +474,7 @@ impl SttManager {
         let client = http_client(30);
         let resp = client.post(format!("{}/stream/stop", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
         result.text.ok_or_else(|| result.error.unwrap_or_else(|| "stream transcription failed".into()))
     }
@@ -544,6 +549,7 @@ impl TtsManager {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -561,6 +567,7 @@ impl TtsManager {
         let resp = client.post(format!("{}/synthesize", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         let result: TtsSynthResponse = resp.json().await.map_err(|e| e.to_string())?;
         match (result.audio, result.sample_rate) {
             (Some(audio), Some(sr)) => Ok((audio, sr)),
@@ -570,8 +577,9 @@ impl TtsManager {
 
     pub async fn stop_playback(&self) -> Result<(), String> {
         let client = http_client(30);
-        client.post(format!("{}/stop", self.base_url()))
+        let resp = client.post(format!("{}/stop", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         Ok(())
     }
 }
@@ -647,6 +655,7 @@ impl MemoryManager {
             .header("X-JWE-Memory-Token", &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -655,6 +664,7 @@ impl MemoryManager {
         let resp = client.get(format!("{}/health", self.base_url()))
             .header("X-JWE-Memory-Token", &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -669,6 +679,7 @@ impl MemoryManager {
             .header("X-JWE-Memory-Token", &self.auth_token)
             .query(&[("q", query)])
             .send().await.map_err(|e| e.to_string())?;
+        ensure_http_ok(&resp)?;
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         // Missing field is a broken response (real error); an empty string
         // is a legitimate "no facts" answer and stays Ok.

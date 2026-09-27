@@ -8,7 +8,7 @@ use zerocopy::IntoBytes;
 use tauri::Emitter;
 
 fn uuid_v7() -> String {
-    Uuid::new_v4().to_string()
+    Uuid::now_v7().to_string()
 }
 
 /// Compute the on-disk path for a doc based on workspace, kind, title, and vault root.
@@ -147,11 +147,9 @@ fn write_to_disk(path: &std::path::Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Compute SHA-256 content hash for snapshot deduplication.
 fn compute_content_hash(content: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
     content.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
@@ -199,16 +197,7 @@ fn snippet_around(content: &str, start: i64, end: i64) -> String {
     out
 }
 
-fn normalize_memory_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-        .flat_map(|c| c.to_lowercase())
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
+use crate::models::normalize_memory_key;
 
 fn memory_edit_distance(left: &str, right: &str) -> usize {
     let a: Vec<char> = left.chars().collect();
@@ -469,48 +458,50 @@ impl Database {
         let content_changed = req.content.is_some();
         {
             let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
             let now = Utc::now().to_rfc3339();
             let old_parent = if req.parent_id.is_some() {
-                Some(conn.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get::<_, Option<String>>(0)).map_err(|e| e.to_string())?)
+                Some(tx.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get::<_, Option<String>>(0)).map_err(|e| e.to_string())?)
             } else {
                 None
             };
 
-            if let Some(title) = &req.title {
-                conn.execute(
+            for let Some(title) = &req.title {
+                tx.execute(
                     "UPDATE docs SET title = ?1, updated_at = ?2 WHERE id = ?3",
                     params![title, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
             if let Some(content) = &req.content {
                 let word_count = content.split_whitespace().count() as i64;
-                conn.execute(
+                tx.execute(
                     "UPDATE docs SET content = ?1, word_count = ?2, updated_at = ?3 WHERE id = ?4",
                     params![content, word_count, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
             if let Some(status) = &req.status {
-                conn.execute(
+                tx.execute(
                     "UPDATE docs SET status = ?1, updated_at = ?2 WHERE id = ?3",
                     params![status, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
             if let Some(fm) = &req.frontmatter_json {
-                conn.execute(
+                tx.execute(
                     "UPDATE docs SET frontmatter_json = ?1, updated_at = ?2 WHERE id = ?3",
                     params![fm, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
             if let Some(parent_id) = &req.parent_id {
                 if old_parent.as_ref() != Some(parent_id) {
-                    conn.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
-                    conn.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                    tx.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                    tx.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
                 }
-                conn.execute(
+                tx.execute(
                     "UPDATE docs SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
                     params![parent_id, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
+            tx.commit().map_err(|e| e.to_string())?;
         }
 
         // Write content to disk if changed + auto-snapshot on meaningful diff
@@ -1134,7 +1125,7 @@ impl Database {
             if let Some(target_id) = title_to_id.get(&link_lower) {
                 if target_id != doc_id {
                     let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-                    let snippet = content[start.saturating_sub(40)..std::cmp::min(content.len(), start + cap.get(0).map(|m| m.len()).unwrap_or(0) + 40)].to_string();
+                    let snippet = snippet_around(&content, start, cap.get(0).map(|m| m.len()).unwrap_or(0) + 80);
                     conn.execute(
                         "INSERT OR IGNORE INTO backlinks (source_id, target_id, context_snippet) VALUES (?1, ?2, ?3)",
                         params![doc_id, target_id, snippet],
@@ -1434,7 +1425,7 @@ impl Database {
             let title_lower = other_title.to_lowercase();
             if content_lower.contains(&title_lower) && !linked_titles.contains(&title_lower) {
                 let pos = content_lower.find(&title_lower).unwrap_or(0);
-                let snippet = doc.content[pos.saturating_sub(40)..std::cmp::min(doc.content.len(), pos + other_title.len() + 40)].to_string();
+                let snippet = snippet_around(&doc.content, pos, other_title.len() + 80);
                 mentions.push(UnlinkedMention {
                     source_id: doc_id.to_string(),
                     source_title: doc.title.clone(),
@@ -3310,7 +3301,7 @@ impl Database {
 
     pub fn clear_messages(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM messages", []).map_err(|e| e.to_string())?;
+        let count = conn.execute("DELETE FROM chat_messages", []).map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
@@ -3328,7 +3319,7 @@ impl Database {
 
     pub fn clear_tab_states(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM tab_states", []).map_err(|e| e.to_string())?;
+        let count = conn.execute("DELETE FROM tab_state", []).map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
@@ -3404,7 +3395,7 @@ impl Database {
                             params![pid, doc_id],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                         ) {
-                            let snippet = if prev.1.len() > 300 { format!("{}...", &prev.1[..300]) } else { prev.1 };
+                            let snippet = if prev.1.len() > 300 { format!("{}...", &prev.1[..300.min(prev.1.len())]) } else { prev.1 };
                             context.push_str(&format!("Previous scene: \"{}\"\n{}\n\n", prev.0, snippet));
                         }
                     }
@@ -3423,7 +3414,7 @@ impl Database {
                     if !notes.is_empty() {
                         context.push_str("Recent daily notes:\n");
                         for (title, content) in &notes {
-                            let snippet = if content.len() > 200 { format!("{}...", &content[..200]) } else { content.clone() };
+                            let snippet = if content.len() > 200 { format!("{}...", &content[..200.min(content.len())]) } else { content.clone() };
                             context.push_str(&format!("  [{}] {}\n", title, snippet));
                         }
                         context.push('\n');

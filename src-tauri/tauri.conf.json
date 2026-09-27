@@ -3,6 +3,9 @@
   "productName": "Just Write ehis",
   "version": "0.2.1",
   "identifier": "com.just-write-ehis.app",
+  "publisher": "simply-ehis",
+  "homepage": "https://github.com/simply-ehis/just-write-ehis#readme",
+  "repository": "https://github.com/simply-ehis/just-write-ehis.git",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",
@@ -40,15 +43,17 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:* http://localhost:* https://* ipc: http://ipc.localhost; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' http://127.0.0.1:* http://localhost:* https://api.anthropic.com https://api.openai.com https://api.groq.com https://api.deepseek.com https://openrouter.ai ipc: http://ipc.localhost; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
     "active": true,
     "publisher": "simply-ehis",
-    "homepage": "https://github.com/simply-ehis/just-write-ehis",
+    "homepage": "https://github.com/simply-ehis/just-write-ehis#readme",
+    "repository": "https://github.com/simply-ehis/just-write-ehis.git",
     "copyright": "Copyright (C) 2026 simply-ehis",
-    "shortDescription": "Just Write ehis — a personal super app for writing and everything around writing",
+    "shortDescription": "A personal super app for writing and everything around writing",
+    "longDescription": "Just Write ehis is a local-first desktop writing application built with Tauri 2 and Svelte 5. It provides a distraction-free writing environment with integrated AI features, voice input/output, document management, and knowledge organization tools.",
     "targets": "nsis",
     "externalBin": ["binaries/pandoc"],
     "icon": [

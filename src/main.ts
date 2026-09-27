@@ -39,10 +39,17 @@ void bootstrap().catch((error) => {
   const target = document.getElementById("app");
   if (target) {
     const reason = error instanceof Error ? error.message : String(error);
-    target.innerHTML =
-      '<div style="display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;padding:24px;">' +
-      "<h1>Just Write ehis couldn't start</h1>" +
-      `<p>The app shell failed to load (${reason}). Reloading usually fixes this; reinstalling repairs a damaged install.</p>` +
-      '<button onclick="location.reload()" style="padding:8px 20px;cursor:pointer;">Reload</button></div>';
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;padding:24px;";
+    const h1 = document.createElement("h1");
+    h1.textContent = "Just Write ehis couldn't start";
+    const p = document.createElement("p");
+    p.textContent = `The app shell failed to load (${reason}). Reloading usually fixes this; reinstalling repairs a damaged install.`;
+    const btn = document.createElement("button");
+    btn.textContent = "Reload";
+    btn.style.cssText = "padding:8px 20px;cursor:pointer;";
+    btn.addEventListener("click", () => location.reload());
+    wrap.append(h1, p, btn);
+    target.replaceChildren(wrap);
   }
 });
