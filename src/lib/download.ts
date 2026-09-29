@@ -18,7 +18,9 @@ export function downloadConvertOutput(out: ConvertOutput): void {
   a.href = url;
   a.download = out.filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel large-blob downloads before the
+  // browser fetches them; defer past the click instead.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 /** Raw Fountain source download (no backend: fountain IS the source). */

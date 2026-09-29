@@ -12,55 +12,16 @@
  */
 import { readFile, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { JSDOM } from "jsdom";
+import { fileURLToPath } from "node:url";
+import { bootDom, resolveBundle, sleep } from "./helpers/jsdom-boot.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const KEYS = [
-  "window", "Window", "document", "navigator", "localStorage", "sessionStorage",
-  "HTMLElement", "Element", "Node", "Text", "Comment", "Document",
-  "DocumentFragment", "DocumentType", "NodeList", "HTMLCollection",
-  "Range", "Selection", "NodeFilter", "HTMLMediaElement", "HTMLAudioElement",
-  "HTMLVideoElement", "HTMLImageElement", "Image", "Audio", "SVGElement",
-  "SVGSVGElement", "SVGGraphicsElement", "HTMLInputElement", "HTMLTextAreaElement",
-  "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "HTMLDivElement",
-  "HTMLSpanElement", "HTMLCanvasElement", "Event", "CustomEvent", "KeyboardEvent",
-  "MouseEvent", "PointerEvent", "WheelEvent", "DragEvent", "ClipboardEvent",
-  "FocusEvent", "InputEvent", "MutationObserver", "MutationRecord",
-  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame",
-  "DOMParser", "XMLSerializer", "DOMTokenList", "VisualViewport",
-];
-
-function rig(dom) {
-  delete globalThis.CustomEvent;
-  delete globalThis.Event;
-  for (const key of KEYS) {
-    if (!(key in dom.window)) continue;
-    try {
-      globalThis[key] = dom.window[key];
-    } catch {
-      try {
-        Object.defineProperty(globalThis, key, {
-          value: dom.window[key], writable: true, configurable: true,
-        });
-      } catch { /* keep Node's */ }
-    }
-  }
-  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
-  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-  const emptyRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
-  if (dom.window.Range) {
-    if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [];
-    if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = emptyRect;
-  }
-}
 
 let failures = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (rel) => readFile(join(root, rel), "utf8");
 
 // ── Source contract (CSS/layout facts jsdom cannot evaluate) ─────────
@@ -105,23 +66,17 @@ try {
 
 // ── Behavior: 390px shell + Inspector sheet round-trip ───────────────
 {
-  const dom = new JSDOM(
-    `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
-    { url: "http://localhost/", pretendToBeVisual: true }
-  );
-  rig(dom);
-  dom.window.innerWidth = 390;
-  dom.window.innerHeight = 844;
+  const dom = bootDom(390, 844);
   dom.window.localStorage.setItem("writing-app-settings", JSON.stringify({ hasOnboarded: true }));
-  const distHtml = await read("dist/index.html");
-  const jsName = distHtml.match(/assets\/(index-.*\.js)/)?.[1];
-  if (!jsName) {
+  let bundleUrl;
+  try {
+    bundleUrl = await resolveBundle(root);
+  } catch {
     console.log("FAIL  no bundle in dist/index.html (run npm run build first)");
     process.exit(1);
   }
-  const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
   console.error = (..._) => {};
-  await import(bundleUrl + "?boot=mobile");
+  await import(bundleUrl);
   await sleep(2500);
 
   const qa = (s) => [...dom.window.document.querySelectorAll(s)];

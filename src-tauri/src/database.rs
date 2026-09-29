@@ -36,7 +36,11 @@ impl Database {
                 status TEXT NOT NULL DEFAULT 'draft',
                 frontmatter_json TEXT,
                 activity_score REAL NOT NULL DEFAULT 0.0,
-                embedding_ref TEXT
+                embedding_ref TEXT,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                goal_words INTEGER,
+                deadline TEXT,
+                locked INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS backlinks (

@@ -85,7 +85,7 @@
   // Web tour tells the browser truth: ghost needs a connected model
   // endpoint here, and docs persist to this browser's localStorage.
   const TOUR_DOC = isBrowserPreview()
-    ? `# Welcome to Just Write ehis ✍️
+    ? `# Welcome to Just Write ehis
 
 This is your Write tab — distraction-free, autosaved, yours. Here on the
 web, your docs persist to this browser's localStorage.
@@ -100,7 +100,7 @@ anytime in Settings → General → Replay onboarding.
 
 Delete this doc whenever you're ready. Happy writing.
 `
-    : `# Welcome to Just Write ehis ✍️
+    : `# Welcome to Just Write ehis
 
 This is your Write tab — distraction-free, autosaved, yours.
 

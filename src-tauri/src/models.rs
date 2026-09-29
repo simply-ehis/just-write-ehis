@@ -391,28 +391,6 @@ pub struct AtlasStar {
     pub embedding: Vec<f32>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ImplicitLink {
-    pub source_id: String,
-    pub target_id: String,
-    pub match_type: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Entity {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EntityOccurrence {
-    pub entity_id: String,
-    pub doc_id: String,
-    pub span_start: i64,
-    pub span_end: i64,
-}
-
 pub fn normalize_memory_key(value: &str) -> String {
     value
         .chars()

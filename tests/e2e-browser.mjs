@@ -95,13 +95,98 @@ async function serveAndFetch() {
   }
 }
 
+const toSnakeKey = (key) => key.replace(/([A-Z])/g, (ch) => `_${ch.toLowerCase()}`);
+
+/**
+ * Split on top-level commas (ignore commas nested in ()[]{}<>, strings).
+ * `quotes` selects string delimiters per language: Rust lifetimes (`'_`)
+ * are NOT strings, so Rust scans use `"` only; TypeScript uses all three.
+ */
+function splitTopLevel(text, quotes = "\"'`") {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote && text[i - 1] !== "\\") quote = null;
+      continue;
+    }
+    if (quotes.includes(ch)) { quote = ch; current += ch; continue; }
+    if ("([{<".includes(ch)) depth++;
+    if (")]}>".includes(ch)) depth--;
+    if (ch === "," && depth === 0) { parts.push(current); current = ""; continue; }
+    current += ch;
+  }
+  if (current.trim() !== "") parts.push(current);
+  return parts;
+}
+
 async function staticCoverage() {
   const api = await readFile(join(root, "src/lib/api.ts"), "utf8");
   const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
+  const rust = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   const invoked = [...api.matchAll(/safeInvoke<[^>]+>\("([^"]+)"/g)].map((m) => m[1]);
   const handled = new Set([...backend.matchAll(/case "([^"]+)":/g)].map((m) => m[1]));
   const missing = [...new Set(invoked)].filter((c) => !handled.has(c));
   check(`api commands covered by browser backend (${invoked.length} sites)`, missing.length === 0, missing.join(", "));
+
+  // Arg-spelling contract: Tauri matches invoke arg names EXACTLY against
+  // Rust param names, so every frontend key must arrive as Rust spells it.
+  // api.ts papers over the camelCase/snake_case split with withSnakeAliases
+  // (sends both spellings); this check proves the paper holds per command:
+  // each sent key must match a Rust param directly or via its snake_case.
+  const rustParams = new Map();
+  for (const m of rust.matchAll(/pub (?:async )?fn ([a-z0-9_]+)\(([^)]*)\)/g)) {
+    const params = [];
+    for (const part of splitTopLevel(m[2], '"')) {
+      const name = part.split(":")[0].trim().replace(/^mut\s+/, "");
+      const type = (part.split(":").slice(1).join(":") || "").trim();
+      if (!name || !/^[A-Za-z_][A-Za-z_0-9]*$/.test(name)) continue;
+      // Tauri-injected params (not sent over IPC): State<'_, _>, Channel,
+      // AppHandle, Manager, Window. Word-boundaried so value types like
+      // TabState are kept.
+      if (/\bState\s*<|\bChannel\b|\bAppHandle\b|\bManager\b|\bWindow\b|\bApp\b/.test(type)) continue;
+      params.push(name);
+    }
+    rustParams.set(m[1], params);
+  }
+  const argProblems = [];
+  const invokeRe = /safeInvoke<[^>]+>\("([^"]+)"(?:\s*,\s*\{)?/g;
+  let im;
+  while ((im = invokeRe.exec(api)) !== null) {
+    const cmd = im[1];
+    // Re-scan the object literal with balanced braces from the match end.
+    let keys = [];
+    if (api[im.index + im[0].length - 1] === "{") {
+      let depth = 1;
+      let body = "";
+      let j = im.index + im[0].length;
+      let quote = null;
+      for (; j < api.length && depth > 0; j++) {
+        const ch = api[j];
+        if (quote) { body += ch; if (ch === quote && api[j - 1] !== "\\") quote = null; continue; }
+        if (ch === '"' || ch === "'" || ch === "`") { quote = ch; body += ch; continue; }
+        if (ch === "{") depth++;
+        if (ch === "}") { depth--; if (depth === 0) break; }
+        body += ch;
+      }
+      for (const part of splitTopLevel(body)) {
+        const key = part.split(":")[0].trim();
+        if (/^[A-Za-z_][A-Za-z_0-9]*$/.test(key)) keys.push(key);
+      }
+    }
+    const params = rustParams.get(cmd);
+    if (!params) { argProblems.push(`${cmd}: no Rust command`); continue; }
+    for (const key of keys) {
+      if (!params.includes(key) && !params.includes(toSnakeKey(key))) {
+        argProblems.push(`${cmd}: arg "${key}" matches no Rust param`);
+      }
+    }
+  }
+  check(`invoke arg spellings match Rust params (${invoked.length} sites)`, argProblems.length === 0, [...new Set(argProblems)].slice(0, 8).join("; "));
 }
 
 async function staticIcons() {
@@ -478,7 +563,7 @@ async function secretsWiring() {
   check("PIN storage fails closed and reset transitions are explicit", lockStore.includes("requirePinStorage") && lockStore.includes("resetPinConfiguration") && lockStore.includes("api.appLockReset"));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
   check("lock listener is installed before access wait", app.indexOf('"app-lock-unlock-request"') < app.indexOf("await waitForAppAccess()") && !app.includes('listen<boolean>("app-lock-state"'));
-  check("invalid persisted PIN cannot open the shell", app.includes("$appLockConfigured || $settings.lockEnabled") && !app.includes("$settings.appLockPin.trim().length"));
+  check("invalid persisted PIN cannot open the shell", app.includes("$appLockConfigured") && app.includes("$appLockPinStatus") && !app.includes("$settings.appLockPin"));
   const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
   check("preview secret bucket has allowlist", backend.includes('payload.key !== "apiKey"'));
   const appLockCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");

@@ -1466,6 +1466,7 @@
     {:else if activeCategory === "stats"}
       <div class="settings-embed">
         <LazyWorkspace loader={() => import("./WritingAnalytics.svelte")} label="Analytics" />
+        <LazyWorkspace loader={() => import("./UsageMemory.svelte")} label="Usage memory" />
       </div>
 
     {:else if activeCategory === "keybindings"}

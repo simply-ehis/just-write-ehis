@@ -32,7 +32,6 @@ const SUBSTITUTIONS: [string, string][] = [
   ["supercede", "supersede"],
   ["threshhold", "threshold"],
   ["tommorow", "tomorrow"],
-  ["untill", "until"],
   ["writting", "writing"],
   ["begining", "beginning"],
   ["comming", "coming"],
@@ -58,8 +57,6 @@ const SUBSTITUTIONS: [string, string][] = [
   ["publically", "publicly"],
   ["reccommend", "recommend"],
   ["referance", "reference"],
-  ["relevent", "relevant"],
-  ["seize", "seize"],
   ["similer", "similar"],
   ["successfull", "successful"],
   ["supress", "suppress"],
@@ -75,10 +72,11 @@ const CHAR_NORMALIZATIONS: [RegExp, string][] = [
   [/\.\.\./g, "\u2026"],
   [/  +/g, " "],
   [/(^|[.!?]\s+)i(\s)/g, "$1I$2"],
-  [/"/g, "\u201C"],
-  [/"/g, "\u201D"],
-  [/'/g, "\u2018"],
-  [/'/g, "\u2019"],
+  // Opening quotes only after whitespace/openers; everything left is a
+  // closer. (Two blind straight-quote passes used to run here — the second
+  // could never match anything.)
+  [/(^|[\s(\[{])"(?=\S)/g, "$1\u201C"],
+  [/(^|[\s(\[{])'(?=\S)/g, "$1\u2018"],
 ];
 
 function wordFrequency(word: string): number {
@@ -178,5 +176,6 @@ export function normalizeCharacters(text: string): string {
   for (const [pattern, replacement] of CHAR_NORMALIZATIONS) {
     result = result.replace(pattern, replacement);
   }
-  return result;
+  // Closers: any straight quote surviving the opening pass above.
+  return result.replace(/"/g, "\u201D").replace(/'/g, "\u2019");
 }

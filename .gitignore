@@ -27,8 +27,12 @@ Thumbs.db
 
 # Local logs
 *.log
-just-write-ehis.key
-just-write-ehis.key.password
+# Updater signing identity: private key + password never enter git in any
+# shape. The PUBLIC key (*.key.pub) is tracked intentionally for endpoint
+# verification; see docs/UPDATES.md (env-only signing) for rotation notes.
+*.key
+*.key.password
+!*.key.pub
 
 # Patchi local config
 .patchi/

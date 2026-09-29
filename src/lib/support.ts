@@ -16,7 +16,9 @@ export const COMPANY_BLURB =
   "Simply Ehis is one independent developer making personal software — starting with Just Write ehis, a super app for writing and everything around it.";
 /** Public support hub (static site). */
 export const SUPPORT_SITE_URL = "https://ehis.pages.dev";
-/** True while the maker blurb and logo above are placeholders. */
+/** False: the maker blurb and logo above are final, not placeholders. Kept
+ * as an explicit signal (tests/support-unit.mjs asserts it) so a future
+ * placeholder swap cannot pass silently. */
 export const SUPPORT_PLACEHOLDER = false;
 
 export type FeedbackSeverity = "bug" | "idea" | "question" | "other";

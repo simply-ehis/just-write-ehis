@@ -877,115 +877,129 @@ impl Database {
         }).collect())
     }
 
-    pub fn get_settings(&self) -> Result<serde_json::Value, String> {
-        Ok(serde_json::json!({}))
-    }
-
     pub fn reindex_fts(&self) -> Result<u64, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM docs_fts", []).map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, content, workspace FROM docs WHERE locked = 0"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        }).map_err(|e| e.to_string())?;
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+        // Collect first: the read cursor must be drained before writing on
+        // the same connection, and DELETE+INSERTs run atomically so a crash
+        // can never leave the FTS index half-empty.
+        let docs: Vec<(String, String, String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, content, workspace FROM docs WHERE locked = 0"
+            ).map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            }).map_err(|e| e.to_string())?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM docs_fts", []).map_err(|e| e.to_string())?;
         let mut count = 0u64;
-        for row in rows {
-            let (id, title, content, workspace) = row.map_err(|e| e.to_string())?;
-            conn.execute(
+        for (id, title, content, workspace) in &docs {
+            tx.execute(
                 "INSERT INTO docs_fts(rowid, title, content, workspace) VALUES ((SELECT rowid FROM docs WHERE id = ?1), ?2, ?3, ?4)",
                 params![id, title, content, workspace],
             ).map_err(|e| e.to_string())?;
             count += 1;
         }
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(count)
     }
 
     pub fn search_docs_fts(&self, query: &str, workspace: Option<&str>) -> Result<Vec<SearchResult>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let fts_query = query.split_whitespace()
-            .map(|w| format!("\"{}\"", w.replace('"', "")))
-            .collect::<Vec<_>>()
-            .join(" OR ");
-        if fts_query.is_empty() {
+        // Quote each token against FTS syntax injection; drop tokens that
+        // are empty after stripping quotes (a `"`-only query must return
+        // no hits, not a SQLite syntax error).
+        let terms: Vec<String> = query.split_whitespace()
+            .map(|w| w.replace('"', ""))
+            .filter(|w| !w.is_empty())
+            .map(|w| format!("\"{}\"", w))
+            .collect();
+        if terms.is_empty() {
             return Ok(Vec::new());
         }
-        let mut stmt = if let Some(ws) = workspace {
+        let fts_query = terms.join(" OR ");
+        // Rank convention (shared with `search_docs`): higher rank sorts
+        // first downstream. bm25() is negative (lower is better), so the
+        // stored rank is `-bm25` and rows arrive best-first.
+        if let Some(ws) = workspace {
             let mut s = conn.prepare(
                 "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
                  FROM docs_fts
-                 JOIN docs d ON d.id = (SELECT id FROM docs WHERE rowid = docs_fts.rowid)
+                 JOIN docs d ON d.rowid = docs_fts.rowid
                  WHERE docs_fts MATCH ?1 AND d.workspace = ?2 AND d.locked = 0
                  ORDER BY rank LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![fts_query, ws], |row| {
-                Ok(Doc {
-                    id: row.get(0)?,
-                    workspace: row.get(1)?,
-                    kind: row.get(2)?,
-                    title: row.get(3)?,
-                    path: row.get(4)?,
-                    parent_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    content: row.get(8)?,
-                    word_count: row.get(9)?,
-                    reading_position: row.get(10)?,
-                    status: row.get(11)?,
-                    frontmatter_json: row.get(12)?,
-                    activity_score: row.get(13)?,
-                    embedding_ref: row.get(14)?,
-                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                    goal_words: row.get(16)?,
-                    deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
-                })
+                Ok((
+                    Doc {
+                        id: row.get(0)?,
+                        workspace: row.get(1)?,
+                        kind: row.get(2)?,
+                        title: row.get(3)?,
+                        path: row.get(4)?,
+                        parent_id: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
+                        content: row.get(8)?,
+                        word_count: row.get(9)?,
+                        reading_position: row.get(10)?,
+                        status: row.get(11)?,
+                        frontmatter_json: row.get(12)?,
+                        activity_score: row.get(13)?,
+                        embedding_ref: row.get(14)?,
+                        pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                        goal_words: row.get(16)?,
+                        deadline: row.get(17)?,
+                        locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+                    },
+                    row.get::<_, String>(19).ok(),
+                    row.get::<_, f64>(20).unwrap_or(0.0),
+                ))
             }).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+            Ok(rows.filter_map(|r| r.ok()).map(|(doc, snippet, score)| SearchResult { doc, snippet, rank: -score }).collect())
         } else {
             let mut s = conn.prepare(
                 "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
                  FROM docs_fts
-                 JOIN docs d ON d.id = (SELECT id FROM docs WHERE rowid = docs_fts.rowid)
+                 JOIN docs d ON d.rowid = docs_fts.rowid
                  WHERE docs_fts MATCH ?1 AND d.locked = 0
                  ORDER BY rank LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![fts_query], |row| {
-                Ok(Doc {
-                    id: row.get(0)?,
-                    workspace: row.get(1)?,
-                    kind: row.get(2)?,
-                    title: row.get(3)?,
-                    path: row.get(4)?,
-                    parent_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    content: row.get(8)?,
-                    word_count: row.get(9)?,
-                    reading_position: row.get(10)?,
-                    status: row.get(11)?,
-                    frontmatter_json: row.get(12)?,
-                    activity_score: row.get(13)?,
-                    embedding_ref: row.get(14)?,
-                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                    goal_words: row.get(16)?,
-                    deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
-                })
+                Ok((
+                    Doc {
+                        id: row.get(0)?,
+                        workspace: row.get(1)?,
+                        kind: row.get(2)?,
+                        title: row.get(3)?,
+                        path: row.get(4)?,
+                        parent_id: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
+                        content: row.get(8)?,
+                        word_count: row.get(9)?,
+                        reading_position: row.get(10)?,
+                        status: row.get(11)?,
+                        frontmatter_json: row.get(12)?,
+                        activity_score: row.get(13)?,
+                        embedding_ref: row.get(14)?,
+                        pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                        goal_words: row.get(16)?,
+                        deadline: row.get(17)?,
+                        locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+                    },
+                    row.get::<_, String>(19).ok(),
+                    row.get::<_, f64>(20).unwrap_or(0.0),
+                ))
             }).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
-        };
-        Ok(stmt.drain(..).map(|doc| SearchResult {
-            rank: 0.0,
-            snippet: None,
-            doc,
-        }).collect())
+            Ok(rows.filter_map(|r| r.ok()).map(|(doc, snippet, score)| SearchResult { doc, snippet, rank: -score }).collect())
+        }
     }
 
     pub fn list_docs_by_workspace(&self, workspace: &str) -> Result<Vec<Doc>, String> {
@@ -1211,12 +1225,7 @@ impl Database {
     }
 
     pub fn extract_backlinks(&self, doc_id: &str, content: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-
-        conn.execute("DELETE FROM backlinks WHERE source_id = ?1", params![doc_id])
-            .map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM links_implicit WHERE source_id = ?1", params![doc_id])
-            .map_err(|e| e.to_string())?;
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let all_docs: Vec<(String, String)> = {
             let mut stmt = conn.prepare("SELECT id, title FROM docs").map_err(|e| e.to_string())?;
@@ -1225,10 +1234,22 @@ impl Database {
             rows.filter_map(|r| r.ok()).collect()
         };
 
-        let wiki_re = regex::Regex::new(r"\[\[([^\]]+)\]\]").map_err(|e| e.to_string())?;
+        static WIKI_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let wiki_re = WIKI_RE.get_or_init(|| {
+            regex::Regex::new(r"\[\[([^\]]+)\]\]").expect("wikilink pattern is static")
+        });
         let title_to_id: std::collections::HashMap<String, String> = all_docs.iter()
             .map(|(id, title)| (title.to_lowercase(), id.clone()))
             .collect();
+        // Lowercase once: the implicit pass below used to rebuild this per
+        // title (one full-content alloc per doc in the vault, per save).
+        let content_lower = content.to_lowercase();
+
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM backlinks WHERE source_id = ?1", params![doc_id])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM links_implicit WHERE source_id = ?1", params![doc_id])
+            .map_err(|e| e.to_string())?;
 
         for cap in wiki_re.captures_iter(content) {
             let link_text = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -1237,7 +1258,7 @@ impl Database {
                 if target_id != doc_id {
                     let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
                     let snippet = snippet_around(&content, start as i64, (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64);
-                    conn.execute(
+                    tx.execute(
                         "INSERT OR IGNORE INTO backlinks (source_id, target_id, context_snippet) VALUES (?1, ?2, ?3)",
                         params![doc_id, target_id, snippet],
                     ).map_err(|e| e.to_string())?;
@@ -1254,14 +1275,15 @@ impl Database {
         for (title, target_id) in &title_to_id {
             if target_id == doc_id { continue; }
             if linked_titles.contains(title) { continue; }
-            if content.to_lowercase().contains(title) {
-                conn.execute(
+            if content_lower.contains(title) {
+                tx.execute(
                     "INSERT OR IGNORE INTO links_implicit (source_id, target_id, match_type) VALUES (?1, ?2, ?3)",
                     params![doc_id, target_id, "title_mention"],
                 ).map_err(|e| e.to_string())?;
             }
         }
 
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1273,7 +1295,7 @@ impl Database {
     /// next to extract_backlinks; the TS preview mirror (entities.ts)
     /// documents the same algorithm — keep the two in sync.
     pub fn refresh_entities(&self, doc_id: &str, content: &str) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM entity_occurrences WHERE doc_id = ?1", params![doc_id])
             .map_err(|e| e.to_string())?;
         if content.trim().is_empty() {
@@ -1302,38 +1324,51 @@ impl Database {
         };
 
         // Pass 1 — gazetteer (global across projects; cast names rarely collide).
+        // One alternation + one pass over the content instead of one compiled
+        // regex and one full scan per fact. DB order is kept inside the
+        // alternation so earlier facts keep priority on ties.
         let facts: Vec<(String, String)> = {
             let mut stmt = conn.prepare("SELECT kind, key FROM bible_facts").map_err(|e| e.to_string())?;
             let iter = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
                 .map_err(|e| e.to_string())?;
             iter.filter_map(|r| r.ok()).collect()
         };
+        // \b boundaries (not lookahead — the regex crate rejects it, which
+        // once failed this whole pass silently; not consumed separators
+        // either, so repeated names still match). DB order is preserved in
+        // the alternation (first fact wins ties, as with the old per-fact
+        // loop) and duplicate keys collapse to their first fact.
+        let mut by_name: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+        let mut alternatives: Vec<String> = Vec::new();
         for (kind, key) in &facts {
-            let key = key.trim();
-            if key.len() < 2 { continue; }
-            // \b boundaries (not lookahead — the regex crate rejects it,
-            // which once failed this whole pass silently; not consumed
-            // separators either, so repeated names still match).
-            let pattern = format!(r"(?i)\b({})\b", regex::escape(key));
-            let re = match regex::Regex::new(&pattern) {
-                Ok(re) => re,
-                Err(_) => continue,
-            };
-            let k = map_kind(kind);
-            for cap in re.captures_iter(content) {
-                let m = match cap.get(1) { Some(m) => m, None => continue };
-                if overlaps(m.start(), m.end(), &used) { continue; }
-                used.push((m.start(), m.end()));
-                rows.push((key.to_lowercase(), m.as_str().to_string(), k.to_string(), m.start() as i64, m.end() as i64));
-                if rows.len() >= 500 { break; }
+            let trimmed = key.trim();
+            if trimmed.len() < 2 { continue; }
+            let lowered = trimmed.to_lowercase();
+            if by_name.contains_key(&lowered) { continue; }
+            alternatives.push(regex::escape(&lowered));
+            by_name.insert(lowered, (map_kind(kind).to_string(), trimmed.to_string()));
+        }
+        if !alternatives.is_empty() {
+            let pattern = format!(r"(?i)\b((?:{}))\b", alternatives.join("|"));
+            if let Ok(re) = regex::Regex::new(&pattern) {
+                for cap in re.captures_iter(content) {
+                    let m = match cap.get(1) { Some(m) => m, None => continue };
+                    if overlaps(m.start(), m.end(), &used) { continue; }
+                    let Some((kind, key)) = by_name.get(&m.as_str().to_lowercase()) else { continue };
+                    used.push((m.start(), m.end()));
+                    rows.push((key.to_lowercase(), m.as_str().to_string(), kind.clone(), m.start() as i64, m.end() as i64));
+                    if rows.len() >= 500 { break; }
+                }
             }
-            if rows.len() >= 500 { break; }
         }
 
         // Pass 2 — capitalized runs (ASCII; non-English names come via the gazetteer).
+        static NAME_RUN_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
         if rows.len() < 500 {
-            let re = regex::Regex::new(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b")
-                .map_err(|e| e.to_string())?;
+            let re = NAME_RUN_RE.get_or_init(|| {
+                regex::Regex::new(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b")
+                    .expect("name-run pattern is static")
+            });
             // First surface form wins the display name per norm.
             let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.0.clone()).collect();
             for cap in re.captures_iter(content) {
@@ -1352,12 +1387,14 @@ impl Database {
             }
         }
 
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
         for (norm, display, kind, start, end) in &rows {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO entity_occurrences (entity_norm, display, kind, doc_id, span_start, span_end) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![norm, display, kind, doc_id, start, end],
             ).map_err(|e| e.to_string())?;
         }
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 

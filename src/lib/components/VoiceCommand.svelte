@@ -4,11 +4,37 @@
   import { api } from '$lib/api';
   import Icon from '$lib/components/Icon.svelte';
 
+  // Minimal Web Speech API surface (no lib.dom dependency on this type):
+  // just the members this component touches.
+  interface SpeechResultItem {
+    transcript: string;
+  }
+  interface SpeechResultList {
+    [index: number]: SpeechResultItem[];
+    readonly length: number;
+  }
+  interface SpeechResultEvent {
+    results: SpeechResultList;
+  }
+  interface SpeechErrorEvent {
+    error: string;
+  }
+  interface VoiceRecognizer {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onresult: ((event: SpeechResultEvent) => void) | null;
+    onerror: ((event: SpeechErrorEvent) => void) | null;
+    onend: (() => void) | null;
+    start(): void;
+    stop(): void;
+  }
+
   let open = $state(false);
   let listening = $state(false);
   let transcript = $state('');
   let command = $state('');
-  let recognition: any = null;
+  let recognition: VoiceRecognizer | null = null;
 
   const COMMANDS = [
     { trigger: 'new document', action: () => { api.docCreate($currentWorkspace === 'home' ? 'write' : $currentWorkspace, 'doc', 'Untitled').then(doc => { showToast('New document created', 'success'); }); } },
@@ -28,13 +54,18 @@
       showToast('Speech recognition not supported in this browser', 'error');
       return;
     }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const win = window as unknown as Record<string, unknown>;
+    const SpeechRecognition = (win.SpeechRecognition || win.webkitSpeechRecognition) as (new () => VoiceRecognizer) | undefined;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported in this browser', 'error');
+      return;
+    }
     recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechResultEvent) => {
       const result = event.results[0][0].transcript.toLowerCase();
       transcript = result;
       command = result;
@@ -46,7 +77,7 @@
       }
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechErrorEvent) => {
       showToast(`Voice error: ${event.error}`, 'error');
       stopListening();
     };

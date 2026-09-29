@@ -15,61 +15,19 @@
  *
  * Run: npm run build && node tests/ws-toggles.mjs
  */
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
+import { rig, resolveBundle, sleep } from "./helpers/jsdom-boot.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const KEYS = [
-  "window", "Window", "document", "navigator", "localStorage", "sessionStorage",
-  "HTMLElement", "Element", "Node", "Text", "Comment", "Document",
-  "DocumentFragment", "DocumentType", "NodeList", "HTMLCollection",
-  "Range", "Selection", "NodeFilter", "HTMLMediaElement", "HTMLAudioElement",
-  "HTMLVideoElement", "HTMLImageElement", "Image", "Audio", "SVGElement",
-  "SVGSVGElement", "SVGGraphicsElement", "HTMLInputElement", "HTMLTextAreaElement",
-  "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "HTMLDivElement",
-  "HTMLSpanElement", "HTMLCanvasElement", "Event", "CustomEvent", "KeyboardEvent",
-  "MouseEvent", "PointerEvent", "WheelEvent", "DragEvent", "ClipboardEvent",
-  "FocusEvent", "InputEvent", "MutationObserver", "MutationRecord",
-  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame",
-  "DOMParser", "XMLSerializer", "DOMTokenList",
-];
-
-function rig(dom) {
-  delete globalThis.CustomEvent;
-  delete globalThis.Event;
-  for (const key of KEYS) {
-    if (!(key in dom.window)) continue;
-    try {
-      globalThis[key] = dom.window[key];
-    } catch {
-      try {
-        Object.defineProperty(globalThis, key, {
-          value: dom.window[key], writable: true, configurable: true,
-        });
-      } catch { /* keep Node's */ }
-    }
-  }
-  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
-  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-  const emptyRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
-  if (dom.window.Range) {
-    if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [];
-    if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = emptyRect;
-  }
-  if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
-  globalThis.devicePixelRatio = 1;
-  globalThis.window.devicePixelRatio = 1;
-}
 
 let failures = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 const sourceFiles = [
   "src/main.ts",
   "src/App.svelte",
@@ -89,16 +47,26 @@ try {
   process.exit(0);
 }
 
-const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
-const jsName = distHtml.match(/assets\/(index-.*\.js)/)?.[1];
-if (!jsName) {
+let bundleUrl;
+try {
+  bundleUrl = await resolveBundle(root);
+} catch {
   console.log("FAIL  no bundle in dist/index.html (run npm run build first)");
   process.exit(1);
 }
-const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
+
+// One boot per process: a ?-suffixed second import evaluates a duplicate
+// entry runtime while the App chunk still binds the first, producing a
+// spurious dual-runtime effect_orphan (see shell-nav.mjs). CI runs
+// --only=hidden and --only=defaults as separate processes.
+const only = (process.argv.find((a) => a.startsWith("--only=")) || "").split("=")[1];
+if (!only || (only !== "hidden" && only !== "defaults")) {
+  console.log("FAIL  run via npm run test:wstoggles (one boot per process: --only=hidden / --only=defaults)");
+  process.exit(1);
+}
 
 // ── Boot 1: hiddenIds preset hides Novel from sidebar ───────────────
-{
+if (!only || only === "hidden") {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
     { url: "http://localhost/", pretendToBeVisual: true }
@@ -111,7 +79,7 @@ const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
     hiddenIds: ["novel", "inbox", "canvas"],
   }));
   console.error = (..._) => {};
-  await import(bundleUrl + "?boot=ws-hidden");
+  await import(bundleUrl);
   await sleep(2500);
 
   const qa = (s) => [...dom.window.document.querySelectorAll(s)];
@@ -137,7 +105,7 @@ const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
 }
 
 // ── Boot 2: defaults unchanged (no hiddenIds key) ───────────────────
-{
+if (!only || only === "defaults") {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
     { url: "http://localhost/", pretendToBeVisual: true }
@@ -147,7 +115,7 @@ const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
   dom.window.innerHeight = 800;
   dom.window.localStorage.setItem("writing-app-settings", JSON.stringify({ hasOnboarded: true }));
   console.error = (..._) => {};
-  await import(bundleUrl + "?boot=ws-defaults");
+  await import(bundleUrl);
   await sleep(2500);
   const qa = (s) => [...dom.window.document.querySelectorAll(s)];
   const navLabels = qa(".workspace-nav .nav-item").map((b) => (b.getAttribute("aria-label") || "").trim());

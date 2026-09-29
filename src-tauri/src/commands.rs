@@ -1204,6 +1204,16 @@ pub fn doc_search_full(db: State<'_, Database>, query: String, workspace: Option
 }
 
 #[tauri::command]
+pub fn search_docs_fts(db: State<'_, Database>, query: String, workspace: Option<String>) -> Result<Vec<SearchResult>, String> {
+    db.search_docs_fts(&query, workspace.as_deref())
+}
+
+#[tauri::command]
+pub fn reindex_fts(db: State<'_, Database>) -> Result<u64, String> {
+    db.reindex_fts()
+}
+
+#[tauri::command]
 pub fn doc_get_stats(db: State<'_, Database>) -> Result<(i64, i64, i64), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let total_docs: i64 = conn.query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0)).map_err(|e| e.to_string())?;
@@ -1625,15 +1635,80 @@ pub fn perf_benchmark(db: State<'_, Database>) -> Result<serde_json::Value, Stri
     db.perf_benchmark()
 }
 
+/// Resolve a renderer-supplied path inside the vault, fail closed.
+/// Symlinks are resolved (`canonicalize`) so a link pointing outside the
+/// vault is refused; not-yet-existing paths resolve via the nearest
+/// existing ancestor with `..`/absolute segments in the remainder rejected.
+fn confine_to_vault(db: &State<'_, Database>, raw: &str) -> Result<std::path::PathBuf, String> {
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
+    confine_path_in(&vault, raw)
+}
+
+fn confine_path_in(vault: &std::path::Path, raw: &str) -> Result<std::path::PathBuf, String> {
+    use std::ffi::OsStr;
+    if raw.trim().is_empty() {
+        return Err("Empty path.".into());
+    }
+    let base = vault
+        .canonicalize()
+        .map_err(|_| "Vault is unavailable.".to_string())?;
+    let mut current = std::path::Path::new(raw);
+    let mut tail: Vec<&OsStr> = Vec::new();
+    loop {
+        if current.exists() {
+            break;
+        }
+        match (current.file_name(), current.parent()) {
+            (Some(name), Some(parent)) if !parent.as_os_str().is_empty() => {
+                tail.push(name);
+                current = parent;
+            }
+            _ => return Err("Path does not resolve inside the vault.".into()),
+        }
+    }
+    let mut resolved = current
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    for part in tail.iter().rev() {
+        let text = part.to_string_lossy();
+        if text.is_empty()
+            || text == "."
+            || text == ".."
+            || text.contains('/')
+            || text.contains('\\')
+        {
+            return Err("Refusing path outside the vault.".into());
+        }
+        resolved.push(part);
+    }
+    if !resolved.starts_with(&base) {
+        return Err("Refusing path outside the vault.".into());
+    }
+    Ok(resolved)
+}
+
+/// A bare file/dir name (no separators, no parent escapes) for rename targets.
+fn check_single_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == ".."
+    {
+        return Err("Invalid name.".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn fs_list_dir(path: String) -> Result<Vec<(String, bool, u64)>, String> {
-    let dir = std::path::Path::new(&path);
-    if !dir.exists() || !dir.is_dir() {
+pub fn fs_list_dir(db: State<'_, Database>, path: String) -> Result<Vec<(String, bool, u64)>, String> {
+    let dir = confine_to_vault(&db, &path)?;
+    if !dir.is_dir() {
         return Err(format!("Not a directory: {}", path));
     }
 
     let mut entries: Vec<(String, bool, u64)> = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let metadata = entry.metadata().map_err(|e| e.to_string())?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -1645,13 +1720,17 @@ pub fn fs_list_dir(path: String) -> Result<Vec<(String, bool, u64)>, String> {
 }
 
 #[tauri::command]
-pub fn fs_read_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+pub fn fs_read_file(db: State<'_, Database>, path: String) -> Result<String, String> {
+    let file = confine_to_vault(&db, &path)?;
+    std::fs::read_to_string(&file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn fs_rename(old_path: String, new_name: String) -> Result<String, String> {
-    let p = std::path::Path::new(&old_path);
+pub fn fs_rename(db: State<'_, Database>, old_path: String, new_name: String) -> Result<String, String> {
+    check_single_name(&new_name)?;
+    let p = confine_to_vault(&db, &old_path)?;
+    // `p` is already resolved inside the vault, so its parent is too, and
+    // `new_name` carries no separators — the join cannot escape.
     let parent = p.parent().ok_or("No parent directory")?;
     let new_path = parent.join(&new_name);
     std::fs::rename(&p, &new_path).map_err(|e| e.to_string())?;
@@ -1659,32 +1738,41 @@ pub fn fs_rename(old_path: String, new_name: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn fs_delete(path: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
+pub fn fs_delete(db: State<'_, Database>, path: String) -> Result<(), String> {
+    let p = confine_to_vault(&db, &path)?;
     if p.is_dir() {
-        std::fs::remove_dir_all(p).map_err(|e| e.to_string())?;
+        std::fs::remove_dir_all(&p).map_err(|e| e.to_string())?;
     } else {
-        std::fs::remove_file(p).map_err(|e| e.to_string())?;
+        std::fs::remove_file(&p).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn fs_move(src: String, dest_dir: String) -> Result<String, String> {
-    let src_path = std::path::Path::new(&src);
-    let dest = std::path::Path::new(&dest_dir).join(src_path.file_name().ok_or("No filename")?);
-    std::fs::rename(src_path, &dest).map_err(|e| e.to_string())?;
+pub fn fs_move(db: State<'_, Database>, src: String, dest_dir: String) -> Result<String, String> {
+    let src_path = confine_to_vault(&db, &src)?;
+    let dest_base = confine_to_vault(&db, &dest_dir)?;
+    if !dest_base.is_dir() {
+        return Err(format!("Not a directory: {}", dest_dir));
+    }
+    let dest = dest_base.join(src_path.file_name().ok_or("No filename")?);
+    std::fs::rename(&src_path, &dest).map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn fs_create_dir(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path).map_err(|e| e.to_string())
+pub fn fs_create_dir(db: State<'_, Database>, path: String) -> Result<(), String> {
+    let dir = confine_to_vault(&db, &path)?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn fs_write_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(&path, contents).map_err(|e| e.to_string())
+pub fn fs_write_file(db: State<'_, Database>, path: String, contents: String) -> Result<(), String> {
+    if contents.len() > 25 * 1024 * 1024 {
+        return Err("File over 25 MB — link it instead of saving inline.".to_string());
+    }
+    let file = confine_to_vault(&db, &path)?;
+    std::fs::write(&file, contents).map_err(|e| e.to_string())
 }
 
 /// Save a dropped/pasted attachment into `<vault>/.attachments/` (A8.9).
@@ -1740,11 +1828,13 @@ pub fn attachment_save(
 /// OS supports it). No extra crates: plain std::process per platform.
 /// Mobile has no file-manager reveal — the frontend falls back to copy-path.
 #[tauri::command]
-pub fn fs_reveal(path: String) -> Result<(), String> {
+pub fn fs_reveal(db: State<'_, Database>, path: String) -> Result<(), String> {
+    let target = confine_to_vault(&db, &path)?;
+    let display = target.to_string_lossy().into_owned();
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .arg(format!("/select,{}", display))
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -1752,7 +1842,7 @@ pub fn fs_reveal(path: String) -> Result<(), String> {
     {
         std::process::Command::new("open")
             .arg("-R")
-            .arg(&path)
+            .arg(&display)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -1761,14 +1851,13 @@ pub fn fs_reveal(path: String) -> Result<(), String> {
         // Linux/Android: no select-in-manager; open the containing folder
         // (or the dir itself). Android WebViews have no desktop shell, so
         // this resolves to an error the UI turns into a copy-path fallback.
-        let target = std::path::Path::new(&path);
         let dir = if target.is_dir() {
-            path.clone()
+            display
         } else {
             target
                 .parent()
                 .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or(path.clone())
+                .unwrap_or(display)
         };
         std::process::Command::new("xdg-open")
             .arg(&dir)
@@ -2531,22 +2620,6 @@ mod ai_slot_tests {
 }
 
 use rusqlite::params as _tag_params;
-use crate::convert::convert_document as _tag_convert_document;
-
-#[tauri::command]
-pub fn convert_document_cmd(
-    db: State<'_, Database>,
-    doc_id: String,
-    format: String,
-) -> Result<serde_json::Value, String> {
-    if doc_id.contains("..") {
-        return Err("Invalid doc id".into());
-    }
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    let (filename, bytes) = _tag_convert_document(&doc_id, &format, &vault)?;
-    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-    Ok(serde_json::json!({ "filename": filename, "base64": b64 }))
-}
 
 #[tauri::command]
 pub fn get_doc_tags(db: State<'_, Database>, doc_id: String) -> Result<Vec<String>, String> {
@@ -2564,7 +2637,7 @@ pub fn add_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> Resu
     if tag.is_empty() {
         return Err("Tag cannot be empty".into());
     }
-    if tag.len() > 64 {
+    if tag.chars().count() > 64 {
         return Err("Tag too long".into());
     }
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -2577,6 +2650,7 @@ pub fn add_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> Resu
 
 #[tauri::command]
 pub fn remove_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> Result<(), String> {
+    let tag = tag.trim().to_lowercase();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM doc_tags WHERE doc_id = ?1 AND tag = ?2",
@@ -2591,7 +2665,7 @@ pub fn search_by_tag(db: State<'_, Database>, tag: String) -> Result<Vec<Doc>, S
     let mut stmt = conn.prepare(
         "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked FROM docs d INNER JOIN doc_tags dt ON dt.doc_id = d.id WHERE dt.tag = ?1 AND d.locked = 0 ORDER BY d.updated_at DESC"
     ).map_err(|e| e.to_string())?;
-    let tag_lc = tag.to_lowercase();
+    let tag_lc = tag.trim().to_lowercase();
     let rows = stmt.query_map([&tag_lc], |row| {
         Ok(Doc {
             id: row.get(0)?,
@@ -2616,5 +2690,59 @@ pub fn search_by_tag(db: State<'_, Database>, tag: String) -> Result<Vec<Doc>, S
         })
     }).map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[cfg(test)]
+mod fs_confinement_tests {
+    use super::*;
+
+    fn vault(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("jwe-confine-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("write")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn inside_paths_resolve() {
+        let base = vault("inside");
+        let file = base.join("write").join("note.md");
+        std::fs::write(&file, "hi").unwrap();
+        assert_eq!(
+            confine_path_in(&base, &file.to_string_lossy()).unwrap(),
+            file.canonicalize().unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn traversal_and_absolute_escapes_are_refused() {
+        let base = vault("escape");
+        for evil in [
+            base.join("..").join("escaped.md").to_string_lossy().into_owned(),
+            "/etc/hostname".to_string(),
+            String::from(""),
+            String::from("   "),
+        ] {
+            assert!(confine_path_in(&base, &evil).is_err(), "accepted {evil:?}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn not_yet_existing_nested_paths_resolve_inside() {
+        let base = vault("nested");
+        let target = base.join("write").join("new").join("note.md");
+        assert!(confine_path_in(&base, &target.to_string_lossy()).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn single_names_reject_separators() {
+        for bad in ["a/b", "a\\b", "..", ".", "", "  "] {
+            assert!(check_single_name(bad).is_err(), "accepted {bad:?}");
+        }
+        assert!(check_single_name("renamed.md").is_ok());
+    }
 }
 

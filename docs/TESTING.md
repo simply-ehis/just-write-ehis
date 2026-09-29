@@ -91,6 +91,21 @@ These tests do not replace an explicitly authorized desktop build. The final
 `build_sidecars.py` → PyInstaller → Tauri resource chain and native GUI
 behavior remain release-gate checks.
 
+## 8. Headless DOM suites (one boot per process)
+
+`test:smoke`, `test:lazy`, `test:shell`, `test:tabs`, `test:novel`,
+`test:reader`, `test:onboard`, `test:wstoggles`, and `test:mobile` mount
+the built bundle in jsdom. Shared setup lives in
+`tests/helpers/jsdom-boot.mjs` (`bootDom` + `resolveBundle` + `sleep`):
+one realm per process (a second bundle evaluation in the same process
+creates a duplicate Svelte runtime — spurious `effect_orphan`), and a
+stylesheet-`<link>` load shim without which Vite's chunk preloading never
+resolves headless. Suites needing two boots (`test:shell --only=desktop /
+--only=mobile`, `test:onboard --only=fresh / --only=veteran`,
+`test:wstoggles --only=hidden / --only=defaults`) run as separate
+processes; invoking them bare fails fast with usage instead of testing
+the known-broken mode.
+
 ## What is NOT covered
 
 - Build-gated UI probes (`test:onboard`, `test:wstoggles`, `test:reader`, theme mount phases, and mobile behavior) report `SKIP` when `dist/` is older than their source inputs. Run them only after an authorized frontend build; source-only mode must not treat a skip as UI evidence.

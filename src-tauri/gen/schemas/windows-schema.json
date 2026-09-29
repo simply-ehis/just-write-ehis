@@ -1035,40 +1035,10 @@
           "markdownDescription": "Enables the setup_file_watcher command without any pre-configured scope."
         },
         {
-          "description": "Enables the sidecar_is_running command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-sidecar-is-running",
-          "markdownDescription": "Enables the sidecar_is_running command without any pre-configured scope."
-        },
-        {
           "description": "Enables the sidecar_python_probe command without any pre-configured scope.",
           "type": "string",
           "const": "allow-sidecar-python-probe",
           "markdownDescription": "Enables the sidecar_python_probe command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the sidecar_query command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-sidecar-query",
-          "markdownDescription": "Enables the sidecar_query command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the sidecar_set_endpoint command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-sidecar-set-endpoint",
-          "markdownDescription": "Enables the sidecar_set_endpoint command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the sidecar_start command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-sidecar-start",
-          "markdownDescription": "Enables the sidecar_start command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the sidecar_stop command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-sidecar-stop",
-          "markdownDescription": "Enables the sidecar_stop command without any pre-configured scope."
         },
         {
           "description": "Enables the snapshot_create command without any pre-configured scope.",
@@ -2109,40 +2079,10 @@
           "markdownDescription": "Denies the setup_file_watcher command without any pre-configured scope."
         },
         {
-          "description": "Denies the sidecar_is_running command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-sidecar-is-running",
-          "markdownDescription": "Denies the sidecar_is_running command without any pre-configured scope."
-        },
-        {
           "description": "Denies the sidecar_python_probe command without any pre-configured scope.",
           "type": "string",
           "const": "deny-sidecar-python-probe",
           "markdownDescription": "Denies the sidecar_python_probe command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the sidecar_query command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-sidecar-query",
-          "markdownDescription": "Denies the sidecar_query command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the sidecar_set_endpoint command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-sidecar-set-endpoint",
-          "markdownDescription": "Denies the sidecar_set_endpoint command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the sidecar_start command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-sidecar-start",
-          "markdownDescription": "Denies the sidecar_start command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the sidecar_stop command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-sidecar-stop",
-          "markdownDescription": "Denies the sidecar_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the snapshot_create command without any pre-configured scope.",

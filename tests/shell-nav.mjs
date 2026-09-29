@@ -17,73 +17,39 @@
  *
  * Run: npm run build && node tests/shell-nav.mjs
  */
-import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
+import { rig, resolveBundle, sleep } from "./helpers/jsdom-boot.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const KEYS = [
-  "window", "Window", "document", "navigator", "localStorage", "sessionStorage",
-  "HTMLElement", "Element", "Node", "Text", "Comment", "Document",
-  "DocumentFragment", "DocumentType", "NodeList", "HTMLCollection",
-  "Range", "Selection", "NodeFilter", "HTMLMediaElement", "HTMLAudioElement",
-  "HTMLVideoElement", "HTMLImageElement", "Image", "Audio", "SVGElement",
-  "SVGSVGElement", "SVGGraphicsElement", "HTMLInputElement", "HTMLTextAreaElement",
-  "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "HTMLDivElement",
-  "HTMLSpanElement", "HTMLCanvasElement", "Event", "CustomEvent", "KeyboardEvent",
-  "MouseEvent", "PointerEvent", "WheelEvent", "DragEvent", "ClipboardEvent",
-  "FocusEvent", "InputEvent", "MutationObserver", "MutationRecord",
-  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame",
-  "DOMParser", "XMLSerializer", "DOMTokenList",
-];
-
-function rig(dom) {
-  delete globalThis.CustomEvent;
-  delete globalThis.Event;
-  for (const key of KEYS) {
-    if (!(key in dom.window)) continue;
-    try {
-      globalThis[key] = dom.window[key];
-    } catch {
-      // Node 24 ships getter-only globals (e.g. navigator): replace the
-      // property so the harness realm wins for every boot.
-      try {
-        Object.defineProperty(globalThis, key, {
-          value: dom.window[key], writable: true, configurable: true,
-        });
-      } catch { /* keep Node's */ }
-    }
-  }
-  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
-  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-  const emptyRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
-  if (dom.window.Range) {
-    if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [];
-    if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = emptyRect;
-  }
-  if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
-  globalThis.devicePixelRatio = 1;
-  globalThis.window.devicePixelRatio = 1;
-}
 
 let failures = 0;
 function check(name, ok, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
-const jsName = distHtml.match(/assets\/(index-.*\.js)/)?.[1];
-if (!jsName) {
+let bundleUrl;
+try {
+  bundleUrl = await resolveBundle(root);
+} catch {
   console.log("FAIL  no bundle in dist/index.html (run npm run build first)");
   process.exit(1);
 }
-const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
+
+// One boot per process: a second mount in the same realm poisons Svelte's
+// global scheduler (rAF/document swap mid-flight surfaces as
+// effect_orphan). CI runs --only=desktop and --only=mobile as separate
+// processes (see package.json test:shell), matching one webview per realm.
+const only = (process.argv.find((a) => a.startsWith("--only=")) || "").split("=")[1];
+if (!only || (only !== "desktop" && only !== "mobile")) {
+  console.log("FAIL  run via npm run test:shell (one boot per process: --only=desktop / --only=mobile)");
+  process.exit(1);
+}
 
 // ── Desktop boot ────────────────────────────────────────────────────
-{
+if (!only || only === "desktop") {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
     { url: "http://localhost/", pretendToBeVisual: true }
@@ -130,7 +96,7 @@ const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
 }
 
 // ── Mobile boot ─────────────────────────────────────────────────────
-{
+if (!only || only === "mobile") {
   const dom = new JSDOM(
     `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
     { url: "http://localhost/", pretendToBeVisual: true }
@@ -141,7 +107,11 @@ const bundleUrl = pathToFileURL(join(root, "dist/assets", jsName)).href;
   const errors = [];
   console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 200));
 
-  await import(bundleUrl + "?boot=mobile");
+  // NOTE: no query suffix here — each --only mode runs in its own process,
+  // and a ?-suffixed file URL makes Node evaluate a SECOND copy of the
+  // entry while the App chunk still binds the first, producing a spurious
+  // dual-runtime effect_orphan that cannot happen in production.
+  await import(bundleUrl);
   await sleep(2500);
   const q = (s) => dom.window.document.querySelector(s);
   const qa = (s) => [...dom.window.document.querySelectorAll(s)];

@@ -328,14 +328,32 @@ impl ManagedSidecar {
         (!image.is_empty()).then_some(PortOwner { pid, image })
     }
 
+    /// Absolute tool path first (PATH hijack resistance), bare name as
+    /// a portability fallback (Nix/Homebrew layouts).
+    #[cfg(not(windows))]
+    fn unix_tool(name: &str) -> std::path::PathBuf {
+        for candidate in [
+            format!("/usr/sbin/{name}"),
+            format!("/usr/bin/{name}"),
+            format!("/bin/{name}"),
+            format!("/sbin/{name}"),
+        ] {
+            let path = std::path::PathBuf::from(&candidate);
+            if path.is_file() {
+                return path;
+            }
+        }
+        std::path::PathBuf::from(name)
+    }
+
     #[cfg(not(windows))]
     fn port_owner_unix(port: u16) -> Option<PortOwner> {
-        let output = Command::new("lsof").args(["-ti", &format!("tcp:{}", port)]).output().ok()?;
+        let output = Command::new(Self::unix_tool("lsof")).args(["-ti", &format!("tcp:{}", port)]).output().ok()?;
         let pid = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_string();
         if pid.is_empty() {
             return None;
         }
-        let ps = Command::new("ps").args(["-p", &pid, "-o", "comm="]).output().ok()?;
+        let ps = Command::new(Self::unix_tool("ps")).args(["-p", &pid, "-o", "comm="]).output().ok()?;
         let image = String::from_utf8_lossy(&ps.stdout).trim().to_string();
         (!image.is_empty()).then_some(PortOwner { pid, image })
     }
@@ -347,7 +365,7 @@ impl ManagedSidecar {
             .status()
             .map_err(|e| e.to_string())?;
         #[cfg(not(windows))]
-        let status = Command::new("kill")
+        let status = Command::new(Self::unix_tool("kill"))
             .args(["-9", owner.pid.as_str()])
             .status()
             .map_err(|e| e.to_string())?;
@@ -722,10 +740,25 @@ fn resolve_llm_model_path(
     }
     let requested_path = std::path::Path::new(requested);
     if requested_path.is_absolute() {
-        if !requested_path.is_file() {
+        // Absolute model paths are confined to the bundled/known model
+        // roots: an arbitrary .gguf anywhere on disk must not be mmap'd
+        // into the backend on renderer input (info disclosure via crafted
+        // files, network-share hangs on probe).
+        let canon = requested_path
+            .canonicalize()
+            .map_err(|_| format!("LLM model not found: {}", requested))?;
+        let inside = |dir: &std::path::Path| {
+            dir.canonicalize()
+                .map(|base| canon.starts_with(&base))
+                .unwrap_or(false)
+        };
+        if !(inside(models_dir) || inside(asset_root)) {
+            return Err("LLM model must live inside the app models directory".to_string());
+        }
+        if !canon.is_file() {
             return Err(format!("LLM model not found: {}", requested));
         }
-        return Ok(requested_path.to_path_buf());
+        return Ok(canon);
     }
     if requested.contains(':')
         || requested.starts_with('/')

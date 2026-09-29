@@ -277,6 +277,9 @@ export function craftStats(content: string): { dialogue: number; avgSentence: nu
 function browserVerifyPin(expected: string, candidate: string): { verified: boolean; retry_after_ms: number } {
   const normalizedExpected = expected.trim();
   const normalizedCandidate = candidate.trim();
+  // No PIN configured: nothing to verify against — fail without burning
+  // lockout attempts against a nonexistent secret.
+  if (normalizedExpected.length < 4) return { verified: false, retry_after_ms: 0 };
   const remaining = Math.max(0, browserPinLockoutUntil - Date.now());
   if (remaining > 0) return { verified: false, retry_after_ms: remaining };
   if (normalizedExpected.length >= 4 && normalizedExpected === normalizedCandidate) {
@@ -416,7 +419,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
         word_count: d.word_count,
         activity_score: d.activity_score,
         degree: store.outgoingLinks(d).length,
-        tags: d.frontmatter_json ? (JSON.parse(d.frontmatter_json).tags ?? []) : [],
+        tags: (() => { try { return d.frontmatter_json ? (JSON.parse(d.frontmatter_json).tags ?? []) : []; } catch { return []; } })(),
       }));
       if (ws !== "all") nodes = nodes.filter((n) => n.workspace === ws);
       if (tags.length > 0) nodes = nodes.filter((n) => n.tags && tags.every((t) => n.tags!.includes(t)));
@@ -1457,6 +1460,89 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       browserPinFailures = 0;
       browserPinLockoutUntil = 0;
       return undefined as T;
+
+    case "search_docs_fts":
+      return store.search(String(payload.query ?? ""), str(payload.workspace)) as T;
+    case "reindex_fts":
+      return 0 as T;
+    case "get_doc_tags": {
+      const key = `jwe-tags:${String(payload.docId ?? payload.doc_id ?? "")}`;
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        return (parsed.filter((t) => typeof t === "string") as string[]) as T;
+      } catch {
+        // Corrupt entry: drop it loudly once so tags fail visible, then
+        // report empty rather than throwing on every read.
+        try { localStorage.removeItem(key); } catch { /* quota/denied: ignore */ }
+        console.warn(`[preview] dropped corrupt tag entry for ${key}`);
+        return [] as T;
+      }
+    }
+    case "add_doc_tag": {
+      const id = String(payload.docId ?? payload.doc_id ?? "");
+      const tag = String(payload.tag ?? "").trim().toLowerCase();
+      if (!tag) throw new Error("Tag cannot be empty");
+      if ([...tag].length > 64) throw new Error("Tag too long (max 64 chars)");
+      const key = `jwe-tags:${id}`;
+      let arr: string[] = [];
+      try {
+        arr = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
+      } catch {
+        arr = [];
+      }
+      if (!arr.includes(tag)) arr.push(tag);
+      try {
+        localStorage.setItem(key, JSON.stringify(arr));
+      } catch {
+        throw new Error("Browser storage is full — free space and retry.");
+      }
+      return undefined as T;
+    }
+    case "remove_doc_tag": {
+      const id = String(payload.docId ?? payload.doc_id ?? "");
+      const tag = String(payload.tag ?? "").trim().toLowerCase();
+      const key = `jwe-tags:${id}`;
+      let arr: string[] = [];
+      try {
+        arr = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
+      } catch {
+        arr = [];
+      }
+      try {
+        localStorage.setItem(key, JSON.stringify(arr.filter((t) => t !== tag)));
+      } catch {
+        throw new Error("Browser storage is full — free space and retry.");
+      }
+      return undefined as T;
+    }
+    case "search_by_tag": {
+      const tag = String(payload.tag ?? "").trim().toLowerCase();
+      const out: unknown[] = [];
+      // Scan localStorage tag keys (preview-scale vaults only). Locked
+      // docs are excluded like the Rust backend (`WHERE d.locked = 0`).
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i) ?? "";
+        if (!k.startsWith("jwe-tags:")) continue;
+        let arr: string[] = [];
+        try {
+          arr = JSON.parse(localStorage.getItem(k) ?? "[]") as string[];
+        } catch {
+          continue;
+        }
+        if (arr.includes(tag)) {
+          const docId = k.slice("jwe-tags:".length);
+          try {
+            const doc = store.get(docId);
+            if (!doc.locked) out.push(doc);
+          } catch {
+            continue;
+          }
+        }
+      }
+      return out as T;
+    }
 
     default:
       throw new Error(`Unknown command in browser preview: ${cmd}`);

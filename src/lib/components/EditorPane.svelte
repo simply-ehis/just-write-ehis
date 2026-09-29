@@ -213,9 +213,12 @@ import { countWords } from "$lib/text";
       return;
     }
     lastPreviewTitle = linkTitle;
-    // Find doc by title
+    const wantedTitle = linkTitle;
+    // Find doc by title (stale-token guarded: rapid hovers resolve out of
+    // order, and only the latest title may paint).
     api.docListByWorkspace("write").then((docs) => {
-      const match = docs.find((d) => d.title === linkTitle);
+      if (wantedTitle !== lastPreviewTitle) return;
+      const match = docs.find((d) => d.title === wantedTitle);
       if (match) {
         previewDocId = match.id;
         previewDocTitle = match.title;

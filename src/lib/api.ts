@@ -25,11 +25,22 @@ function toSnakeKey(key: string): string {
   return key.replace(/([A-Z])/g, (ch) => `_${ch.toLowerCase()}`);
 }
 
+const UNSAFE_ARG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function withSnakeAliases(args: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...args };
   for (const [key, value] of Object.entries(args)) {
     const snake = toSnakeKey(key);
-    if (snake !== key && !(snake in out)) out[snake] = value;
+    if (snake === key || UNSAFE_ARG_KEYS.has(snake)) continue;
+    if (snake in out) {
+      // Both spellings passed explicitly with different values: a caller
+      // bug. Keep the snake_case backend contract visible, loudly.
+      if (!Object.is(out[snake], value)) {
+        console.warn(`[api] conflicting arg spellings for "${snake}" — keeping snake_case value`);
+      }
+      continue;
+    }
+    out[snake] = value;
   }
   return out;
 }
@@ -628,12 +639,6 @@ export const api = {
 
   reindexFts: () =>
     safeInvoke<number>("reindex_fts"),
-
-  convertDocument: (docId: string, format: string) =>
-    safeInvoke<{ filename: string; base64: string }>("convert_document_cmd", { docId, format }),
-
-  batchExport: (docIds: string[], format: string) =>
-    safeInvoke<{ filename: string; base64: string }>("batch_export", { docIds, format }),
 
   getDocTags: (docId: string) =>
     safeInvoke<string[]>("get_doc_tags", { docId }),

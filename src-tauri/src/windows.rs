@@ -53,56 +53,49 @@ pub fn find_text_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
         })
 }
 
-pub fn find_openable_file(path: &Path) -> Option<PathBuf> {
-    if !path.is_file() {
-        return None;
-    }
-    let extension = path
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let text_exts = [
-        "txt", "text", "rtf", "log",
-        "md", "markdown", "mdown", "mkd", "mkdn", "mdwn",
-        "rst", "org", "adoc", "asciidoc",
-        "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "xml", "csv", "tsv",
-        "html", "htm", "css", "js", "ts", "jsx", "tsx",
-        "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt", "scala",
-        "sh", "bash", "zsh", "ps1", "bat", "cmd",
-    ];
-    if text_exts.contains(&extension.as_str()) {
-        return Some(path.to_path_buf());
-    }
-    std::fs::read(path)
-        .ok()
-        .filter(|bytes| !bytes.contains(&0))
-        .map(|_| path.to_path_buf())
-}
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
 
-pub fn file_type_label(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "md" | "markdown" | "mdown" | "mkd" | "mkdn" | "mdwn" => "Markdown",
-        "txt" | "text" => "Text",
-        "rtf" => "Rich Text",
-        "json" | "yaml" | "yml" | "toml" | "ini" | "cfg" | "conf" | "xml" | "csv" | "tsv" => "Data",
-        "html" | "htm" => "HTML",
-        "js" | "ts" | "jsx" | "tsx" => "Script",
-        "py" => "Python",
-        "rs" => "Rust",
-        "go" => "Go",
-        "sh" | "bash" | "zsh" => "Shell",
-        "ps1" | "bat" | "cmd" => "Batch",
-        _ => "Document",
+    #[test]
+    fn text_file_args_resolve() {
+        let dir = std::env::temp_dir();
+        let probe = dir.join("jwe-probe-notes.md");
+        std::fs::write(&probe, "# probe").unwrap();
+        let found = find_text_file(
+            &[probe.to_string_lossy().into_owned()],
+            &dir,
+        );
+        assert_eq!(found, Some(probe.clone()));
+        let _ = std::fs::remove_file(&probe);
     }
-}
 
-pub fn is_openable(path: &Path) -> bool {
-    find_openable_file(path).is_some()
+    #[test]
+    fn non_text_args_are_ignored() {
+        let dir = std::env::temp_dir();
+        assert_eq!(
+            find_text_file(&["--widget-autostart".to_string()], &dir),
+            None
+        );
+    }
+
+    #[test]
+    fn binaries_and_missing_files_are_ignored() {
+        let dir = std::env::temp_dir();
+        assert_eq!(find_text_file(&["app.exe".to_string()], &dir), None);
+        assert_eq!(
+            find_text_file(&["jwe-no-such-file-xyz.md".to_string()], &dir),
+            None
+        );
+    }
+
+    #[test]
+    fn relative_paths_resolve_against_cwd() {
+        let dir = std::env::temp_dir().join(format!("jwe-rel-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("rel.md"), "# rel").unwrap();
+        let found = find_text_file(&["rel.md".to_string()], &dir);
+        assert_eq!(found, Some(dir.join("rel.md")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

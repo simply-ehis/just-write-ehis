@@ -176,9 +176,15 @@
   async function restoreTabs() {
     try {
       const saved = await api.tabsGet("global");
-      const ids = saved?.tab_stack_json ? JSON.parse(saved.tab_stack_json) : [];
-      if (!Array.isArray(ids) || ids.length === 0) return;
-      const wanted = ids.slice(0, 30);
+      const raw = saved?.tab_stack_json ? JSON.parse(saved.tab_stack_json) : [];
+      if (!Array.isArray(raw) || raw.length === 0) return;
+      // Locked docs restore as covered tabs (lockCover gates content until
+      // per-doc unlock); corrupt non-string entries are dropped here so
+      // they never reach docGet or the strip-order map below.
+      const wanted = raw
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+        .slice(0, 30);
+      if (wanted.length === 0) return;
       const getDoc = (id: string) => api.docGet(id).catch(() => null);
       // Active doc first for instant paint; the rest of the strip streams
       // in behind it in batches of 8 so cold SQLite never faces a 30-wide

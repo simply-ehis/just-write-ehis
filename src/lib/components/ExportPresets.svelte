@@ -14,7 +14,7 @@
 
   let open = $state(false);
   let exporting = $state(false);
-  let selectedFormat = $state('markdown');
+  let selectedFormat = $state('md');
 
   const presets: ExportPreset[] = [
     { id: 'markdown', name: 'Markdown', format: 'md', description: 'Plain Markdown with frontmatter', icon: 'file' },
@@ -29,14 +29,17 @@
   function closePanel() { open = false; }
 
   async function exportDoc(preset: ExportPreset) {
+    if (exporting) return;
     if (!$currentDoc) {
       showToast('No document selected', 'warning');
       return;
     }
     exporting = true;
     try {
-      const result = await api.convertDocument($currentDoc.id, preset.format);
-      showToast(`Exported as ${preset.name}`, 'success');
+      const out = await api.convertRun($currentDoc.id, preset.format);
+      const { downloadConvertOutput } = await import('$lib/download');
+      downloadConvertOutput(out);
+      showToast(`Downloaded ${out.filename}`, 'success');
       closePanel();
     } catch (e) {
       showToast(`Export failed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -45,15 +48,18 @@
     }
   }
 
-  async function exportAll() {
+  async function exportCurrent() {
+    if (exporting) return;
     if (!$currentDoc) {
       showToast('No document selected', 'warning');
       return;
     }
     exporting = true;
     try {
-      const result = await api.batchExport([$currentDoc.id], selectedFormat);
-      showToast(`Exported as ${selectedFormat.toUpperCase()}`, 'success');
+      const out = await api.convertRun($currentDoc.id, selectedFormat);
+      const { downloadConvertOutput } = await import('$lib/download');
+      downloadConvertOutput(out);
+      showToast(`Downloaded ${out.filename}`, 'success');
       closePanel();
     } catch (e) {
       showToast(`Export failed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -80,7 +86,7 @@
         {:else}
           <div class="preset-grid">
             {#each presets as preset}
-              <button class="preset-card" onclick={() => exportDoc(preset)}>
+              <button class="preset-card" onclick={() => exportDoc(preset)} disabled={exporting}>
                 <Icon name={preset.icon} size={24} />
                 <span class="preset-name">{preset.name}</span>
                 <span class="preset-desc">{preset.description}</span>
@@ -93,7 +99,7 @@
                 <option value={preset.format}>{preset.name}</option>
               {/each}
             </select>
-            <button class="export-all-btn" onclick={exportAll}>Export All</button>
+            <button class="export-all-btn" onclick={exportCurrent} disabled={exporting}>Export current doc</button>
           </div>
         {/if}
       </div>

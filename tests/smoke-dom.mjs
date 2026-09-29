@@ -6,10 +6,9 @@
  *
  * Run: npm run build && node tests/smoke-dom.mjs [--width=390]
  */
-import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { JSDOM } from "jsdom";
+import { fileURLToPath } from "node:url";
+import { bootDom, resolveBundle } from "./helpers/jsdom-boot.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const widthArg = process.argv.find((a) => a.startsWith("--width="));
@@ -18,59 +17,15 @@ const WIDTH = widthArg ? parseInt(widthArg.split("=")[1], 10) : 1280;
 const errors = [];
 const warnings = [];
 
-const distHtml = await readFile(join(root, "dist/index.html"), "utf8");
-const jsName = distHtml.match(/assets\/(index-.*\.js)/)?.[1];
-if (!jsName) {
+let bundleUrl;
+try {
+  bundleUrl = await resolveBundle(root);
+} catch {
   console.log("FAIL  no bundle in dist/index.html (run npm run build first)");
   process.exit(1);
 }
 
-const dom = new JSDOM(
-  `<!DOCTYPE html><html><head></head><body><div id="app"></div></body></html>`,
-  { url: "http://localhost/", pretendToBeVisual: true }
-);
-
-for (const key of [
-  "window", "Window", "document", "navigator", "localStorage", "sessionStorage",
-  "HTMLElement", "Element", "Node", "Text", "Comment", "Document",
-  "DocumentFragment", "DocumentType", "NodeList", "HTMLCollection",
-  "Range", "Selection", "NodeFilter", "HTMLMediaElement", "HTMLAudioElement",
-  "HTMLVideoElement", "HTMLImageElement", "Image", "Audio", "SVGElement",
-  "SVGSVGElement", "SVGGraphicsElement", "HTMLInputElement", "HTMLTextAreaElement",
-  "HTMLSelectElement", "HTMLButtonElement", "HTMLAnchorElement", "HTMLDivElement",
-  "HTMLSpanElement", "HTMLCanvasElement", "Event", "CustomEvent", "KeyboardEvent",
-  "MouseEvent", "PointerEvent", "WheelEvent", "DragEvent", "ClipboardEvent",
-  "FocusEvent", "InputEvent", "MutationObserver", "MutationRecord",
-  "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame",
-  "DOMParser", "XMLSerializer", "DOMTokenList",
-]) {
-  if (key in dom.window && !(key in globalThis)) {
-    globalThis[key] = dom.window[key].bind
-      ? dom.window[key]
-      : dom.window[key];
-  }
-}
-// requestAnimationFrame needs binding to window for jsdom timers
-globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
-// jsdom Ranges/Elements lack geometry APIs that CodeMirror calls during
-// measure. Zeros are fine for a mount-crash smoke test (not layout).
-const emptyRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 });
-if (dom.window.Range) {
-  if (!dom.window.Range.prototype.getClientRects) {
-    dom.window.Range.prototype.getClientRects = function () { return []; };
-  }
-  if (!dom.window.Range.prototype.getBoundingClientRect) {
-    dom.window.Range.prototype.getBoundingClientRect = emptyRect;
-  }
-}
-if (dom.window.Element && !dom.window.Element.prototype.getClientRects) {
-  dom.window.Element.prototype.getClientRects = function () { return []; };
-}
-globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-globalThis.window.innerWidth = WIDTH;
-globalThis.window.innerHeight = 800;
-globalThis.devicePixelRatio = 1;
-globalThis.window.devicePixelRatio = 1;
+const dom = bootDom(WIDTH, 800);
 
 const origError = console.error;
 const origWarn = console.warn;
@@ -104,7 +59,7 @@ if (process.argv.includes("--dirty")) {
 }
 
 try {
-  await import(pathToFileURL(join(root, "dist/assets", jsName)).href);
+  await import(bundleUrl);
 } catch (e) {
   errors.push(`MOUNT THREW: ${String(e).split("\n").slice(0, 4).join(" | ")}`);
 }

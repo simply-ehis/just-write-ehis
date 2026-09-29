@@ -177,7 +177,7 @@ check(
   "theme switch applies (sepia paper)",
   !!q(".reader-workspace section[data-section].theme-sepia")
 );
-check("read-aloud entry present", !!q('.reader-toolbar button[aria-label="Read text aloud"]'));
+check("read-aloud entry present", !!q('.reader-workspace .tts-btn'));
 
 clearInterval(linkTimer);
 console.log(`INFO  console.error count: ${errors.length}`);

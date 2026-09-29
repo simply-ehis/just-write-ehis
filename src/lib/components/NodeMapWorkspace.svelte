@@ -157,10 +157,13 @@
       return true;
     });
 
+    // Per-frame Set lookups (orphans/hubs ship as arrays).
+    const orphanIds = new Set(gd.orphans);
+    const hubIds = new Set(gd.hubs.map(([id]) => id));
+
     // Hubs-only view: hub nodes plus their direct neighbors. Off = all.
     let visibleNodes = filteredNodes;
     if (hubOnly) {
-      const hubIds = new Set(gd.hubs.map(([id]) => id));
       const neighborIds = new Set<string>();
       for (const e of gd.edges) {
         if (hubIds.has(e.source)) neighborIds.add(e.target);
@@ -195,8 +198,8 @@
 
       const isSelected = selectedNodeId === node.id;
       const isHovered = hoveredNodeId === node.id;
-      const isOrphan = gd.orphans.includes(node.id);
-      const isHub = gd.hubs.some(([id]) => id === node.id);
+      const isOrphan = orphanIds.has(node.id);
+      const isHub = hubIds.has(node.id);
       const baseRadius = 6 + Math.min(node.degree * 1.5, 12);
       const radius = isSelected ? baseRadius * 1.3 : isHovered ? baseRadius * 1.15 : baseRadius;
 
