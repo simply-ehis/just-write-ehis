@@ -10,7 +10,6 @@
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
   import { ensureHarness } from "$lib/memorySidecar";
-  import { testProvider } from "$lib/providerTest";
   import { friendlyEndpointError, rateLimited } from "$lib/aiRequest";
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
@@ -235,7 +234,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         ghostProbe = { running: false, text: `${Date.now() - startedAt}ms · ${text}` };
         return;
       }
-      const result = await testProvider($settings.smallModelEndpoint, $settings.smallModelName);
+      const result = await api.providerProbe($settings.smallModelEndpoint, $settings.smallModelName, $settings.apiKey || undefined);
       ghostProbe = {
         running: false,
         text: result.ok
@@ -341,7 +340,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     }
     // Surface a dead endpoint the moment the panel opens — not mid-sentence.
     try {
-      const probe = await testProvider($settings.mainModelEndpoint, $settings.mainModelName);
+      const probe = await api.providerProbe($settings.mainModelEndpoint, $settings.mainModelName, $settings.apiKey || undefined);
       endpointUnreachable = !probe.ok;
     } catch {
       endpointUnreachable = true;

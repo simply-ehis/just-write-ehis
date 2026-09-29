@@ -12,6 +12,15 @@ export const TEXT_EXTS = ["md", "txt", "fountain"] as const;
 export const BOOK_EXTS = ["epub", "pdf", "docx"] as const;
 export const IMPORTABLE_EXTS = [...TEXT_EXTS, ...BOOK_EXTS] as const;
 
+/** True for book/container files the book parser handles. */
+export function isBookFile(name: string): boolean {
+  const lower = (name || "").toLowerCase();
+  return (BOOK_EXTS as readonly string[]).some((ext) => lower.endsWith(`.${ext}`));
+}
+
+/** File-picker accept for book+text imports (one order everywhere). */
+export const BOOK_ACCEPT = ".fountain,.md,.txt,.epub,.pdf,.docx";
+
 export interface ImportResult {
   title: string;
   text: string;

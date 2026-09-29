@@ -3,5 +3,5 @@
   "identifier": "widget-window",
   "description": "Companion document command set and explicit process exit.",
   "windows": ["widget"],
-  "permissions": ["widget"]
+  "permissions": ["widget", "core:window:allow-set-size", "core:window:allow-set-position"]
 }

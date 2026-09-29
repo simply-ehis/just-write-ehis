@@ -48,9 +48,21 @@ if (typeof localStorage !== "undefined") {
     }, 300);
   };
   let latest = { sidebar: initialPanels.sidebar, ai: initialPanels.ai, inspector: initialPanels.inspector };
-  sidebarOpen.subscribe((v) => { latest.sidebar = v; scheduleSave(latest.sidebar, latest.ai, latest.inspector); });
-  aiPanelOpen.subscribe((v) => { latest.ai = v; scheduleSave(latest.sidebar, latest.ai, latest.inspector); });
-  inspectorOpen.subscribe((v) => { latest.inspector = v; scheduleSave(latest.sidebar, latest.ai, latest.inspector); });
+  // Skip the immediate first call per store: subscribe fires on boot with
+  // unchanged values, which would schedule a pointless write (and could
+  // clobber newer cross-tab prefs with identical-looking data).
+  let skips = 3;
+  const track = (key: "sidebar" | "ai" | "inspector") => (v: boolean) => {
+    latest = { ...latest, [key]: v };
+    if (skips > 0) {
+      skips -= 1;
+      return;
+    }
+    scheduleSave(latest.sidebar, latest.ai, latest.inspector);
+  };
+  sidebarOpen.subscribe(track("sidebar"));
+  aiPanelOpen.subscribe(track("ai"));
+  inspectorOpen.subscribe(track("inspector"));
 }
 
 export const workspaces = [

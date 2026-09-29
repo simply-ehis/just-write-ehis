@@ -265,8 +265,12 @@ async function updaterWiring() {
 
 async function exportWiring() {
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("editor export offers docx", editor.includes("docx"));
-  check("editor export offers epub+pdf", editor.includes("epub") && editor.includes("pdf"));
+  // Formats live in the shared module now (not per-component literals):
+  // the editor must import it, and it must define all six formats.
+  const formats = await readFile(join(root, "src/lib/exportFormats.ts"), "utf8");
+  const six = ["md", "txt", "html", "docx", "epub", "pdf"].every((f) => formats.includes(`"${f}"`));
+  check("editor export offers docx", editor.includes("exportFormats") && formats.includes('"docx"') && six);
+  check("editor export offers epub+pdf", editor.includes("exportFormats") && formats.includes('"epub"') && formats.includes('"pdf"'));
   const novel = await readFile(join(root, "src/lib/components/NovelWorkspace.svelte"), "utf8");
   check("novel compile downloads in formats", novel.includes("compileRun") && novel.includes("Download"));
   const cargo = await readFile(join(root, "src-tauri/Cargo.toml"), "utf8");
@@ -301,7 +305,11 @@ async function noNativeDialogs() {
 
 async function integrityWiring() {
   const reader = await readFile(join(root, "src/lib/components/ReaderWorkspace.svelte"), "utf8");
-  check("reader parses books (no raw binary import)", reader.includes("parseBookFile") && reader.includes(".epub,.pdf,.docx"));
+  // Book picker extensions live in importFile.ts (BOOK_ACCEPT) so every
+  // surface accepts the same set; the reader must use them + parseBookFile.
+  const importFile = await readFile(join(root, "src/lib/importFile.ts"), "utf8");
+  const acceptAll = [".epub", ".pdf", ".docx", ".md", ".txt", ".fountain"].every((e) => importFile.includes(e));
+  check("reader parses books (no raw binary import)", reader.includes("parseBookFile") && reader.includes("BOOK_ACCEPT") && acceptAll);
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
   check("ghost passes workspace for privacy", editor.includes("requestGhostContinuation(lastSentence, $currentWorkspace)"));
 }
@@ -352,6 +360,37 @@ async function modelsDocWiring() {
   check("models doc locks voice picks", models.includes("Moonshine streaming only") && models.includes("Kokoro-82M only"));
   check("models doc lists cloud providers only", models.includes("OpenAI") && models.includes("Anthropic") && models.includes("Custom") && !models.includes("ollama pull") && !models.includes("llama3.2"));
   check("models doc states chat-completions contract", models.includes("Provider notes") && models.includes("/chat/completions"));
+}
+
+async function privacyWiring() {
+  // Local-first launch: no remote fonts — the Brutalist theme uses the
+  // bundled mono stack + system heavies, so nothing phones home at boot.
+  const html = await readFile(join(root, "index.html"), "utf8");
+  check("no remote fonts at launch", !html.includes("fonts.googleapis.com") && !html.includes("fonts.gstatic.com"));
+  const conf = JSON.parse(await readFile(join(root, "src-tauri/tauri.conf.json"), "utf8"));
+  const csp = conf.app?.security?.csp ?? "";
+  check("CSP has no Google font hosts", !csp.includes("fonts.googleapis.com") && !csp.includes("fonts.gstatic.com"));
+  const css = await readFile(join(root, "src/app.css"), "utf8");
+  check("no remote font URLs in styles", !css.includes("fonts.googleapis.com") && !css.includes("fonts.gstatic.com"));
+  const main = await readFile(join(root, "src/main.ts"), "utf8");
+  check(
+    "brutalist display type self-hosted via fontsource",
+    main.includes("@fontsource/archivo-black") && main.includes("@fontsource/space-mono")
+  );
+  // Place stamp is opt-in and calls third parties from the webview: every
+  // host it touches must be in connect-src, or the desktop build blocks it
+  // and the toggle silently does nothing.
+  const stamp = await readFile(join(root, "src/lib/stamp.ts"), "utf8");
+  const hosts = [...stamp.matchAll(/https:\/\/([a-z0-9.-]+)/g)].map((m) => m[1]);
+  const connect = csp.match(/connect-src ([^;]+)/)?.[1] ?? "";
+  check(
+    `stamp hosts allow-listed in CSP (${hosts.join(", ")})`,
+    hosts.length > 0 && hosts.every((h) => connect.includes(h))
+  );
+  const settings = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
+  check("place stamp defaults off", /logsStampPlace:\s*false/.test(settings));
+  const pane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
+  check("place stamp toggle discloses third parties", pane.includes("Nominatim") && pane.includes("Open-Meteo"));
 }
 
 async function memorySidecarLive() {
@@ -500,7 +539,7 @@ async function auditBatchWiring() {
   const dl = await readFile(join(root, "src/lib/download.ts"), "utf8");
   check("fountain helper shared", dl.includes("downloadFountain"));
   const ed = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("export menus list all six gated", ed.includes("ALL_EXPORT_FORMATS") && ed.includes("Needs pandoc"));
+  check("export menus list all six gated", ed.includes("exportFormats") && ed.includes("Needs pandoc"));
   const imp = await readFile(join(root, "src/lib/import.ts"), "utf8");
   check("batch concurrency + cancel + dedupe", imp.includes("mapLimit") && imp.includes("shouldCancel") && imp.includes("dedupeFilename") && imp.includes("streamFiles"));
   const pub_ = await readFile(join(root, "src/lib/stores/publish.ts"), "utf8");
@@ -734,6 +773,7 @@ await splitHardeningWiring();
 await themeAndReaderWiring();
 await modelWiring();
 await modelsDocWiring();
+await privacyWiring();
 await aiEntryWiring();
 await writePathWiring();
 await memorySidecarLive();

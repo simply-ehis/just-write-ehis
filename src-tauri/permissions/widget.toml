@@ -1,4 +1,4 @@
-[[permission]]
+[[set]]
 identifier = "widget"
 description = "Existing document, log, capture, save, and narrow app-lock verification commands used by the companion window. General secrets, sidecars, filesystem, watcher, and updater commands are deliberately absent."
 permissions = [

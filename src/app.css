@@ -1183,6 +1183,9 @@ input:focus, textarea:focus, select:focus {
 /* ============================================
    BRUTALIST THEME — structural overrides
    Same colors, different bones.
+   Fonts are self-hosted via @fontsource (Archivo Black + Space Mono,
+   imported in main.ts): exact display type, zero remote requests,
+   fully offline.
    ============================================ */
 
 [data-theme="brutalist"] body,
@@ -1343,7 +1346,7 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
 }
 
-/* Headings — Archivo Black, uppercase, tight */
+/* Headings — Archivo Black (self-hosted via @fontsource), uppercase, tight */
 [data-theme="brutalist"] h1,
 [data-theme="brutalist"] h2,
 [data-theme="brutalist"] h3,

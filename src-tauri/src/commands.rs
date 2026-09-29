@@ -10,8 +10,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::process::Command;
-use ammonia;
 use serde::Serialize;
+use uuid::Uuid;
 use crate::windows::PendingLaunchFile;
 
 #[tauri::command]
@@ -50,6 +50,11 @@ pub fn open_external_file(db: State<'_, Database>, path: String) -> Result<Optio
         }
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
+        }
+        // Cap before reading: a multi-GB .txt would otherwise be loaded
+        // whole into memory (25 MB mirrors attachment_save).
+        if path.metadata().map(|m| m.len()).unwrap_or(0) > 25 * 1024 * 1024 {
+            return Err("File over 25 MB — open it from its own app instead.".into());
         }
         let bytes = std::fs::read(&path).map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
         if bytes.contains(&0) {
@@ -315,8 +320,8 @@ pub fn log_list_entries(db: State<'_, Database>, limit: Option<i64>) -> Result<V
 }
 
 #[tauri::command]
-pub fn graph_query(db: State<'_, Database>) -> Result<GraphQueryResult, String> {
-    db.graph_query()
+pub fn graph_query(db: State<'_, Database>, workspace: Option<String>, tags: Option<Vec<String>>) -> Result<GraphQueryResult, String> {
+    db.graph_query(workspace.as_deref(), tags.as_deref())
 }
 
 #[tauri::command]
@@ -406,6 +411,9 @@ pub fn bible_get_mentions(db: State<'_, Database>, bible_doc_id: String) -> Resu
 }
 
 #[tauri::command]
+// Eight args is the Tauri IPC contract (one per invoke key); bundling them
+// into a struct would break every caller, so the lint is allowed here.
+#[allow(clippy::too_many_arguments)]
 pub fn bible_upsert_mention(
     db: State<'_, Database>,
     bible_doc_id: String,
@@ -491,7 +499,8 @@ pub async fn bible_rebuild_memory(
 }
 
 #[tauri::command]
-pub fn conversation_create(db: State<'_, Database>, doc_id: Option<String>, mode: String) -> Result<Conversation, String> {
+pub fn conversation_create(db: State<'_, Database>, doc_id: Option<String>, mode: Option<String>) -> Result<Conversation, String> {
+    let mode = mode.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| "chat".to_string());
     db.conversation_create(doc_id.as_deref(), &mode)
 }
 
@@ -625,6 +634,114 @@ pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateRespons
     .await?;
 
     Ok(AiGenerateResponse { content, tokens_used: tokens })
+}
+
+/// Pull model ids out of an OpenAI-compatible `/models` payload.
+/// Pure (no I/O) so it is unit-testable: missing/non-array `data`,
+/// entries without an `id`, and anything past 20 all yield a clean list.
+fn parse_models_list(data: &serde_json::Value) -> Vec<String> {
+    let mut models: Vec<String> = data
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id")?.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    models.truncate(20);
+    models
+}
+
+/// Probe an OpenAI-compatible `/models` endpoint (Settings → Test buttons).
+/// Runs in Rust so the stored API key is attached as a Bearer header and
+/// the webview CSP can't block non-allow-listed hosts. Best-effort: any
+/// failure is an Err string, like the other AI commands.
+#[tauri::command]
+pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result<ProviderProbeResponse, String> {
+    let base = endpoint.trim_end_matches('/');
+    if base.is_empty() {
+        return Err("Provider endpoint is empty.".to_string());
+    }
+    // Scheme allowlist: the renderer supplies this URL, so file://, ftp://
+    // and other exotic schemes are rejected before any request is built.
+    // (Private-IP gating is intentionally absent: endpoints are the user's
+    // own configured providers, including localhost sidecars.)
+    if !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Err("Provider endpoint must be an http(s) URL.".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.get(format!("{}/models", base));
+    if let Some(key) = api_key.as_ref().filter(|k| !k.is_empty()) {
+        req = req.header("Authorization", format!("Bearer {}", key));
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(friendly_http_status(resp.status().as_u16()));
+    }
+    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(ProviderProbeResponse { models: parse_models_list(&data) })
+}
+
+#[cfg(test)]
+mod provider_probe_tests {
+    use super::*;
+
+    #[test]
+    fn parses_model_ids() {
+        let data = serde_json::json!({ "data": [{ "id": "gpt-4o-mini" }, { "id": "org/llama3.2" }] });
+        assert_eq!(parse_models_list(&data), vec!["gpt-4o-mini", "org/llama3.2"]);
+    }
+
+    #[test]
+    fn skips_entries_without_ids() {
+        let data = serde_json::json!({ "data": [{ "id": "kept" }, { "name": "no-id" }, { "id": 42 }] });
+        assert_eq!(parse_models_list(&data), vec!["kept"]);
+    }
+
+    #[test]
+    fn missing_or_misshapen_data_yields_empty() {
+        assert!(parse_models_list(&serde_json::json!({})).is_empty());
+        assert!(parse_models_list(&serde_json::json!({ "data": "nope" })).is_empty());
+        assert!(parse_models_list(&serde_json::json!({ "data": [] })).is_empty());
+    }
+
+    #[test]
+    fn truncates_past_twenty() {
+        let ids: Vec<serde_json::Value> = (0..30).map(|i| serde_json::json!({ "id": format!("m-{i}") })).collect();
+        let models = parse_models_list(&serde_json::json!({ "data": ids }));
+        assert_eq!(models.len(), 20);
+        assert_eq!(models[0], "m-0");
+        assert_eq!(models[19], "m-19");
+    }
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::*;
+
+    #[test]
+    fn script_closer_neutralized_in_any_case() {
+        assert_eq!(neutralize_closer("a</script>b", "script"), "a<\\/script>b");
+        assert_eq!(neutralize_closer("a</SCRIPT>b", "script"), "a<\\/SCRIPT>b");
+        assert_eq!(neutralize_closer("a</ScRiPt>b", "script"), "a<\\/ScRiPt>b");
+        assert_eq!(neutralize_closer("a</style>b", "script"), "a</style>b");
+    }
+
+    #[test]
+    fn closer_scan_survives_unicode_prefix() {
+        assert_eq!(neutralize_closer("héllo wörld</sCrIpT>x", "script"), "héllo wörld<\\/sCrIpT>x");
+        assert_eq!(neutralize_closer("plain text", "script"), "plain text");
+        assert_eq!(neutralize_closer("a</sty", "style"), "a</sty");
+    }
+
+    #[test]
+    fn style_closer_neutralized() {
+        assert_eq!(sanitize_inline_css("a</STYLE>b"), "a<\\/STYLE>b");
+    }
 }
 
 /// Streaming twin of `ai_generate` (spec §3.3 `ai.complete(stream)`).
@@ -871,7 +988,7 @@ fn parse_memory_candidates(raw: &str, text: &str) -> Option<Vec<BibleMentionCand
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return None };
     let entries = value.get("mentions").and_then(|v| v.as_array())
         .or_else(|| value.as_array());
-    let Some(entries) = entries else { return None };
+    let entries = entries?;
     let source = collapse_model_text(text);
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
@@ -1392,8 +1509,9 @@ fn resolve_transclusion(target: &str, db: &crate::database::Database) -> Option<
         }
         let start = start_idx?;
         let mut end = lines.len();
-        for i in (start + 1)..lines.len() {
-            if let Some(m) = regex::Regex::new(r"^(#+)\s+").ok()?.captures(lines[i]) {
+        let end_re = regex::Regex::new(r"^(#+)\s+").ok()?;
+        for (i, line) in lines.iter().enumerate().skip(start + 1) {
+            if let Some(m) = end_re.captures(line) {
                 if m.get(1)?.as_str().len() <= heading_level {
                     end = i;
                     break;
@@ -1458,7 +1576,8 @@ fn inline_attachments(content: &str, db: &State<'_, Database>) -> (String, u64, 
             "jpg" | "jpeg" => "image/jpeg",
             "gif" => "image/gif",
             "webp" => "image/webp",
-            "svg" => "image/svg+xml",
+            // No "svg": inline SVG data URIs execute embedded scripts in
+            // some view contexts, so SVGs stay linked and count as skipped.
             _ => {
                 skipped += 1;
                 continue;
@@ -1486,14 +1605,41 @@ fn inline_attachments(content: &str, db: &State<'_, Database>) -> (String, u64, 
 /// Sanitize user-supplied inline CSS: neutralize `</style` breakouts.
 /// Anything else passes through (it runs inside a <style> block).
 fn sanitize_inline_css(css: &str) -> String {
-    css.replace("</style", "<\\/style").replace("</STYLE", "<\\/STYLE")
+    neutralize_closer(css, "style")
 }
 
 /// Sanitize user-supplied inline JS: neutralize `</script` breakouts so
 /// customJs can never escape its own script element.
 fn sanitize_inline_js(js: &str) -> String {
-    js.replace("</script", "<\\/script")
-        .replace("</SCRIPT", "<\\/SCRIPT")
+    neutralize_closer(js, "script")
+}
+
+/// Neutralize an HTML element closer (`</script`, `</style`) with ASCII
+/// case-insensitive matching: HTML closes elements regardless of case, so
+/// replacing only lowercase/uppercase misses `</ScRiPt>`. Byte-scans so
+/// non-ASCII text before the match can't shift indices; the tag itself is
+/// copied back with its original case.
+fn neutralize_closer(src: &str, tag: &str) -> String {
+    let bytes = src.as_bytes();
+    let tag_bytes = tag.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<'
+            && i + 2 + tag_bytes.len() <= bytes.len()
+            && bytes[i + 1] == b'/'
+            && bytes[i + 2..i + 2 + tag_bytes.len()].eq_ignore_ascii_case(tag_bytes)
+        {
+            out.push_str("<\\/");
+            out.push_str(&src[i + 2..i + 2 + tag_bytes.len()]);
+            i += 2 + tag_bytes.len();
+        } else {
+            let ch = src[i..].chars().next().unwrap_or('\u{FFFD}');
+            out.push(ch);
+            i += ch.len_utf8().max(1);
+        }
+    }
+    out
 }
 
 fn render_publish_html(
@@ -1622,7 +1768,7 @@ fn render_publish_html(
         html_escape(title),
         html_escape(description),
         html_escape(theme),
-        &nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", html_escape(w), html_escape(w))).collect::<Vec<_>>().join(""),
+        nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", html_escape(w), html_escape(w))).collect::<Vec<_>>().join(""),
         body,
         chrono::Utc::now().format("%B %d, %Y"),
         custom_css_block,
@@ -1818,7 +1964,9 @@ pub fn attachment_save(
     let dir = vault.join(".attachments");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dest = dir.join(&unique);
-    let temp = dest.with_extension("tmp");
+    // Unique temp per write: same-second same-name saves from concurrent
+    // commands must never share (and clobber) one temp file.
+    let temp = dest.with_extension(format!("tmp.{}", Uuid::new_v4()));
     std::fs::write(&temp, &bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&temp, &dest).map_err(|e| e.to_string())?;
     Ok(format!(".attachments/{}", unique))
@@ -2312,8 +2460,15 @@ pub fn attachment_read(db: State<'_, Database>, path: String) -> Result<String, 
     if !rel.starts_with(".attachments/") {
         return Err("Only .attachments/ refs can be bundled.".into());
     }
+    // Canonicalize and re-check: a symlink inside .attachments/ pointing
+    // outside the vault must not be followed.
     let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    let bytes = std::fs::read(vault.join(rel)).map_err(|e| format!("Attachment unreadable: {}", e))?;
+    let vault_canon = vault.canonicalize().map_err(|_| "Vault is unavailable.".to_string())?;
+    let target = vault_canon.join(rel).canonicalize().map_err(|e| format!("Attachment unreadable: {}", e))?;
+    if !target.starts_with(&vault_canon) {
+        return Err("Refusing path escaping the vault.".into());
+    }
+    let bytes = std::fs::read(&target).map_err(|e| format!("Attachment unreadable: {}", e))?;
     if bytes.len() > 25 * 1024 * 1024 {
         return Err("Attachment over 25 MB — link the file instead.".into());
     }

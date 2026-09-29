@@ -8,8 +8,9 @@
   import DeleteButton from '$lib/components/DeleteButton.svelte';
   import Icon from '$lib/components/Icon.svelte';
   import { downloadConvertOutput, downloadFountain } from '$lib/download';
-  import { readImportFile } from '$lib/importFile';
+  import { readImportFile, isBookFile, BOOK_ACCEPT } from '$lib/importFile';
   import { domainError } from '$lib/errors';
+  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS, exportLabel } from '$lib/exportFormats';
   import WorkspaceError from './WorkspaceError.svelte';
 
   let scripts = $state<Doc[]>([]);
@@ -27,24 +28,10 @@
   // an $effect), so it can't resubscribe anything.
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const ALL_EXPORT_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
-  const PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
   let showExportMenu = $state(false);
   let pandocAvailable = $state(true);
   let exportMenuLoaded = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
-
-  function exportLabel(format: string): string {
-    switch (format) {
-      case 'md': return 'Markdown (.md)';
-      case 'txt': return 'Plain Text (.txt)';
-      case 'html': return 'HTML (.html)';
-      case 'docx': return 'Word (.docx)';
-      case 'epub': return 'eBook (.epub)';
-      case 'pdf': return 'PDF (.pdf)';
-      default: return format;
-    }
-  }
 
   async function toggleExportMenu() {
     showExportMenu = !showExportMenu;
@@ -315,7 +302,7 @@
     if (!file) return;
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+      if (isBookFile(lower)) {
         showToast(`Extracting text from ${file.name}…`, "info");
       }
       const res = await readImportFile(file);
@@ -385,7 +372,7 @@
         <input
           bind:this={importInput}
           type="file"
-          accept=".fountain,.md,.txt,.epub,.pdf,.docx"
+          accept={BOOK_ACCEPT}
           onchange={handleImportScript}
           hidden
         />

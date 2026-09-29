@@ -403,13 +403,24 @@
   import { emit, emitTo, listen } from "@tauri-apps/api/event";
   import { checkForUpdate } from "$lib/updates";
   import { showBanner, showToast } from "$lib/stores/notifications";
-  import { warnOnce } from "$lib/errors";
+  import { isAclDenied, warnOnce } from "$lib/errors";
   import { forgetPlace, placeFor, rememberPlace, pushNavHistory } from "$lib/stores/lastPlace";
 
   const DAY_MS = 86400000;
 
   /** Weekly triage nudge, streak nudge, and scheduled auto-backup. */
   async function runStartupMaintenance() {
+    // Loud ACL probe first: a misconfigured window manifest denies every
+    // command, and each check below fails quietly on its own — so verify
+    // one cheap command and banner loudly instead of looking broken.
+    try {
+      await api.getVaultPath();
+    } catch (e) {
+      if (isAclDenied(e)) {
+        showBanner("App permissions are misconfigured — commands are blocked. Rebuild the desktop app after fixing the window ACL.", "error");
+        return;
+      }
+    }
     const now = Date.now();
     const today = new Date().toISOString().slice(0, 10);
 

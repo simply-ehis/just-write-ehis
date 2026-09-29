@@ -21,7 +21,9 @@ let openRequest = 0;
 async function notifyWidgetFailure(message: string): Promise<void> {
   try {
     await emitTo("widget", "widget-open-failed", message);
-  } catch {}
+  } catch (e) {
+    console.warn("Widget failure notice undelivered:", e instanceof Error ? e.message : e);
+  }
 }
 
 async function focusMain(mainWindow: Window) {

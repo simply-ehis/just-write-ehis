@@ -19,9 +19,12 @@ use tauri::{
 
 pub fn run() {
     unsafe {
-        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
-            sqlite_vec::sqlite3_vec_init as *const (),
-        )));
+        // sqlite_vec bundles its own sqlite3-sys, so its init fn pointer type
+        // can't be named from here — the transmute is load-bearing, not lazy.
+        rusqlite::ffi::sqlite3_auto_extension(Some(
+            #[allow(clippy::missing_transmute_annotations)]
+            std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const ()),
+        ));
     }
 
     let builder = tauri::Builder::default();
@@ -211,6 +214,7 @@ pub fn run() {
             commands::conversation_get_messages,
             commands::ai_generate,
             commands::ai_generate_stream,
+            commands::provider_probe,
             commands::memory_decay_activity,
             commands::memory_smart_tabs,
             commands::memory_record_metric,

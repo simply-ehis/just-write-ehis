@@ -15,11 +15,7 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="service-worker" href="sw.js" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Non-render-blocking: display fonts enhance when online, never stall paint. -->
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" /></noscript>
+    <!-- Local-first: display type is self-hosted (see app.css), zero remote requests. -->
     <script>
       try {
         var s = JSON.parse(localStorage.getItem("writing-app-settings") || "{}");
@@ -54,10 +50,6 @@
             .then(reg => console.log('SW registered:', reg.scope))
             .catch(err => console.log('SW registration failed:', err));
         });
-      }
-      // Handle share target
-      if (navigator.share) {
-        // App can receive shared content
       }
     </script>
   </head>

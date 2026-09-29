@@ -409,6 +409,15 @@ pub struct SttTranscribeResponse {
     pub error: Option<String>,
 }
 
+/// Model override travels as child-process argv: keep it a bare name so a
+/// crafted value can't redirect the sidecar's model resolution elsewhere.
+fn check_model_name(model: &str) -> Result<(), String> {
+    if model.contains('/') || model.contains('\\') || model.contains("..") {
+        return Err("Invalid model name.".into());
+    }
+    Ok(())
+}
+
 impl SttManager {
     pub fn new(port: u16) -> Self {
         Self {
@@ -419,6 +428,7 @@ impl SttManager {
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
         let mut args = vec![self.proc.port().to_string()];
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+            check_model_name(m)?;
             args.push(m.to_string());
         }
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe") {
@@ -534,6 +544,7 @@ impl TtsManager {
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
         let mut args = vec![self.proc.port().to_string()];
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
+            check_model_name(m)?;
             args.push(m.to_string());
         }
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "tts-server.exe") {
@@ -1019,5 +1030,16 @@ mod managed_tests {
         assert!(!m.is_running());
         // Second stop is a safe no-op.
         m.stop().expect("second stop");
+    }
+
+    /// Model overrides ride as child argv: bare names pass, anything that
+    /// could redirect resolution (separators, parent escapes) fails closed.
+    #[test]
+    fn model_name_allows_bare_names_only() {
+        assert!(check_model_name("moonshine-base.gguf").is_ok());
+        assert!(check_model_name("kokoro-v1.0").is_ok());
+        assert!(check_model_name("../evil").is_err());
+        assert!(check_model_name("sub/dir").is_err());
+        assert!(check_model_name("C:\\models\\x").is_err());
     }
 }

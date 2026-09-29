@@ -8,7 +8,7 @@
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, friendlyUpdateError, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
   import { APP_VERSION } from "$lib/version";
-  import { testProvider, type ProviderTestResult } from "$lib/providerTest";
+  import { type ProviderTestResult } from "$lib/providerTest";
   import BackupManager from "./BackupManager.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import LazyWorkspace from "./LazyWorkspace.svelte";
@@ -301,7 +301,8 @@
     try {
       const endpoint = slot === "small" ? $settings.smallModelEndpoint : $settings.mainModelEndpoint;
       const model = slot === "small" ? $settings.smallModelName : $settings.mainModelName;
-      slotResults = { ...slotResults, [slot]: await testProvider(endpoint, model) };
+      // Desktop probes via Rust (key attached, no CSP block); preview fetches directly.
+      slotResults = { ...slotResults, [slot]: await api.providerProbe(endpoint, model, $settings.apiKey || undefined) };
     } finally {
       testingSlot = null;
     }
@@ -1451,6 +1452,7 @@
           <label for="setting-logs-stamp-place">Stamp location & weather on new daily notes</label>
           <input id="setting-logs-stamp-place" type="checkbox" bind:checked={$settings.logsStampPlace} />
         </div>
+        <p class="setting-desc">Opt-in: sends your coordinates to Nominatim (place name) and Open-Meteo (weather) when stamping a new daily note. Off by default.</p>
       </div>
 
     {:else if activeCategory === "skills"}

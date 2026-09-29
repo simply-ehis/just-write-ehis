@@ -51,6 +51,7 @@ const COMMANDS: &[&str] = &[
     "conversation_get_messages",
     "ai_generate",
     "ai_generate_stream",
+    "provider_probe",
     "memory_decay_activity",
     "memory_smart_tabs",
     "memory_record_metric",

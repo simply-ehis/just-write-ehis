@@ -240,6 +240,7 @@ pub struct GraphNode {
     pub word_count: i64,
     pub activity_score: f64,
     pub degree: i64,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +315,13 @@ pub struct AiGenerateRequest {
 pub struct AiGenerateResponse {
     pub content: String,
     pub tokens_used: Option<u32>,
+}
+
+/// Settings → Test buttons: the `/models` ids behind a configured endpoint.
+/// Model-name matching stays frontend-side (ProviderTestResult.modelFound).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderProbeResponse {
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,17 +9,23 @@ import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
 import { createDocFromTemplate } from "$lib/stores/templates";
 
 export async function openDailyNote(): Promise<void> {
-  const today = new Date().toISOString().split("T")[0];
+  // Local calendar day (not UTC): toISOString at 11pm local already reads
+  // as tomorrow, which would open/search the wrong note.
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   try {
-    // Search for existing daily note
-    const results = await api.docSearchFull(`Daily Note ${today}`);
-    if (results.length > 0) {
-      const doc = results[0].doc;
-      currentDoc.set(doc);
-      currentWorkspace.set(doc.workspace);
+    // Search the short title, then match the date line locally: the full
+    // "Daily Note <date>" string never appears contiguously (title holds
+    // the name, the body holds `# <date>`), so exact-phrase search misses
+    // on substring backends and duplicates the note.
+    const results = await api.docSearchFull("Daily Note");
+    const hit = results.map((r) => r.doc).find((d) => (d.content ?? "").startsWith(`# ${today}`));
+    if (hit) {
+      currentDoc.set(hit);
+      currentWorkspace.set(hit.workspace);
       const tabs = get(openTabs);
-      if (!tabs.find((t) => t.id === doc.id)) {
-        openTabs.set([doc, ...tabs]);
+      if (!tabs.find((t) => t.id === hit.id)) {
+        openTabs.set([hit, ...tabs]);
       }
       return;
     }

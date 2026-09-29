@@ -1,6 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { isWorkspacePrivate } from "$lib/stores/settings";
 import { browserInvoke } from "$lib/browserBackend";
+import { aclDeniedMessage, isAclDenied } from "$lib/errors";
+import { capModels, matchModel, type ProviderTestResult } from "$lib/providerTest";
 
 /** True when running as a plain web page without the Tauri shell. */
 export function isBrowserPreview(): boolean {
@@ -45,10 +47,20 @@ function withSnakeAliases(args: Record<string, unknown>): Record<string, unknown
   return out;
 }
 
+/** Map a raw Tauri invoke rejection to a readable error. Exported for tests. */
+export function mapInvokeError(cmd: string, err: unknown): unknown {
+  // Tauri ACL denials reject with a bare "not allowed" string: name the
+  // blocked command so a misconfigured manifest is obvious, not silent.
+  if (isAclDenied(err)) return new Error(aclDeniedMessage(cmd, err));
+  return err;
+}
+
 function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const fullArgs = withSnakeAliases(args ?? {});
   if (isBrowserPreview()) return browserInvoke<T>(cmd, fullArgs);
-  return invoke<T>(cmd, fullArgs);
+  return invoke<T>(cmd, fullArgs).catch((err: unknown): Promise<T> => {
+    throw mapInvokeError(cmd, err);
+  });
 }
 
 /**
@@ -530,6 +542,37 @@ export const api = {
   aiStructurize: (request: StructurizeRequest) => {
     assertAiAllowed(request.workspace);
     return safeInvoke<StructurizeResponse>("ai_structurize", { request });
+  },
+
+  /**
+   * Endpoint health check (Settings → Test buttons). Desktop runs the
+   * `provider_probe` Rust command so the stored key is attached and the
+   * webview CSP can't block the host; the browser preview falls back to
+   * a direct fetch via the browserBackend case. Never rejects — a dead
+   * endpoint is data (`ok: false`), not an exception.
+   */
+  providerProbe: async (endpoint: string, model: string, apiKey?: string): Promise<ProviderTestResult> => {
+    const t0 = performance.now();
+    const fail = (error: string): ProviderTestResult => ({
+      ok: false,
+      latencyMs: Math.round(performance.now() - t0),
+      models: [],
+      modelFound: false,
+      error,
+    });
+    try {
+      const res = await safeInvoke<{ models: string[] }>("provider_probe", { endpoint, api_key: apiKey });
+      const models = capModels(res.models ?? []);
+      return {
+        ok: true,
+        latencyMs: Math.round(performance.now() - t0),
+        models,
+        modelFound: matchModel(models, model),
+        error: "",
+      };
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : String(e));
+    }
   },
 
   perfBenchmark: () =>

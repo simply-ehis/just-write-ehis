@@ -9,6 +9,7 @@
   import { markUsed } from '$lib/features';
   import Icon from '$lib/components/Icon.svelte';
   import { openDailyNote } from '$lib/dailyNote';
+  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS } from '$lib/exportFormats';
   import { untrack } from 'svelte';
   import { domainError } from '$lib/errors';
 
@@ -253,8 +254,6 @@
     }
   }
 
-  const BULK_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
-  const BULK_PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
   let compileFormat = $state("md");
   let compilePandoc = $state(true);
   let bulkOp = $state<{ label: string; done: number; total: number } | null>(null);
@@ -262,7 +261,7 @@
 
   /** Preflight pandoc formats before any click can throw at the backend. */
   async function preflightBulkFormat(fmt: string): Promise<boolean> {
-    if (!BULK_PANDOC_FORMATS.has(fmt)) return true;
+    if (!PANDOC_FORMATS.has(fmt)) return true;
     try {
       const status = await api.convertStatus();
       compilePandoc = status.pandoc;
@@ -386,11 +385,11 @@
             aria-label="Compile format"
             onclick={(e) => e.stopPropagation()}
           >
-            {#each BULK_FORMATS as fmt}
+            {#each ALL_EXPORT_FORMATS as fmt}
               <option
                 value={fmt}
-                disabled={BULK_PANDOC_FORMATS.has(fmt) && !compilePandoc}
-                title={BULK_PANDOC_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
+                disabled={PANDOC_FORMATS.has(fmt) && !compilePandoc}
+                title={PANDOC_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
               >.{fmt}</option>
             {/each}
           </select>

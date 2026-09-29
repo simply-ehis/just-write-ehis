@@ -4,7 +4,7 @@ READ-WHEN: export fails, adding a format, bundling the pandoc sidecar
 KEY-FILES: src-tauri/src/convert.rs, commands.rs (convert_run/compile_run/convert_status), src/lib/download.ts
 INVARIANTS: menus list exactly what convert_status reports; binary book formats import via parsers, never raw
 GOTCHAS: PDF needs a pandoc PDF engine; browser preview does md/txt/html only
-UPDATED: 2026-09-17
+UPDATED: 2026-09-23
 
 # EXPORT.md — Document conversion & manuscript compile
 

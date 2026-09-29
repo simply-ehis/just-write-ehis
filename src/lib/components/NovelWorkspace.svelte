@@ -10,9 +10,10 @@
   import DockSplit from './DockSplit.svelte';
   import DocForkPanel from './DocForkPanel.svelte';
   import Icon from './Icon.svelte';
+  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS } from '$lib/exportFormats';
 
   import ForkBadge from './ForkBadge.svelte';
-  import { readImportFile, contentHash } from '$lib/importFile';
+  import { readImportFile, isBookFile, BOOK_ACCEPT, contentHash } from '$lib/importFile';
   import { statusColor } from '$lib/status';
   import { rebuildStoryMemory } from '$lib/storyMemory';
   import { domainError, warnOnce } from '$lib/errors';
@@ -108,8 +109,6 @@
   let selectedBeat = $state<BeatNode | null>(null);
   let viewMode = $state<'board' | 'bible' | 'cast'>('board');
   let compiledOutput = $state('');
-  const ALL_COMPILE_FORMATS = ['md', 'txt', 'html', 'docx', 'epub', 'pdf'];
-  const PANDOC_COMPILE_FORMATS = new Set(['docx', 'epub', 'pdf']);
   let compileFormat = $state('md');
   let compilePandoc = $state(true);
   let compiling = $state(false);
@@ -192,7 +191,7 @@
     importing = true;
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+      if (isBookFile(lower)) {
         showToast(`Extracting text from ${file.name}…`, "info");
       }
       const { title, text, author, cover, encodingNote } = await readImportFile(file);
@@ -447,7 +446,7 @@
       try {
         const status = await api.convertStatus();
         compilePandoc = status.pandoc;
-        if (!compilePandoc && PANDOC_COMPILE_FORMATS.has(compileFormat)) compileFormat = 'md';
+        if (!compilePandoc && PANDOC_FORMATS.has(compileFormat)) compileFormat = 'md';
       } catch {
         compilePandoc = false;
       }
@@ -769,7 +768,7 @@
       <input
         bind:this={importInput}
         type="file"
-        accept=".epub,.pdf,.docx,.md,.txt,.fountain"
+        accept={BOOK_ACCEPT}
         onchange={handleImportFile}
         hidden
       />
@@ -1120,11 +1119,11 @@
           <h2>Compiled Manuscript</h2>
           <div class="compiled-actions">
             <select bind:value={compileFormat} title="Manuscript format" aria-label="Manuscript format">
-              {#each ALL_COMPILE_FORMATS as fmt}
+              {#each ALL_EXPORT_FORMATS as fmt}
                 <option
                   value={fmt}
-                  disabled={PANDOC_COMPILE_FORMATS.has(fmt) && !compilePandoc}
-                  title={PANDOC_COMPILE_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
+                  disabled={PANDOC_FORMATS.has(fmt) && !compilePandoc}
+                  title={PANDOC_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
                 >.{fmt}</option>
               {/each}
             </select>

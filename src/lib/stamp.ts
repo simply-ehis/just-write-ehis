@@ -1,6 +1,9 @@
 /**
  * stamp — optional location + weather line for new daily notes (A11.9).
- * Opt-in, keyless free APIs (Nominatim + Open-Meteo), fails silent.
+ * Opt-in (Settings → Capture, off by default), keyless free APIs
+ * (Nominatim + Open-Meteo), fails silent. Both hosts must stay in the
+ * CSP connect-src allow-list (tauri.conf.json) or the desktop webview
+ * blocks them; enabling the toggle sends your coordinates to both.
  */
 
 function geoPosition(timeoutMs = 8000): Promise<GeolocationPosition> {
@@ -13,15 +16,22 @@ function geoPosition(timeoutMs = 8000): Promise<GeolocationPosition> {
   });
 }
 
-function weatherDesc(code: number): string {
-  if (code === 0) return "clear";
-  if (code <= 3) return "partly cloudy";
-  if (code <= 48) return "fog";
-  if (code <= 57) return "drizzle";
-  if (code <= 67) return "rain";
-  if (code <= 77) return "snow";
-  if (code <= 82) return "showers";
+const WEATHER_LABELS: [number, string][] = [
+  [0, "clear"],
+  [3, "partly cloudy"],
+  [48, "fog"],
+  [57, "drizzle"],
+  [67, "rain"],
+  [77, "snow"],
+  [82, "showers"],
+];
+
+/** Open-Meteo weather-code → short label. Exported for unit tests. */
+export function weatherDesc(code: number): string {
   if (code >= 95) return "thunderstorm";
+  for (const [max, label] of WEATHER_LABELS) {
+    if (code <= max) return label;
+  }
   return "overcast";
 }
 

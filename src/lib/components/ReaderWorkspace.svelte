@@ -7,7 +7,7 @@
   import WorkspaceError from './WorkspaceError.svelte';
   import { settings } from '$lib/stores/settings';
   import { processTransclusions } from '$lib/transclude';
-  import { readImportFile } from '$lib/importFile';
+  import { readImportFile, isBookFile, BOOK_ACCEPT } from '$lib/importFile';
   import { markdownToHtmlFragment } from '$lib/markdown';
   import {
     anchorFor,
@@ -412,7 +412,7 @@
 
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith(".epub") || lower.endsWith(".pdf") || lower.endsWith(".docx")) {
+      if (isBookFile(lower)) {
         showToast(`Extracting text from ${file.name}…`, "info");
       }
       const res = await readImportFile(file);
@@ -523,7 +523,7 @@
           <input
             bind:this={importInput}
             type="file"
-            accept=".epub,.pdf,.docx,.md,.txt,.fountain"
+            accept={BOOK_ACCEPT}
             onchange={handleImport}
             hidden
           />

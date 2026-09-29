@@ -160,6 +160,13 @@ impl Database {
                 FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS doc_tags (
+                doc_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                PRIMARY KEY (doc_id, tag),
+                FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_docs_workspace ON docs(workspace);
             CREATE INDEX IF NOT EXISTS idx_docs_parent ON docs(parent_id);
             CREATE INDEX IF NOT EXISTS idx_docs_path ON docs(path);
@@ -185,6 +192,8 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_snapshots_doc_created ON snapshots(doc_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_usage_events_doc_event ON usage_events(doc_id, event);
             CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(ts);
+            CREATE INDEX IF NOT EXISTS idx_doc_tags_tag ON doc_tags(tag);
+            CREATE INDEX IF NOT EXISTS idx_doc_tags_doc ON doc_tags(doc_id);
 
             CREATE TABLE IF NOT EXISTS rag_chunks (
                 id TEXT PRIMARY KEY,

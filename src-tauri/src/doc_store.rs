@@ -11,6 +11,9 @@ fn uuid_v7() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// One dashboard goal row: (id, title, workspace, goal_words, word_count, deadline).
+type GoalRow = (String, String, String, i64, i64, Option<String>);
+
 /// Compute the on-disk path for a doc based on workspace, kind, title, and vault root.
 /// Spec §3.1:
 ///   logs/            YYYY/MM/YYYY-MM-DD.md
@@ -136,12 +139,13 @@ fn resolve_in_vault(vault: &std::path::Path, stored: &str) -> Result<std::path::
     }
 }
 
-/// Write content to disk atomically (temp file + rename).
+/// Write content to disk atomically (temp file + rename). The temp name is
+/// unique per call so concurrent saves of the same path never share one.
 fn write_to_disk(path: &std::path::Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
     }
-    let temp = path.with_extension("tmp");
+    let temp = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
     std::fs::write(&temp, content.as_bytes()).map_err(|e| format!("Failed to write temp: {}", e))?;
     std::fs::rename(&temp, path).map_err(|e| format!("Failed to rename temp: {}", e))?;
     Ok(())
@@ -1257,7 +1261,7 @@ impl Database {
             if let Some(target_id) = title_to_id.get(&link_lower) {
                 if target_id != doc_id {
                     let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-                    let snippet = snippet_around(&content, start as i64, (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64);
+                    let snippet = snippet_around(content, start as i64, (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64);
                     tx.execute(
                         "INSERT OR IGNORE INTO backlinks (source_id, target_id, context_snippet) VALUES (?1, ?2, ?3)",
                         params![doc_id, target_id, snippet],
@@ -1432,7 +1436,7 @@ impl Database {
                 doc_title: row.get(4)?,
                 span_start: start,
                 span_end: end,
-                snippet: snippet_around(&content, start as i64, end as i64),
+                snippet: snippet_around(&content, start, end),
             })
         }).map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1455,19 +1459,54 @@ impl Database {
         Ok(done)
     }
 
-    pub fn graph_query(&self) -> Result<GraphQueryResult, String> {
+    pub fn graph_query(&self, workspace: Option<&str>, tags: Option<&[String]>) -> Result<GraphQueryResult, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, title, workspace, kind, word_count, activity_score FROM docs"
-        ).map_err(|e| e.to_string())?;
-
+        // "all" (and empty/missing) means no workspace filter — mirrors the preview backend.
+        let ws = workspace.filter(|w| !w.trim().is_empty() && *w != "all");
         let docs: Vec<(String, String, String, String, i64, f64)> = {
-            let rows = stmt.query_map([], |row| {
+            let map_row = |row: &rusqlite::Row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, i64>(4)?, row.get::<_, f64>(5)?))
-            }).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect()
+            };
+            match ws {
+                Some(w) => {
+                    let mut stmt = conn.prepare(
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE workspace = ?1"
+                    ).map_err(|e| e.to_string())?;
+                    let rows = stmt.query_map([w], map_row).map_err(|e| e.to_string())?;
+                    rows.filter_map(|r| r.ok()).collect()
+                }
+                None => {
+                    let mut stmt = conn.prepare(
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs"
+                    ).map_err(|e| e.to_string())?;
+                    let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
+                    rows.filter_map(|r| r.ok()).collect()
+                }
+            }
         };
+
+        // One batched tag lookup (no per-doc N+1) doubling as the tag filter.
+        let mut tag_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT doc_id, tag FROM doc_tags").map_err(|e| e.to_string())?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }).map_err(|e| e.to_string())?;
+            for (doc_id, tag) in rows.filter_map(|r| r.ok()) {
+                tag_map.entry(doc_id).or_default().push(tag);
+            }
+        }
+        let wanted: &[String] = tags.unwrap_or(&[]);
+        let docs: Vec<(String, String, String, String, i64, f64)> = docs.into_iter().filter(|(id, _, _, _, _, _)| {
+            if wanted.is_empty() {
+                return true;
+            }
+            match tag_map.get(id) {
+                Some(ts) => wanted.iter().all(|t| ts.contains(t)),
+                None => false,
+            }
+        }).collect();
 
         let mut edge_stmt = conn.prepare(
             "SELECT source_id, target_id, context_snippet FROM backlinks"
@@ -1510,6 +1549,7 @@ impl Database {
                 word_count: *wc,
                 activity_score: *score,
                 degree: degree_map.get(id).copied().unwrap_or(0),
+                tags: tag_map.get(id).cloned().unwrap_or_default(),
             }
         }).collect();
 
@@ -1544,7 +1584,7 @@ impl Database {
             .filter(|(_, deg)| **deg >= 3)
             .map(|(id, deg)| (id.clone(), *deg))
             .collect();
-        hubs.sort_by(|a, b| b.1.cmp(&a.1));
+        hubs.sort_by_key(|b| std::cmp::Reverse(b.1));
         hubs.truncate(20);
 
         Ok(GraphQueryResult { nodes, edges, orphans, hubs })
@@ -1859,6 +1899,9 @@ impl Database {
         }).collect())
     }
 
+    // Eight params mirror the Tauri command's one-arg-per-invoke-key shape;
+    // bundling them would churn every caller for no behavior gain.
+    #[allow(clippy::too_many_arguments)]
     pub fn bible_upsert_mention(&self, bible_doc_id: &str, doc_id: &str, fact_key: &str, kind: &str, snippet: &str, attribute_key: Option<&str>, attribute_value: Option<&str>) -> Result<BibleMention, String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -2716,9 +2759,11 @@ impl Database {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = backup_dir.join(format!("backup_{}.db", timestamp));
 
-        // Use VACUUM INTO for backup (SQLite 3.27.0+)
+        // Use VACUUM INTO for backup (SQLite 3.27.0+). The path is ours
+        // (timestamped filename under app-data), but quote it anyway:
+        // a username with an apostrophe would otherwise break the SQL.
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute_batch(&format!("VACUUM INTO '{}';", backup_path.to_string_lossy()))
+        conn.execute_batch(&format!("VACUUM INTO '{}';", backup_path.to_string_lossy().replace('\'', "''")))
             .map_err(|e| e.to_string())?;
 
         Ok(backup_path.to_string_lossy().to_string())
@@ -3055,7 +3100,7 @@ impl Database {
         }))
     }
 
-    pub fn dashboard_goals(&self) -> Result<Vec<(String, String, String, i64, i64, Option<String>)>, String> {
+    pub fn dashboard_goals(&self) -> Result<Vec<GoalRow>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let mut stmt = conn.prepare(
@@ -3308,18 +3353,16 @@ impl Database {
 
         let handle = app_handle.clone();
         std::thread::spawn(move || {
-            for res in rx {
-                if let Ok(event) = res {
-                    match event.kind {
-                        EventKind::Create(_) | EventKind::Modify(_) => {
-                            for path in event.paths {
-                                if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                                    let _ = handle.emit("file-changed", path.to_string_lossy().to_string());
-                                }
+            for event in rx.into_iter().flatten() {
+                match event.kind {
+                    EventKind::Create(_) | EventKind::Modify(_) => {
+                        for path in event.paths {
+                            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                let _ = handle.emit("file-changed", path.to_string_lossy().to_string());
                             }
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         });
@@ -3532,20 +3575,18 @@ impl Database {
                 }
 
                 // Previous scene (sibling doc with same parent, earlier in order)
-                if let Ok(parent) = conn.query_row(
+                if let Some(pid) = conn.query_row(
                     "SELECT parent_id FROM docs WHERE id = ?1",
                     params![doc_id],
                     |row| row.get::<_, Option<String>>(0),
-                ) {
-                    if let Some(pid) = parent {
-                        if let Ok(prev) = conn.query_row(
-                            "SELECT title, content FROM docs WHERE parent_id = ?1 AND id != ?2 AND locked = 0 ORDER BY updated_at DESC LIMIT 1",
-                            params![pid, doc_id],
-                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                        ) {
-                            let snippet = if prev.1.len() > 300 { format!("{}...", &prev.1[..300.min(prev.1.len())]) } else { prev.1 };
-                            context.push_str(&format!("Previous scene: \"{}\"\n{}\n\n", prev.0, snippet));
-                        }
+                ).ok().flatten() {
+                    if let Ok(prev) = conn.query_row(
+                        "SELECT title, content FROM docs WHERE parent_id = ?1 AND id != ?2 AND locked = 0 ORDER BY updated_at DESC LIMIT 1",
+                        params![pid, doc_id],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    ) {
+                        let snippet = if prev.1.len() > 300 { format!("{}...", &prev.1[..300.min(prev.1.len())]) } else { prev.1 };
+                        context.push_str(&format!("Previous scene: \"{}\"\n{}\n\n", prev.0, snippet));
                     }
                 }
             }
@@ -3678,15 +3719,13 @@ impl Database {
         let rows = stmt
             .query_map(params![doc_id], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?;
-        for row in rows {
-            if let Ok(gid) = row {
-                // Verify it's actually a ghost of this doc (not just a substring match)
-                if let Ok(ghost_doc) = self.get_doc(&gid) {
-                    if let Some(ref fm_str) = ghost_doc.frontmatter_json {
-                        if let Ok(fm) = serde_json::from_str::<serde_json::Value>(fm_str) {
-                            if fm.get("ghost_parent").and_then(|v| v.as_str()) == Some(doc_id) {
-                                ghosts.push(ghost_doc);
-                            }
+        for gid in rows.flatten() {
+            // Verify it's actually a ghost of this doc (not just a substring match)
+            if let Ok(ghost_doc) = self.get_doc(&gid) {
+                if let Some(ref fm_str) = ghost_doc.frontmatter_json {
+                    if let Ok(fm) = serde_json::from_str::<serde_json::Value>(fm_str) {
+                        if fm.get("ghost_parent").and_then(|v| v.as_str()) == Some(doc_id) {
+                            ghosts.push(ghost_doc);
                         }
                     }
                 }
@@ -3996,6 +4035,33 @@ mod entity_tests {
         db.set_locked(&scene_one, true).unwrap();
         assert!(!db.bible_source_allowed(&scene_one).unwrap());
         assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_one));
+    }
+
+    #[test]
+    fn graph_query_filters_workspace_and_tags() {
+        let db = test_db("graphfilter");
+        let a = db.create_doc(CreateDocRequest {
+            workspace: "novel".into(), kind: "scene".into(), title: "A".into(),
+            parent_id: None, content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        let b = db.create_doc(CreateDocRequest {
+            workspace: "write".into(), kind: "doc".into(), title: "B".into(),
+            parent_id: None, content: Some(String::new()), frontmatter_json: None,
+        }).unwrap().id;
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute("INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)", rusqlite::params![a, "cast"]).unwrap();
+            conn.execute("INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)", rusqlite::params![b, "research"]).unwrap();
+        }
+        assert_eq!(db.graph_query(None, None).unwrap().nodes.len(), 2);
+        let novel = db.graph_query(Some("novel"), None).unwrap();
+        assert_eq!(novel.nodes.len(), 1);
+        assert_eq!(novel.nodes[0].id, a);
+        assert_eq!(novel.nodes[0].tags, vec!["cast".to_string()]);
+        let tagged = db.graph_query(Some("all"), Some(&["research".to_string()])).unwrap();
+        assert_eq!(tagged.nodes.len(), 1);
+        assert_eq!(tagged.nodes[0].id, b);
+        assert!(db.graph_query(None, Some(&["nope".to_string()])).unwrap().nodes.is_empty());
     }
 }
 

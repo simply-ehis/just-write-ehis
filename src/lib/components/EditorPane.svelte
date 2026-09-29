@@ -12,6 +12,7 @@
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { recordSave } from "$lib/stores/saveState";
+  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS, exportLabel } from "$lib/exportFormats";
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
@@ -675,8 +676,6 @@ import { countWords } from "$lib/text";
     ghostVisible = false;
   }
 
-  const ALL_EXPORT_FORMATS = ["md", "txt", "html", "docx", "epub", "pdf"];
-  const PANDOC_FORMATS = new Set(["docx", "epub", "pdf"]);
   let pandocAvailable = $state(true);
   let exportMenuLoaded = $state(false);
 
@@ -728,18 +727,6 @@ import { countWords } from "$lib/text";
     if (!showExportMenu) return;
     if ((e.target as HTMLElement).closest?.(".export-wrapper")) return;
     showExportMenu = false;
-  }
-
-  function exportLabel(format: string): string {
-    switch (format) {
-      case 'md': return 'Markdown (.md)';
-      case 'txt': return 'Plain Text (.txt)';
-      case 'html': return 'HTML (.html)';
-      case 'docx': return 'Word (.docx)';
-      case 'epub': return 'eBook (.epub)';
-      case 'pdf': return 'PDF (.pdf)';
-      default: return format;
-    }
   }
 
   $effect(() => {

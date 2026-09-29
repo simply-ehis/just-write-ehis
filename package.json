@@ -48,6 +48,10 @@
     "test:aipanel": "node tests/ai-panel-error.mjs",
     "test:sidecar": "node tests/sidecar-validate.mjs",
     "test:ensure": "node tests/ensure-poll.mjs",
+    "test:aclerrors": "node tests/acl-errors-unit.mjs",
+    "test:providerprobe": "node tests/provider-probe-unit.mjs",
+    "test:dailynote": "node tests/daily-note-unit.mjs",
+    "test:stamp": "node tests/stamp-unit.mjs",
     "test:resolve": "python tests/sidecar-resolve.py",
     "test:reader": "node tests/reader-surface.mjs",
     "test:readersec": "node tests/reader-sections.mjs",
@@ -63,7 +67,7 @@
     "test:widget-proof": "node tests/window-constraint-proof.mjs",
     "test:window": "node tests/window-state-unit.mjs",
     "test:support": "node tests/support-unit.mjs",
-    "test:source": "npm run test:settings && npm run test:ensure && npm run test:sidecar && npm run test:writeback && npm run test:window && npm run test:support"
+    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sidecar && npm run test:writeback && npm run test:window && npm run test:support"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.0",
@@ -71,10 +75,12 @@
     "@codemirror/search": "^6.5.0",
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.33.0",
+    "@fontsource/archivo-black": "5.3.0",
     "@fontsource/fira-code": "5.3.0",
     "@fontsource/ibm-plex-mono": "5.3.0",
     "@fontsource/jetbrains-mono": "5.3.0",
     "@fontsource/source-code-pro": "5.3.0",
+    "@fontsource/space-mono": "5.3.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "@tauri-apps/plugin-process": "^2.3.1",

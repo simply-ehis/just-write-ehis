@@ -7,6 +7,9 @@ import "@fontsource/source-code-pro/400.css";
 import "@fontsource/source-code-pro/700.css";
 import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/700.css";
+import "@fontsource/archivo-black/400.css";
+import "@fontsource/space-mono/400.css";
+import "@fontsource/space-mono/700.css";
 import "./app.css";
 
 // Boot-timing baseline: milliseconds from navigation start to interactive

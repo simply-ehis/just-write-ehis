@@ -74,6 +74,25 @@ for (const command of ["widget_doc_get", "doc_create", "widget_doc_save", "doc_s
   check(`widget command allowed: ${command}`, widgetPermissions.includes(`allow-${command.replaceAll("_", "-")}`));
 }
 check("main command set includes widget subset", mainPermissions.includes('identifier = "main"') && widgetPermissions.includes('identifier = "widget"'));
+// ACL structure: Tauri only reads `permissions = [...]` on [[set]] blocks.
+// A [[permission]] block with a `permissions =` key is silently ignored,
+// which empties the umbrella set and denies every command.
+function permissionBlocksWithList(toml) {
+  const blocks = toml.split(/^\s*\[\[/m).slice(1);
+  return blocks.filter((b) => /^\s*permission\s*\]\]/.test(b) && /^permissions\s*=/m.test(b));
+}
+function setIdentifiers(toml) {
+  const ids = [];
+  for (const b of toml.split(/^\s*\[\[/m).slice(1)) {
+    if (!/^\s*set\s*\]\]/.test(b)) continue;
+    const m = b.match(/^identifier\s*=\s*"([^"]+)"/m);
+    if (m) ids.push(m[1]);
+  }
+  return ids;
+}
+check("main ACL is a [[set]] (not an ignored [[permission]] list)", setIdentifiers(mainPermissions).includes("main") && permissionBlocksWithList(mainPermissions).length === 0);
+check("widget ACL is a [[set]] (not an ignored [[permission]] list)", setIdentifiers(widgetPermissions).includes("widget") && permissionBlocksWithList(widgetPermissions).length === 0);
+check("widget can dock/resize", widgetCapability.permissions.includes("core:window:allow-set-size") && widgetCapability.permissions.includes("core:window:allow-set-position"));
 
 if (failures) {
   console.error(`${failures} widget invariant failure(s)`);

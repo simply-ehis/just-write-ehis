@@ -9,6 +9,7 @@
 import { getBrowserStore, countWords, type BrowserCanvasNode, type BrowserDoc } from "$lib/browserStore";
 import { friendlyEndpointError, RETRY_BACKOFF_MS, shouldRetryStatus, sleep } from "$lib/aiRequest";
 import { markdownToHtmlFragment } from "$lib/markdown";
+import { testProvider } from "$lib/providerTest";
 
 const browserSecrets = new Map<string, string>();
 let browserPinFailures = 0;
@@ -35,6 +36,30 @@ function widgetDocShape(store: ReturnType<typeof getBrowserStore>, id: string): 
   if (!doc) throw new Error("document not found");
   if (doc.locked) throw new Error("document is locked and unavailable to the companion window");
   return docShape(doc);
+}
+
+/** Preview tag storage (one localStorage entry per doc). Corrupt entries
+ * are dropped loudly once, then read as empty instead of throwing. */
+function readPreviewTags(id: string): string[] {
+  const key = `jwe-tags:${id}`;
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    return parsed.filter((t) => typeof t === "string") as string[];
+  } catch {
+    try { localStorage.removeItem(key); } catch { /* quota/denied: ignore */ }
+    console.warn(`[preview] dropped corrupt tag entry for ${key}`);
+    return [];
+  }
+}
+
+function writePreviewTags(id: string, tags: string[]): void {
+  try {
+    localStorage.setItem(`jwe-tags:${id}`, JSON.stringify(tags));
+  } catch {
+    throw new Error("Browser storage is full — free space and retry.");
+  }
 }
 
 async function aiChatCompletions(
@@ -503,7 +528,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     }
 
     case "log_list_entries":
-      return store.listByWorkspace("logs").slice(0, num(payload.limit) ?? 60) as T;
+      return store.listByWorkspace("logs").slice(0, num(payload.limit) ?? 30) as T;
 
     case "reader_update_position":
       store.saveDoc(String(payload.docId), { reading_position: num(payload.position) ?? 0 });
@@ -690,8 +715,8 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       store.conversations.push(conv);
       try {
         localStorage.setItem("jwe-browser-conv-v1", JSON.stringify(store.conversations));
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn("Preview conversations persist failed:", e instanceof Error ? e.message : e);
       }
       return { ...conv } as T;
     }
@@ -723,6 +748,14 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       const req = payload.request as { prompt: string; system_prompt?: string; provider?: string; model?: string; api_key?: string };
       const content = await aiChatCompletions(req.provider, req.model, req.prompt, req.system_prompt, req.api_key);
       return { content } as T;
+    }
+
+    case "provider_probe": {
+      // Browser preview has no Rust backend: same fetch the desktop does
+      // in Rust, with the key the caller passed (preview never persists it).
+      const probed = await testProvider(String(payload.endpoint ?? ""), undefined, str(payload.api_key));
+      if (!probed.ok) throw new Error(probed.error || "endpoint unreachable");
+      return { models: probed.models } as T;
     }
 
     case "ai_structurize": {
@@ -813,7 +846,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
       throw new Error("File operations on raw paths need the desktop app; manage docs from their workspaces in this preview.");
 
     case "publish_static_site": {
-      return { indexHtml: "<html><body>Static site published (desktop app required for full generation)</body></html>", files: ["index.html"] } as T;
+      throw new Error("Static site generation needs the desktop app; nothing was published in this preview.");
     }
 
     case "dashboard_productivity_score": {
@@ -1107,15 +1140,29 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "compile_run": {
       const ids = (payload.docIds as string[]) ?? [];
       if (ids.length === 0) throw new Error("Nothing to compile: no documents selected.");
+      // Per-doc authors ride into ONE manuscript-level YAML header below,
+      // mirroring the desktop compile (mid-document blocks render as noise).
+      const authors: string[] = [];
       const parts = ids.map((id) => {
         const d = store.get(id);
+        try {
+          const fm = d.frontmatter_json ? JSON.parse(d.frontmatter_json) : {};
+          const a = typeof fm.author === "string" ? fm.author.trim() : "";
+          if (a && !authors.includes(a)) authors.push(a);
+        } catch {
+          /* garbage JSON = no author */
+        }
         const body = previewPrepareExport(d.title, d.content, null);
         return `# ${d.title}\n\n${demoteHeadings(body)}`;
       });
       const title = String((payload.title as string) ?? "manuscript");
-      const manuscript = parts.join("\n\n---\n\n");
+      let manuscript = parts.join("\n\n---\n\n");
       if (manuscript.length > 5_000_000) {
         throw new Error("Manuscript is too large to compile — export a zip of chapters instead (Export Open Tabs).");
+      }
+      if (authors.length > 0) {
+        const esc = (s: string) => s.replace(/"/g, "'");
+        manuscript = `---\ntitle: "${esc(title)}"\nauthor: "${esc(authors.join(", "))}"\n---\n\n${manuscript}`;
       }
       return convertMarkdown(title, manuscript, String(payload.outFmt)) as T;
     }
@@ -1206,7 +1253,7 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
 
     case "rag_search": {
       const q = String(payload.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
-      const limit = num(payload.limit) ?? 5;
+      const limit = num(payload.limit) ?? 10;
       const scored: [{ id: string; doc_id: string; chunk_index: number; content: string; start_word: number; end_word: number }, number][] = [];
       for (const d of store.docs) {
         if (d.locked) continue;
@@ -1400,16 +1447,23 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     }
     case "ghost_merge": {
       const ghostDoc = store.get(String(payload.ghostId));
-      const targetId = String(payload.targetId ?? (() => {
-        const fm = ghostDoc.frontmatter_json ? JSON.parse(ghostDoc.frontmatter_json) : {};
-        return fm.ghost_parent;
-      })());
+      if (!ghostDoc) throw new Error("document not found");
+      let targetId = str(payload.targetId);
+      if (!targetId) {
+        try {
+          const fm = ghostDoc.frontmatter_json ? JSON.parse(ghostDoc.frontmatter_json) : {};
+          targetId = typeof fm.ghost_parent === "string" ? fm.ghost_parent : undefined;
+        } catch {
+          targetId = undefined;
+        }
+        if (!targetId) throw new Error("No ghost_parent found and no target specified");
+      }
       store.saveDoc(targetId, { content: ghostDoc.content });
-      store.deleteDoc(String(payload.ghostId));
+      store.delete(String(payload.ghostId));
       return docShape(store.get(targetId)) as T;
     }
     case "ghost_dismiss": {
-      store.deleteDoc(String(payload.ghostId));
+      store.delete(String(payload.ghostId));
       return undefined as T;
     }
 
@@ -1466,55 +1520,22 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "reindex_fts":
       return 0 as T;
     case "get_doc_tags": {
-      const key = `jwe-tags:${String(payload.docId ?? payload.doc_id ?? "")}`;
-      try {
-        const raw = localStorage.getItem(key);
-        const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-        if (!Array.isArray(parsed)) throw new Error("not an array");
-        return (parsed.filter((t) => typeof t === "string") as string[]) as T;
-      } catch {
-        // Corrupt entry: drop it loudly once so tags fail visible, then
-        // report empty rather than throwing on every read.
-        try { localStorage.removeItem(key); } catch { /* quota/denied: ignore */ }
-        console.warn(`[preview] dropped corrupt tag entry for ${key}`);
-        return [] as T;
-      }
+      return readPreviewTags(String(payload.docId ?? payload.doc_id ?? "")) as T;
     }
     case "add_doc_tag": {
       const id = String(payload.docId ?? payload.doc_id ?? "");
       const tag = String(payload.tag ?? "").trim().toLowerCase();
       if (!tag) throw new Error("Tag cannot be empty");
       if ([...tag].length > 64) throw new Error("Tag too long (max 64 chars)");
-      const key = `jwe-tags:${id}`;
-      let arr: string[] = [];
-      try {
-        arr = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
-      } catch {
-        arr = [];
-      }
+      const arr = readPreviewTags(id);
       if (!arr.includes(tag)) arr.push(tag);
-      try {
-        localStorage.setItem(key, JSON.stringify(arr));
-      } catch {
-        throw new Error("Browser storage is full — free space and retry.");
-      }
+      writePreviewTags(id, arr);
       return undefined as T;
     }
     case "remove_doc_tag": {
       const id = String(payload.docId ?? payload.doc_id ?? "");
       const tag = String(payload.tag ?? "").trim().toLowerCase();
-      const key = `jwe-tags:${id}`;
-      let arr: string[] = [];
-      try {
-        arr = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
-      } catch {
-        arr = [];
-      }
-      try {
-        localStorage.setItem(key, JSON.stringify(arr.filter((t) => t !== tag)));
-      } catch {
-        throw new Error("Browser storage is full — free space and retry.");
-      }
+      writePreviewTags(id, readPreviewTags(id).filter((t) => t !== tag));
       return undefined as T;
     }
     case "search_by_tag": {

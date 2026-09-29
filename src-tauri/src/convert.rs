@@ -340,7 +340,7 @@ pub fn resolve_wikilinks(md: &str) -> String {
                 let j = i + end;
                 if j + 1 < chars.len() && chars[j + 1] == ']' {
                     let inner: String = chars[i + 2..i + end].iter().collect();
-                    let display = inner.split('|').last().unwrap_or(&inner);
+                    let display = inner.split('|').next_back().unwrap_or(&inner);
                     // Skip image-style `![..](..)` — the leading `!` check
                     // above already guarded embeds, plain images stay raw.
                     out.push_str(display);
@@ -397,7 +397,7 @@ pub fn demote_headings(md: &str) -> String {
     md.lines()
         .map(|line| {
             let hashes = line.chars().take_while(|&c| c == '#').count();
-            if hashes >= 1 && hashes <= 6 && line[hashes..].starts_with([' ', '\t']) {
+            if (1..=6).contains(&hashes) && line[hashes..].starts_with([' ', '\t']) {
                 let level = hashes.min(5) + 1;
                 format!("{} {}", "#".repeat(level), line[hashes..].trim_start())
             } else {

@@ -223,11 +223,15 @@ export const templates = writable<Template[]>(loadTemplates());
 export const snippets = writable<Snippet[]>(loadSnippets());
 
 templates.subscribe((val) => {
-  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(val)); } catch { }
+  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(val)); } catch (e) {
+    console.warn("Templates: persist failed (quota?):", e instanceof Error ? e.message : e);
+  }
 });
 
 snippets.subscribe((val) => {
-  try { localStorage.setItem(SNIPPETS_KEY, JSON.stringify(val)); } catch { }
+  try { localStorage.setItem(SNIPPETS_KEY, JSON.stringify(val)); } catch (e) {
+    console.warn("Templates: snippet persist failed (quota?):", e instanceof Error ? e.message : e);
+  }
 });
 
 export function resolveVariables(content: string, vars: Record<string, string>): string {
