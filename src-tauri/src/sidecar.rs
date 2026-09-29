@@ -139,7 +139,12 @@ async fn ensure_http_ok(response: reqwest::Response, label: &str) -> Result<reqw
     }
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    Err(format!("{} HTTP {}: {}", label, status, body.trim()))
+    let snippet: String = body.trim().chars().take(300).collect();
+    if snippet.is_empty() {
+        Err(format!("{} HTTP {}", label, status))
+    } else {
+        Err(format!("{} HTTP {}: {}", label, status, snippet))
+    }
 }
 
 /// ONE managed child process shared by all sidecar managers.
@@ -434,7 +439,7 @@ impl SttManager {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -447,7 +452,7 @@ impl SttManager {
         let resp = client.post(format!("{}/transcribe", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
         result.text.ok_or_else(|| result.error.unwrap_or_else(|| "transcription failed".into()))
     }
@@ -456,7 +461,7 @@ impl SttManager {
         let client = http_client(30);
         let resp = client.post(format!("{}/stream/start", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        ensure_http_ok(resp, "sidecar").await?;
         Ok(())
     }
 
@@ -466,7 +471,7 @@ impl SttManager {
         let resp = client.post(format!("{}/stream/chunk", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        ensure_http_ok(resp, "sidecar").await?;
         Ok(())
     }
 
@@ -474,7 +479,7 @@ impl SttManager {
         let client = http_client(30);
         let resp = client.post(format!("{}/stream/stop", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
         result.text.ok_or_else(|| result.error.unwrap_or_else(|| "stream transcription failed".into()))
     }
@@ -549,7 +554,7 @@ impl TtsManager {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -567,7 +572,7 @@ impl TtsManager {
         let resp = client.post(format!("{}/synthesize", self.base_url()))
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         let result: TtsSynthResponse = resp.json().await.map_err(|e| e.to_string())?;
         match (result.audio, result.sample_rate) {
             (Some(audio), Some(sr)) => Ok((audio, sr)),
@@ -579,7 +584,7 @@ impl TtsManager {
         let client = http_client(30);
         let resp = client.post(format!("{}/stop", self.base_url()))
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        ensure_http_ok(resp, "sidecar").await?;
         Ok(())
     }
 }
@@ -655,7 +660,7 @@ impl MemoryManager {
             .header("X-JWE-Memory-Token", &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -664,7 +669,7 @@ impl MemoryManager {
         let resp = client.get(format!("{}/health", self.base_url()))
             .header("X-JWE-Memory-Token", &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
     }
 
@@ -679,10 +684,8 @@ impl MemoryManager {
             .header("X-JWE-Memory-Token", &self.auth_token)
             .query(&[("q", query)])
             .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(&resp)?;
+        let resp = ensure_http_ok(resp, "memory recall").await?;
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        // Missing field is a broken response (real error); an empty string
-        // is a legitimate "no facts" answer and stays Ok.
         data["facts"].as_str().map(String::from)
             .ok_or_else(|| "bad /recall response: missing facts field".to_string())
     }

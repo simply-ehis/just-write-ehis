@@ -457,7 +457,7 @@ impl Database {
     pub fn save_doc(&self, req: SaveDocRequest) -> Result<Doc, String> {
         let content_changed = req.content.is_some();
         {
-            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let now = Utc::now().to_rfc3339();
             let old_parent = if req.parent_id.is_some() {
@@ -466,7 +466,7 @@ impl Database {
                 None
             };
 
-            for let Some(title) = &req.title {
+            if let Some(title) = &req.title {
                 tx.execute(
                     "UPDATE docs SET title = ?1, updated_at = ?2 WHERE id = ?3",
                     params![title, now, req.id],
@@ -877,6 +877,10 @@ impl Database {
         }).collect())
     }
 
+    pub fn get_settings(&self) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({}))
+    }
+
     pub fn reindex_fts(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM docs_fts", []).map_err(|e| e.to_string())?;
@@ -1232,7 +1236,7 @@ impl Database {
             if let Some(target_id) = title_to_id.get(&link_lower) {
                 if target_id != doc_id {
                     let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-                    let snippet = snippet_around(&content, start, cap.get(0).map(|m| m.len()).unwrap_or(0) + 80);
+                    let snippet = snippet_around(&content, start as i64, (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64);
                     conn.execute(
                         "INSERT OR IGNORE INTO backlinks (source_id, target_id, context_snippet) VALUES (?1, ?2, ?3)",
                         params![doc_id, target_id, snippet],
@@ -1391,7 +1395,7 @@ impl Database {
                 doc_title: row.get(4)?,
                 span_start: start,
                 span_end: end,
-                snippet: snippet_around(&content, start, end),
+                snippet: snippet_around(&content, start as i64, end as i64),
             })
         }).map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1532,7 +1536,7 @@ impl Database {
             let title_lower = other_title.to_lowercase();
             if content_lower.contains(&title_lower) && !linked_titles.contains(&title_lower) {
                 let pos = content_lower.find(&title_lower).unwrap_or(0);
-                let snippet = snippet_around(&doc.content, pos, other_title.len() + 80);
+                let snippet = snippet_around(&doc.content, pos as i64, (other_title.len() as i64) + 80);
                 mentions.push(UnlinkedMention {
                     source_id: doc_id.to_string(),
                     source_title: doc.title.clone(),

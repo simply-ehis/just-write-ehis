@@ -17,7 +17,7 @@
     if (!$currentDoc) return;
     loading = true;
     try {
-      graphData = await api.graphQuery({ docId: $currentDoc.id });
+      graphData = await api.graphQuery({});
       selectedNode = $currentDoc.id;
     } catch (e) {
       console.error('Graph load failed:', e);
@@ -105,8 +105,8 @@
         {:else if graphData}
           <svg class="graph-svg" viewBox="0 0 400 400" style="transform: translate({transform.x}px, {transform.y}px) scale({transform.k})">
             {#each graphData.edges as edge}
-              {@const source = graphData.nodes.find(n => n.id === edge.source_id)}
-              {@const target = graphData.nodes.find(n => n.id === edge.target_id)}
+              {@const source = graphData.nodes.find(n => n.id === edge.source)}
+              {@const target = graphData.nodes.find(n => n.id === edge.target)}
               {#if source && target}
                 {@const sourceIdx = graphData.nodes.indexOf(source)}
                 {@const targetIdx = graphData.nodes.indexOf(target)}

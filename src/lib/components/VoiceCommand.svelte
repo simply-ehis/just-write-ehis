@@ -8,11 +8,11 @@
   let listening = $state(false);
   let transcript = $state('');
   let command = $state('');
-  let recognition: SpeechRecognition | null = null;
+  let recognition: any = null;
 
   const COMMANDS = [
-    { trigger: 'new document', action: () => { api.docCreate(currentWorkspace === 'home' ? 'write' : currentWorkspace, 'doc', 'Untitled').then(doc => { showToast('New document created', 'success'); }); } },
-    { trigger: 'save document', action: () => { if (currentDoc) api.docSave(currentDoc.id).then(() => showToast('Document saved', 'success')); } },
+    { trigger: 'new document', action: () => { api.docCreate($currentWorkspace === 'home' ? 'write' : $currentWorkspace, 'doc', 'Untitled').then(doc => { showToast('New document created', 'success'); }); } },
+    { trigger: 'save document', action: () => { if ($currentDoc) api.docSave($currentDoc.id).then(() => showToast('Document saved', 'success')); } },
     { trigger: 'toggle sidebar', action: () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', ctrlKey: true })); } },
     { trigger: 'toggle ai', action: () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true })); } },
     { trigger: 'command palette', action: () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } },
@@ -28,24 +28,25 @@
       showToast('Speech recognition not supported in this browser', 'error');
       return;
     }
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = event.results[0][0].transcript.toLowerCase();
-      command = transcript;
-      const cmd = COMMANDS.find(c => transcript.includes(c.trigger));
+    recognition.onresult = (event: any) => {
+      const result = event.results[0][0].transcript.toLowerCase();
+      transcript = result;
+      command = result;
+      const cmd = COMMANDS.find(c => result.includes(c.trigger));
       if (cmd) {
         cmd.action();
-        showToast(`Executed: ${c.trigger}`, 'success');
+        showToast(`Executed: ${cmd.trigger}`, 'success');
         stopListening();
       }
     };
 
-    recognition.onerror = (event) => {
+    recognition.onerror = (event: any) => {
       showToast(`Voice error: ${event.error}`, 'error');
       stopListening();
     };
@@ -53,10 +54,12 @@
     recognition.onend = () => {
       listening = false;
       transcript = '';
+      command = '';
     };
 
     recognition.start();
     listening = true;
+    open = true;
   }
 
   function stopListening() {
@@ -65,6 +68,7 @@
       recognition = null;
     }
     listening = false;
+    command = '';
   }
 
   function toggleVoice() {
@@ -73,7 +77,7 @@
   }
 </script>
 
-<button class="voice-trigger icon-btn" onclick={toggleVoice} title="Voice Commands (say 'ehis')" aria-label="Toggle voice commands" class:listening>
+  <button class="voice-trigger icon-btn" onclick={toggleVoice} title="Voice Commands" aria-label="Toggle voice commands" class:listening>
   <Icon name="mic" size={15} />
 </button>
 
@@ -85,7 +89,7 @@
         <button class="close-btn" onclick={() => open = false}>&times;</button>
       </div>
       <div class="voice-content">
-        <p class="voice-hint">Say <strong>"ehis"</strong> followed by a command:</p>
+        <p class="voice-hint">Click the mic and say a command:</p>
         <ul class="command-list">
           {#each COMMANDS as cmd}
             <li>{cmd.trigger}</li>

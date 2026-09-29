@@ -302,6 +302,11 @@ pub struct AiGenerateRequest {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
     pub api_key: Option<String>,
 }
 
@@ -384,6 +389,28 @@ pub struct AtlasStar {
     pub activity_score: f64,
     pub updated_at: String,
     pub embedding: Vec<f32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImplicitLink {
+    pub source_id: String,
+    pub target_id: String,
+    pub match_type: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Entity {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EntityOccurrence {
+    pub entity_id: String,
+    pub doc_id: String,
+    pub span_start: i64,
+    pub span_end: i64,
 }
 
 pub fn normalize_memory_key(value: &str) -> String {

@@ -14,10 +14,30 @@ export function isBrowserPreview(): boolean {
 /**
  * Invoke a backend command. Under Tauri this hits the Rust sidecar;
  * in a plain browser it routes to the localStorage-backed preview backend.
+ *
+ * WOMM fix: the Rust commands use snake_case params (`doc_id`,
+ * `frontmatter_json`) while the Svelte callers use camelCase (`docId`,
+ * `frontmatterJson`). Tauri matches arg names exactly, so desktop calls
+ * would fail while browser preview (camelCase) worked. Pass BOTH spellings
+ * so each backend finds the one it expects.
  */
+function toSnakeKey(key: string): string {
+  return key.replace(/([A-Z])/g, (ch) => `_${ch.toLowerCase()}`);
+}
+
+function withSnakeAliases(args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...args };
+  for (const [key, value] of Object.entries(args)) {
+    const snake = toSnakeKey(key);
+    if (snake !== key && !(snake in out)) out[snake] = value;
+  }
+  return out;
+}
+
 function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isBrowserPreview()) return browserInvoke<T>(cmd, args ?? {});
-  return invoke<T>(cmd, args);
+  const fullArgs = withSnakeAliases(args ?? {});
+  if (isBrowserPreview()) return browserInvoke<T>(cmd, fullArgs);
+  return invoke<T>(cmd, fullArgs);
 }
 
 /**

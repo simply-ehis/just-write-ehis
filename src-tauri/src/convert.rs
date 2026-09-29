@@ -167,7 +167,11 @@ pub fn markdown_to_html_doc(title: &str, md: &str) -> String {
     )
 }
 
-fn html_escape(s: &str) -> String {
+pub fn convert_doc(doc_id: &str, format: &str, vault: &std::path::Path) -> Result<(String, Vec<u8>), String> {
+    convert_document(doc_id, format, vault)
+}
+
+pub fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -555,6 +559,31 @@ pub fn convert_markdown(
     })
 }
 
+/// Lightweight single-doc export used by the `convert_document_cmd` Tauri
+/// command (tag-era UI). Reads `<vault>/<doc_id>.md` and returns
+/// `(filename, bytes)` for md/txt/html. Pandoc formats go through
+/// `convert_markdown` via the misc commands instead.
+pub fn convert_document(
+    doc_id: &str,
+    format: &str,
+    vault: &std::path::Path,
+) -> Result<(String, Vec<u8>), String> {
+    if doc_id.contains("..") || doc_id.contains('/') || doc_id.contains('\\') {
+        return Err("Invalid doc id".into());
+    }
+    let doc_path = vault.join(doc_id).with_extension("md");
+    let content = std::fs::read_to_string(&doc_path).map_err(|e| e.to_string())?;
+    match format {
+        "md" | "markdown" => Ok((format!("{}.md", doc_id), content.into_bytes())),
+        "txt" | "text" => Ok((format!("{}.txt", doc_id), markdown_to_text(&content).into_bytes())),
+        "html" => {
+            let html = markdown_to_html_doc(doc_id, &content);
+            Ok((format!("{}.html", doc_id), html.into_bytes()))
+        }
+        _ => Err(format!("Unsupported export format: {}", format)),
+    }
+}
+
 #[cfg(test)]
 mod convert_tests {
     use super::*;
@@ -649,20 +678,6 @@ mod convert_tests {
         assert!(out.contains("note about ch1"));
         assert!(!out.contains("[["));
         assert!(!out.contains("![["));
-    }
-
-    pub fn convert_document(doc_id: &str, format: &str, vault: &std::path::Path) -> Result<(String, Vec<u8>), String> {
-        let doc_path = vault.join(doc_id).with_extension("md");
-        let content = std::fs::read_to_string(&doc_path).map_err(|e| e.to_string())?;
-        match format {
-            "md" | "markdown" => Ok((format!("{}.md", doc_id), content.into_bytes())),
-            "txt" | "text" => Ok((format!("{}.txt", doc_id), content.into_bytes())),
-            "html" => {
-                let html = markdown_to_html(&content);
-                Ok((format!("{}.html", doc_id), html.into_bytes()))
-            }
-            _ => Err(format!("Unsupported export format: {}", format)),
-        }
     }
 
     #[test]
