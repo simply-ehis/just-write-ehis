@@ -18,10 +18,13 @@
   `tauri.conf.json` + `.sig` artifacts produced by the build. Endpoint
   is the real releases URL
   (`simply-ehis/just-write-ehis/.../latest.json`). Still yours:
-  publish artifacts + `latest.json` per release, and consider rotating
-  the keypair — the previous private key was briefly committed to git
-  history (removed in `ea3ba20`; old signatures stay valid, so rotation
-  is a release-day decision, not an emergency).
+  publish artifacts + `latest.json` per release.
+  Update 2026-09-29: keypair rotated again (fresh password) — live pubkey
+  in `tauri.conf.json` + tracked `just-write-ehis.key.pub`; private key +
+  password at repo root (gitignored). Superseded keys archived outside the
+  repo (`~/.tauri/*-superseded-*`); no release ever shipped under the
+  pre-2026-09-26 key, and nothing shipped under the 2026-09-26 key either,
+  so nothing in the wild trusts the old keys.
 - [x] **First `tauri build` on a maintainer machine** — done 2026-09-19:
   `Just Write ehis_0.2.0_x64-setup.exe` (317MB, all models bundled) +
   `.sig`, NSIS-only, signed with `~/.tauri/just-write-ehis.key`.

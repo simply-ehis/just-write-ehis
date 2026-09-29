@@ -19,12 +19,14 @@ with the site.
 
 ## One-time setup (maintainer)
 
-1. **Signing keypair** — done (rotated 2026-09-26; no releases ever shipped
-   under any older key, so nothing trusts them). The private key lives at
-   the repo root as `just-write-ehis.key` (gitignored, never commit it) and
-   its password in `just-write-ehis.key.password` (also gitignored — back
-   both up off-machine; losing them means existing installs can never
-   update again). Builds MUST set both vars in-session
+1. **Signing keypair** — done (rotated 2026-09-29 with a fresh password;
+   no releases ever shipped under any older key, so nothing trusts them).
+   The private key lives at the repo root as `just-write-ehis.key`
+   (gitignored, never commit it) and its password in
+   `just-write-ehis.key.password` (also gitignored — back both up
+   off-machine; losing them means existing installs can never update
+   again). The public half is tracked as `just-write-ehis.key.pub` and
+   must match `plugins.updater.pubkey` in `tauri.conf.json`. Builds MUST set both vars in-session
    (`TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`)
    and MUST unset machine-level `TAURI_SIGNING_PRIVATE_KEY_PATH` (it points
    at another project's key and makes signing fail). Passwordless keys are
@@ -39,13 +41,13 @@ with the site.
    - Static `latest.json` on GitHub Releases (see format below), or
    - A dynamic server returning `204` (no update) or `200` + update JSON.
 4. **Export the private key at build time** (PowerShell — `.env` files do
-   NOT work):
-   `$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw just-write-ehis.key`
-   then run the build in the same session so the variable is visible.
-   Gotcha 2026-09-18: if the key ever gains a password, the
-   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` var must be present and correct —
-   an absent/empty one makes tauri-cli stop for an interactive password
-   prompt and hang headless builds forever.
+   NOT work). Deterministic path — dot-source the env script, then build
+   in the same session (it sets the key + password vars from the repo
+   root and clears the stale machine-level `TAURI_SIGNING_PRIVATE_KEY_PATH`):
+   `. $HOME\.tauri\just-write-ehis-env.ps1`
+   Gotcha: the `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` var must be present
+   and correct — an absent/empty one makes tauri-cli stop for an
+   interactive password prompt and hang headless builds forever.
 
 ## Per-release flow
 
