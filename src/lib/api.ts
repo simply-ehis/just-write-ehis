@@ -55,12 +55,41 @@ export function mapInvokeError(cmd: string, err: unknown): unknown {
   return err;
 }
 
+/** One slow backend call, for About → Diagnostics hang evidence. */
+export interface SlowCall {
+  cmd: string;
+  ms: number;
+  at: string;
+}
+
+const slowCalls: SlowCall[] = [];
+/** Invokes slower than this are worth knowing about when diagnosing hangs. */
+export const SLOW_CALL_MS = 2000;
+
+export function recordSlowCall(cmd: string, ms: number): void {
+  slowCalls.push({ cmd, ms: Math.round(ms), at: new Date().toISOString() });
+  if (slowCalls.length > 10) slowCalls.splice(0, slowCalls.length - 10);
+}
+
+/** Newest last. Read on demand by the diagnostics panel. */
+export function getSlowCalls(): SlowCall[] {
+  return [...slowCalls];
+}
+
 function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const fullArgs = withSnakeAliases(args ?? {});
-  if (isBrowserPreview()) return browserInvoke<T>(cmd, fullArgs);
-  return invoke<T>(cmd, fullArgs).catch((err: unknown): Promise<T> => {
-    throw mapInvokeError(cmd, err);
-  });
+  const t0 = performance.now();
+  const timed = <U>(p: Promise<U>): Promise<U> =>
+    p.finally(() => {
+      const ms = performance.now() - t0;
+      if (ms >= SLOW_CALL_MS) recordSlowCall(cmd, ms);
+    });
+  if (isBrowserPreview()) return timed(browserInvoke<T>(cmd, fullArgs));
+  return timed(
+    invoke<T>(cmd, fullArgs).catch((err: unknown): Promise<T> => {
+      throw mapInvokeError(cmd, err);
+    })
+  );
 }
 
 /**

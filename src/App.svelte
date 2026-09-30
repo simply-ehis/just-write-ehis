@@ -50,7 +50,8 @@
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
-  import { restoreMainWindow } from "$lib/windowState";
+  import { restoreMainWindow, showMainWindow } from "$lib/windowState";
+  import { markBootStart, markCleanExit } from "$lib/sessionHealth";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
   // currentWorkspace) pollute featuresUsed before the async boot block
@@ -493,10 +494,20 @@
   }
 
   onMount(() => {
+    // Hang evidence: snapshot the previous session, then mark this one
+    // open (pagehide below marks clean exits for the next launch).
+    markBootStart();
+    const markExit = () => markCleanExit();
+    window.addEventListener('pagehide', markExit);
     // Main-window geometry first (fire-and-forget, never blocks boot):
-    // fresh installs open at ~80% of the work area instead of overlapping
-    // the taskbar, and returning users get their own size/position back.
-    void restoreMainWindow();
+    // fresh installs open at the spec viewport, returning users get their
+    // own size/position back.
+    // The window starts hidden (no black flash, no resize jump) and is
+    // revealed once geometry lands; post-ready + failsafe re-show below
+    // so no boot path can trap the user behind an invisible window.
+    void restoreMainWindow().finally(() => {
+      void showMainWindow();
+    });
     checkMobile();
     window.addEventListener('resize', checkMobile);
     window.visualViewport?.addEventListener('resize', checkMobile);
@@ -519,6 +530,7 @@
         }
         ready = true;
         reportBootMs();
+        void showMainWindow();
       }
     }, 20000);
     (async () => {
@@ -658,6 +670,7 @@
         markBootStep("done");
         ready = true;
         reportBootMs();
+        void showMainWindow();
       } finally {
         clearTimeout(bootFailsafe);
         reportBootMs();
@@ -666,6 +679,7 @@
 
     return () => {
       window.removeEventListener('resize', checkMobile);
+      window.removeEventListener('pagehide', markExit);
       window.visualViewport?.removeEventListener('resize', checkMobile);
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('editor-typing', handleEditorTyping);

@@ -41,17 +41,26 @@ export interface DiagnosticsSnapshot {
   desktop: boolean;
   theme: string;
   themeMode: string;
+  bootMs?: number | null;
+  prevExit?: string;
+  stuckStep?: string | null;
+  slowCalls?: string;
 }
 
 /** One-line-per-fact block appended to the feedback email body. */
 export function buildDiagnosticsSnapshot(snap: DiagnosticsSnapshot): string {
-  return [
+  const lines = [
     "---",
     "Diagnostics (auto-attached, edit or delete as you like):",
     `app version: ${snap.version || "unknown"}`,
     `platform: ${snap.desktop ? "desktop app" : "browser preview"}`,
     `theme: ${snap.theme || "unknown"} / ${snap.themeMode || "unknown"}`,
-  ].join("\n");
+  ];
+  if (snap.bootMs != null) lines.push(`last boot: ${snap.bootMs}ms`);
+  if (snap.prevExit) lines.push(`previous session: ${snap.prevExit}`);
+  if (snap.stuckStep) lines.push(`stuck boot step: ${snap.stuckStep}`);
+  if (snap.slowCalls) lines.push(`slow calls: ${snap.slowCalls}`);
+  return lines.join("\n");
 }
 
 const MAX_LINK_BODY = 1500;

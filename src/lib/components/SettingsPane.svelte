@@ -4,7 +4,8 @@
   import { appLockConfigured, settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
-  import { api, isBrowserPreview } from "$lib/api";
+  import { api, isBrowserPreview, getSlowCalls } from "$lib/api";
+  import { readSessionHealth } from "$lib/sessionHealth";
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, friendlyUpdateError, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
   import { APP_VERSION } from "$lib/version";
@@ -1490,6 +1491,8 @@
       </div>
 
     {:else if activeCategory === "about"}
+      {@const health = readSessionHealth()}
+      {@const slow = getSlowCalls()}
       <div class="settings-section">
         <img class="about-logo" src={aboutLogo} alt="Just Write ehis — pen wrote 'this' with E-tick" />
         <h3>About & Diagnostics</h3>
@@ -1500,6 +1503,26 @@
         <div class="setting-row">
           <span class="setting-label">Vault Path</span>
           <span class="value">{resolvedVaultPath || $settings.vaultPath}</span>
+        </div>
+
+        <h3>Session Health</h3>
+        <div class="setting-row">
+          <span class="setting-label">Last Boot</span>
+          <span class="value">{health.bootMs != null ? `${health.bootMs}ms` : "…"}</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Previous Session</span>
+          <span class="value">{health.prevExit === "clean" ? "exited cleanly" : health.prevExit === "unclean" ? "ended unexpectedly ⚠" : "unknown (first run?)"}</span>
+        </div>
+        {#if health.stuckStep}
+          <div class="setting-row">
+            <span class="setting-label">Stuck Boot Step</span>
+            <span class="value">{health.stuckStep}</span>
+          </div>
+        {/if}
+        <div class="setting-row">
+          <span class="setting-label">Slow Calls (&gt;2s)</span>
+          <span class="value">{slow.length === 0 ? "none" : slow.map((c) => `${c.cmd} ${c.ms}ms`).join(", ")}</span>
         </div>
 
         <h3>Export setup</h3>

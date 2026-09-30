@@ -486,9 +486,12 @@ async function initSecrets(): Promise<void> {
       }
     };
 
-    if (keys.includes("appLockPin")) {
-      await readSecret("appLockPin");
-      await writeSecret("appLockPin");
+    // Reads are independent: run together so one slow keychain doesn't
+    // serialize behind the other (worst case ~10s → ~5s). Writes stay
+    // after reads — a write must see the migrated value first.
+    await Promise.all(keys.map((key) => readSecret(key)));
+    for (const key of keys) {
+      await writeSecret(key);
     }
     // Authoritative answer first: does the backend hold a usable PIN? The
     // master switch must never imply a PIN — that produced lock gates for a
@@ -504,11 +507,6 @@ async function initSecrets(): Promise<void> {
     preserveLegacySecrets = false;
     appLockPinStatus.set("ready");
 
-    for (const key of keys) {
-      if (key === "appLockPin") continue;
-      await readSecret(key);
-      await writeSecret(key);
-    }
     secretsMigrated = true;
     preserveLegacySecrets = false;
     if (migrationFailed) scheduleSecretSync(get(settings));

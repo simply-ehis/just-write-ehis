@@ -7,7 +7,8 @@
    */
   import { onMount } from "svelte";
   import { settings } from "$lib/stores/settings";
-  import { api, isBrowserPreview } from "$lib/api";
+  import { api, getSlowCalls, isBrowserPreview } from "$lib/api";
+  import { readSessionHealth } from "$lib/sessionHealth";
   import { showToast } from "$lib/stores/notifications";
   import { getAppVersion } from "$lib/updates";
   import { APP_VERSION } from "$lib/version";
@@ -37,11 +38,17 @@
   });
 
   function snapshot(): string {
+    const health = readSessionHealth();
+    const slow = getSlowCalls();
     return buildDiagnosticsSnapshot({
       version: appVersion,
       desktop: !isBrowserPreview(),
       theme: $settings.theme,
       themeMode: $settings.themeMode,
+      bootMs: health.bootMs,
+      prevExit: health.prevExit,
+      stuckStep: health.stuckStep,
+      slowCalls: slow.length === 0 ? undefined : slow.map((c) => `${c.cmd} ${c.ms}ms`).join(", "),
     });
   }
 

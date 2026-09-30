@@ -85,6 +85,34 @@ export const EDITOR_FONTS = EDITOR_FONT_VALUES;
 
 export type EditorFont = (typeof EDITOR_FONTS)[number];
 
+/**
+ * Families fetched on demand (everything else is eager in main.ts or a
+ * system font). The CSS var already names the family, so text paints the
+ * fallback stack first and swaps in via font-display: swap once the chunk
+ * arrives. Safe to call on every typography apply; failures re-try next
+ * time instead of sticking the family as "loaded".
+ */
+const loadedEditorFonts = new Set<string>(["JetBrains Mono"]);
+
+const LAZY_FONT_LOADERS: Record<string, () => Promise<unknown>> = {
+  "Fira Code": () =>
+    Promise.all([import("@fontsource/fira-code/400.css"), import("@fontsource/fira-code/700.css")]),
+  "Source Code Pro": () =>
+    Promise.all([import("@fontsource/source-code-pro/400.css"), import("@fontsource/source-code-pro/700.css")]),
+  "IBM Plex Mono": () =>
+    Promise.all([import("@fontsource/ibm-plex-mono/400.css"), import("@fontsource/ibm-plex-mono/700.css")]),
+};
+
+export function ensureEditorFont(family: string): void {
+  if (loadedEditorFonts.has(family)) return;
+  const load = LAZY_FONT_LOADERS[family];
+  if (!load) return;
+  loadedEditorFonts.add(family);
+  void load().catch(() => {
+    loadedEditorFonts.delete(family);
+  });
+}
+
 export function editorFontStack(font: string): string {
   // Keep a distinct fallback tail for each bundled family so a missing font
   // asset does not make every editor choice render identically.

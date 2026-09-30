@@ -1,7 +1,7 @@
 /**
  * window-state-unit — checks for src/lib/windowState.ts, the main-window
- * geometry behind "first launch ≈80% of the work area, later launches
- * restore the user's size/position".
+ * geometry behind "first launch opens the spec viewport (1240×740),
+ * later launches restore the user's size/position".
  *
  * Run: node tests/window-state-unit.mjs (no build needed)
  */
@@ -19,12 +19,12 @@ function check(name, ok, detail = "") {
 
 const area1080p = { x: 0, y: 0, w: 1920, h: 1040 }; // 1080p minus taskbar
 
-// Fresh launch covers 80% and centers inside the work area.
+// Fresh launch opens the spec viewport, centered inside the work area.
 let d = v.defaultGeometry(area1080p);
-check("default is 80% of work area", d.w === 1536 && d.h === 832, JSON.stringify(d));
+check("default is the spec viewport", d.w === 1240 && d.h === 740, JSON.stringify(d));
 check(
   "default centered",
-  d.x === Math.round((1920 - 1536) / 2) && d.y === Math.round((1040 - 832) / 2),
+  d.x === Math.round((1920 - 1240) / 2) && d.y === Math.round((1040 - 740) / 2),
   JSON.stringify(d)
 );
 check(
@@ -60,7 +60,7 @@ check("null save rejected", v.coerceGeometry(null, area1080p) === null);
 check("string save rejected", v.coerceGeometry("big", area1080p) === null);
 check("NaN save rejected", v.coerceGeometry({ w: NaN, h: 700, x: 0, y: 0 }, area1080p) === null);
 c = v.computeWindowTarget(area1080p, { nope: true });
-check("compute falls back to default", c.w === 1536 && c.h === 832, JSON.stringify(c));
+check("compute falls back to default", c.w === 1240 && c.h === 740, JSON.stringify(c));
 c = v.computeWindowTarget(area1080p, saved);
 check("compute prefers saved", c.w === 1200 && c.x === 100, JSON.stringify(c));
 

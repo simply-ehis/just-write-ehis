@@ -33,6 +33,16 @@ const widgetPermissions = await read("src-tauri/permissions/widget.toml");
 
 const windows = config.app?.windows ?? [];
 check("two configured windows", windows.length === 2, windows.map((w) => w.label).join(", "));
+const mainConfig = windows.find((w) => w.label === "main");
+// Hidden-start: the main window must never flash unpainted or jump through
+// the geometry restore on screen — App.svelte reveals it afterwards.
+check("main window starts hidden", mainConfig?.visible === false);
+const mainGrants = new Set(
+  [capability, mainCapability].flatMap((c) => (c.windows ?? []).includes("main") ? (c.permissions ?? []) : [])
+);
+check("main window may show itself", mainGrants.has("core:window:allow-show"));
+const showSites = (app.match(/showMainWindow\(\)/g) ?? []).length;
+check("app reveals main window on every boot exit", showSites >= 3, `${showSites} call sites`);
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");
 check("widget starts as a compact figure", widgetConfig?.width === 56 && widgetConfig?.height === 56 && widgetConfig?.minWidth === 48 && widgetConfig?.minHeight === 48);

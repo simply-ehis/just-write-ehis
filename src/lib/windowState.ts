@@ -1,6 +1,6 @@
 /**
- * windowState — main-window geometry: first launch covers ~80% of the
- * work area (never the taskbar), later launches restore the user's own
+ * windowState — main-window geometry: first launch opens the spec viewport
+ * (1240×740, centered), later launches restore the user's own
  * size/position.
  *
  * Pure web APIs only for measuring (window.screen.avail* is the work area
@@ -18,8 +18,9 @@
 export const MIN_WINDOW_W = 900;
 export const MIN_WINDOW_H = 600;
 
-/** Fraction of the work area a fresh window covers. */
-export const DEFAULT_WINDOW_COVERAGE = 0.8;
+/** Fresh-launch size: the spec viewport (mirrors tauri.conf.json). */
+export const DEFAULT_WINDOW_W = 1240;
+export const DEFAULT_WINDOW_H = 740;
 
 const STORAGE_KEY = "jwe-main-window";
 
@@ -44,21 +45,15 @@ function isFiniteNumber(v: unknown): v is number {
   return typeof v === "number" && Number.isFinite(v);
 }
 
-/** Fresh-launch geometry: 80% of the work area, centered in it. */
+/** Fresh-launch geometry: the spec viewport, centered; fills smaller areas. */
 export function defaultGeometry(area: WorkArea): WindowGeometry {
-  const safeW = Math.max(1, area.w);
-  const safeH = Math.max(1, area.h);
-  const w = Math.round(
-    Math.min(safeW, Math.max(MIN_WINDOW_W, safeW * DEFAULT_WINDOW_COVERAGE))
-  );
-  const h = Math.round(
-    Math.min(safeH, Math.max(MIN_WINDOW_H, safeH * DEFAULT_WINDOW_COVERAGE))
-  );
+  const w = Math.round(Math.min(area.w, Math.max(MIN_WINDOW_W, DEFAULT_WINDOW_W)));
+  const h = Math.round(Math.min(area.h, Math.max(MIN_WINDOW_H, DEFAULT_WINDOW_H)));
   return {
     w,
     h,
-    x: Math.round(area.x + (safeW - w) / 2),
-    y: Math.round(area.y + (safeH - h) / 2),
+    x: Math.round(area.x + Math.max(0, (area.w - w) / 2)),
+    y: Math.round(area.y + Math.max(0, (area.h - h) / 2)),
   };
 }
 
@@ -87,7 +82,7 @@ export function coerceGeometry(saved: unknown, area: WorkArea): WindowGeometry |
   return { w, h, x, y };
 }
 
-/** Restored + clamped user geometry, or the 80% default. */
+/** Restored + clamped user geometry, or the spec-viewport default. */
 export function computeWindowTarget(area: WorkArea, saved: unknown): WindowGeometry {
   return coerceGeometry(saved, area) ?? defaultGeometry(area);
 }
@@ -175,8 +170,26 @@ export function trackMainWindow(): void {
 }
 
 /**
+ * Reveal the main window after geometry restore. The window starts hidden
+ * (tauri.conf.json `visible: false`) so first paint and the restore resize
+ * never flash on screen. Idempotent — call it from every boot exit
+ * (post-restore, post-ready, failsafe) so a stuck boot can never trap the
+ * user behind an invisible window. Desktop shell only — no-op in preview.
+ */
+export async function showMainWindow(): Promise<void> {
+  try {
+    const { isTauri } = await import("@tauri-apps/api/core");
+    if (!isTauri()) return;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().show();
+  } catch {
+    /* visible fallback stands / not a shell */
+  }
+}
+
+/**
  * Restore the main window once at startup: user's saved geometry when it
- * still fits, else ~80% of the work area centered (never overlapping the
+ * still fits, else the spec viewport centered (never overlapping the
  * taskbar). Desktop shell only — no-op in the browser preview. Never
  * throws; failures keep the tauri.conf.json fallback.
  */

@@ -377,6 +377,19 @@ async function privacyWiring() {
     "brutalist display type self-hosted via fontsource",
     main.includes("@fontsource/archivo-black") && main.includes("@fontsource/space-mono")
   );
+  // First paint pays only for the default editor face + display type; the
+  // other editor families must arrive via on-demand import, never static.
+  const staticFontImports = [...main.matchAll(/^import ["'](@fontsource\/[^"']+)["']/gm)].map((m) => m[1]);
+  check(
+    "only default + display fonts block first paint",
+    staticFontImports.every((m) => !/(fira-code|source-code-pro|ibm-plex-mono)/.test(m)),
+    staticFontImports.join(", ")
+  );
+  const theme = await readFile(join(root, "src/lib/editorTheme.ts"), "utf8");
+  check(
+    "other editor families load on demand",
+    ["fira-code", "source-code-pro", "ibm-plex-mono"].every((f) => theme.includes(f))
+  );
   // Place stamp is opt-in and calls third parties from the webview: every
   // host it touches must be in connect-src, or the desktop build blocks it
   // and the toggle silently does nothing.

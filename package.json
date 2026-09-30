@@ -52,6 +52,7 @@
     "test:providerprobe": "node tests/provider-probe-unit.mjs",
     "test:dailynote": "node tests/daily-note-unit.mjs",
     "test:stamp": "node tests/stamp-unit.mjs",
+    "test:sessionhealth": "node tests/session-health-unit.mjs",
     "test:resolve": "python tests/sidecar-resolve.py",
     "test:reader": "node tests/reader-surface.mjs",
     "test:readersec": "node tests/reader-sections.mjs",
@@ -67,7 +68,7 @@
     "test:widget-proof": "node tests/window-constraint-proof.mjs",
     "test:window": "node tests/window-state-unit.mjs",
     "test:support": "node tests/support-unit.mjs",
-    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sidecar && npm run test:writeback && npm run test:window && npm run test:support"
+    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:writeback && npm run test:window && npm run test:support"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.0",

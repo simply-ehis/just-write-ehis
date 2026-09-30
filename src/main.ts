@@ -1,12 +1,9 @@
 import { mount } from "svelte";
+// Eager: the default editor face + Brutalist display type only. The other
+// editor families load on demand via ensureEditorFont (editorTheme.ts) so
+// they never tax first paint.
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
-import "@fontsource/fira-code/400.css";
-import "@fontsource/fira-code/700.css";
-import "@fontsource/source-code-pro/400.css";
-import "@fontsource/source-code-pro/700.css";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/700.css";
 import "@fontsource/archivo-black/400.css";
 import "@fontsource/space-mono/400.css";
 import "@fontsource/space-mono/700.css";

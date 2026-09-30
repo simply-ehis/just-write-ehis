@@ -10,12 +10,15 @@
  * on text-on-accent.
  */
 
-import { editorFontStack } from "./editorTheme";
+import { editorFontStack, ensureEditorFont } from "./editorTheme";
 
 export type ThemeStyle = "default" | "brutalist" | "glass";
 export type ThemeMode = "dark" | "light";
 
 export function applyEditorTypography(font: string, size: number, lineHeight: number): void {
+  // Non-default families arrive on demand (see ensureEditorFont) instead
+  // of blocking first paint; the stack below already names them.
+  ensureEditorFont(font);
   const safeSize = Number.isFinite(size) ? Math.min(32, Math.max(10, size)) : 15;
   const safeLineHeight = Number.isFinite(lineHeight)
     ? Math.min(3, Math.max(1, lineHeight))
