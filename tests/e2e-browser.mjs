@@ -386,9 +386,15 @@ async function privacyWiring() {
     staticFontImports.join(", ")
   );
   const theme = await readFile(join(root, "src/lib/editorTheme.ts"), "utf8");
+  // Dynamic import per family (not a static import, not a bare string):
+  // renaming a family breaks its loader loudly instead of silently.
   check(
-    "other editor families load on demand",
-    ["fira-code", "source-code-pro", "ibm-plex-mono"].every((f) => theme.includes(f))
+    "every non-system family has a lazy loader",
+    ["fira-code", "source-code-pro", "ibm-plex-mono"].every((f) => theme.includes(`import("@fontsource/${f}/`))
+  );
+  check(
+    "brutalist display type loads on theme switch",
+    ["archivo-black", "space-mono"].every((f) => theme.includes(`import("@fontsource/${f}/`))
   );
   // Place stamp is opt-in and calls third parties from the webview: every
   // host it touches must be in connect-src, or the desktop build blocks it

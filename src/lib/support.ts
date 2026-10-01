@@ -47,6 +47,11 @@ export interface DiagnosticsSnapshot {
   slowCalls?: string;
 }
 
+/** "cmd 123ms, other 4ms" for panels and pasted diagnostics. */
+export function formatSlowCalls(calls: { cmd: string; ms: number }[]): string {
+  return calls.map((c) => `${c.cmd} ${c.ms}ms`).join(", ");
+}
+
 /** One-line-per-fact block appended to the feedback email body. */
 export function buildDiagnosticsSnapshot(snap: DiagnosticsSnapshot): string {
   const lines = [

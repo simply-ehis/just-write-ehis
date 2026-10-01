@@ -47,8 +47,10 @@ function isFiniteNumber(v: unknown): v is number {
 
 /** Fresh-launch geometry: the spec viewport, centered; fills smaller areas. */
 export function defaultGeometry(area: WorkArea): WindowGeometry {
-  const w = Math.round(Math.min(area.w, Math.max(MIN_WINDOW_W, DEFAULT_WINDOW_W)));
-  const h = Math.round(Math.min(area.h, Math.max(MIN_WINDOW_H, DEFAULT_WINDOW_H)));
+  // Degenerate areas (0/negative, seen transiently on some drivers) fall
+  // back to the raw spec size rather than a 0-size window.
+  const w = Math.round(Math.min(Math.max(1, area.w), Math.max(MIN_WINDOW_W, DEFAULT_WINDOW_W)));
+  const h = Math.round(Math.min(Math.max(1, area.h), Math.max(MIN_WINDOW_H, DEFAULT_WINDOW_H)));
   return {
     w,
     h,
@@ -178,12 +180,16 @@ export function trackMainWindow(): void {
  */
 export async function showMainWindow(): Promise<void> {
   try {
-    const { isTauri } = await import("@tauri-apps/api/core");
+    const [{ isTauri }, { getCurrentWindow }] = await Promise.all([
+      import("@tauri-apps/api/core"),
+      import("@tauri-apps/api/window"),
+    ]);
     if (!isTauri()) return;
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().show();
-  } catch {
-    /* visible fallback stands / not a shell */
+  } catch (e) {
+    // A failed show() would trap the user behind an invisible window:
+    // say so loudly (boot diagnostics pick up the console line).
+    console.warn("showMainWindow failed:", e instanceof Error ? e.message : e);
   }
 }
 

@@ -30,6 +30,14 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "windows")]
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+        // A second launch must always resurface the main window: closing it
+        // hides to the tray (see widgetBridge onCloseRequested), so a plain
+        // double-click with no file arg would otherwise appear to do nothing.
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.unminimize();
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
         let Some(path) = windows::find_text_file(&args, Path::new(&cwd)) else {
             return;
         };
@@ -37,8 +45,6 @@ pub fn run() {
             pending.set(path.clone());
         }
         if let Some(main) = app.get_webview_window("main") {
-            let _ = main.show();
-            let _ = main.set_focus();
             let _ = main.emit("native-file-open", path.to_string_lossy().into_owned());
         }
     }));

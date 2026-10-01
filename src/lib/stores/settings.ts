@@ -487,12 +487,10 @@ async function initSecrets(): Promise<void> {
     };
 
     // Reads are independent: run together so one slow keychain doesn't
-    // serialize behind the other (worst case ~10s → ~5s). Writes stay
-    // after reads — a write must see the migrated value first.
+    // serialize behind the other. Writes stay after reads (a write must
+    // see the migrated value first) but are independent of each other.
     await Promise.all(keys.map((key) => readSecret(key)));
-    for (const key of keys) {
-      await writeSecret(key);
-    }
+    await Promise.all(keys.map((key) => writeSecret(key)));
     // Authoritative answer first: does the backend hold a usable PIN? The
     // master switch must never imply a PIN — that produced lock gates for a
     // PIN nobody set. No PIN configured is a healthy state, never an error.

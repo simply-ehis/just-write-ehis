@@ -10,7 +10,7 @@
  * on text-on-accent.
  */
 
-import { editorFontStack, ensureEditorFont } from "./editorTheme";
+import { editorFontStack, ensureBrutalistFonts, ensureEditorFont } from "./editorTheme";
 
 export type ThemeStyle = "default" | "brutalist" | "glass";
 export type ThemeMode = "dark" | "light";
@@ -92,6 +92,9 @@ export function applyAppearance(style: string, mode: string, accentOverride: str
   const safeMode: ThemeMode = mode === "light" ? "light" : "dark";
   root.dataset.theme = safeStyle;
   root.dataset.mode = safeMode;
+  // Display type arrives with a Brutalist switch (first paint is covered
+  // by main.ts when Brutalist is the stored theme).
+  if (safeStyle === "brutalist") ensureBrutalistFonts();
   const el = root.style;
   if (isAccentHex(accentOverride)) {
     const hex = accentOverride.toLowerCase();

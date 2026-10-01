@@ -59,16 +59,22 @@ export function mapInvokeError(cmd: string, err: unknown): unknown {
 export interface SlowCall {
   cmd: string;
   ms: number;
-  at: string;
+  timestamp: string;
 }
 
 const slowCalls: SlowCall[] = [];
 /** Invokes slower than this are worth knowing about when diagnosing hangs. */
 export const SLOW_CALL_MS = 2000;
+/** Ring capacity: recent evidence, not a log. */
+export const SLOW_CALL_MAX = 10;
+
+export function shouldRecordSlowCall(ms: number): boolean {
+  return ms >= SLOW_CALL_MS;
+}
 
 export function recordSlowCall(cmd: string, ms: number): void {
-  slowCalls.push({ cmd, ms: Math.round(ms), at: new Date().toISOString() });
-  if (slowCalls.length > 10) slowCalls.splice(0, slowCalls.length - 10);
+  slowCalls.push({ cmd, ms: Math.round(ms), timestamp: new Date().toISOString() });
+  if (slowCalls.length > SLOW_CALL_MAX) slowCalls.splice(0, slowCalls.length - SLOW_CALL_MAX);
 }
 
 /** Newest last. Read on demand by the diagnostics panel. */
@@ -82,7 +88,7 @@ function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   const timed = <U>(p: Promise<U>): Promise<U> =>
     p.finally(() => {
       const ms = performance.now() - t0;
-      if (ms >= SLOW_CALL_MS) recordSlowCall(cmd, ms);
+      if (shouldRecordSlowCall(ms)) recordSlowCall(cmd, ms);
     });
   if (isBrowserPreview()) return timed(browserInvoke<T>(cmd, fullArgs));
   return timed(
@@ -553,19 +559,27 @@ export const api = {
    */
   aiGenerateStream: async (request: AiGenerateRequest, onToken: (token: string) => void): Promise<string> => {
     assertAiAllowed(request.workspace);
-    if (isBrowserPreview()) {
-      const res = await browserInvoke<AiGenerateResponse>("ai_generate", { request });
-      if (res.content) onToken(res.content);
-      return res.content;
+    // Streams run minutes: time them like any other call so a stuck
+    // generation shows up in Slow Calls instead of vanishing silently.
+    const t0 = performance.now();
+    try {
+      if (isBrowserPreview()) {
+        const res = await browserInvoke<AiGenerateResponse>("ai_generate", { request });
+        if (res.content) onToken(res.content);
+        return res.content;
+      }
+      const { Channel } = await import("@tauri-apps/api/core");
+      let full = "";
+      const channel = new Channel<string>((token) => {
+        full += token;
+        onToken(token);
+      });
+      await invoke<void>("ai_generate_stream", { request, onEvent: channel });
+      return full;
+    } finally {
+      const ms = performance.now() - t0;
+      if (shouldRecordSlowCall(ms)) recordSlowCall("ai_generate_stream", ms);
     }
-    const { Channel } = await import("@tauri-apps/api/core");
-    let full = "";
-    const channel = new Channel<string>((token) => {
-      full += token;
-      onToken(token);
-    });
-    await invoke<void>("ai_generate_stream", { request, onEvent: channel });
-    return full;
   },
 
   aiStructurize: (request: StructurizeRequest) => {

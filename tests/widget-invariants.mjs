@@ -34,15 +34,25 @@ const widgetPermissions = await read("src-tauri/permissions/widget.toml");
 const windows = config.app?.windows ?? [];
 check("two configured windows", windows.length === 2, windows.map((w) => w.label).join(", "));
 const mainConfig = windows.find((w) => w.label === "main");
-// Hidden-start: the main window must never flash unpainted or jump through
-// the geometry restore on screen — App.svelte reveals it afterwards.
+// Hidden-start: see showMainWindow docs.
 check("main window starts hidden", mainConfig?.visible === false);
+// Spec viewport parity: the fresh-launch default must equal the static
+// tauri.conf.json size, or first paint jumps between two sizes.
+check(
+  "default geometry matches static window size",
+  mainConfig?.width === 1240 && mainConfig?.height === 740
+);
 const mainGrants = new Set(
   [capability, mainCapability].flatMap((c) => (c.windows ?? []).includes("main") ? (c.permissions ?? []) : [])
 );
 check("main window may show itself", mainGrants.has("core:window:allow-show"));
-const showSites = (app.match(/showMainWindow\(\)/g) ?? []).length;
-check("app reveals main window on every boot exit", showSites >= 3, `${showSites} call sites`);
+// Wiring, not a count: reveal must chain off the restore and repeat on the
+// post-ready + failsafe exits, so no boot path traps an invisible window.
+check("reveal chains off geometry restore", app.includes("restoreMainWindow().finally"));
+check(
+  "reveal repeats on remaining boot exits",
+  app.includes("void showMainWindow();") && (app.match(/void showMainWindow\(\);/g) ?? []).length >= 3
+);
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");
 check("widget starts as a compact figure", widgetConfig?.width === 56 && widgetConfig?.height === 56 && widgetConfig?.minWidth === 48 && widgetConfig?.minHeight === 48);
@@ -73,6 +83,17 @@ check("widget emits doc and workspace handoffs", widget.includes('emitTo("main",
 check("widget waits for handoff acknowledgement", widget.includes('listen("main-window-shown"') && widget.includes('listen<string>("widget-open-failed"'));
 check("main opens and focuses routed doc or workspace", bridge.includes('listen<string>("widget-open-doc"') && bridge.includes('listen<string>("widget-open-workspace"') && bridge.includes("setFocus()"));
 check("tray show/hide entry", rust.includes('MenuItemBuilder::with_id("widget"') && rust.includes('get_webview_window("widget")'));
+// Relaunch resurface: closing hides to the tray, so a second launch with no
+// file arg must still show the main window (a bare early return = "exe
+// does nothing" on double-click). The reveal must precede file handling.
+const singleInstance = rust.slice(rust.indexOf("single_instance::init"));
+check(
+  "relaunch resurfaces hidden main window",
+  singleInstance.indexOf("unminimize()") !== -1 &&
+    singleInstance.indexOf("unminimize()") < singleInstance.indexOf("find_text_file") &&
+    singleInstance.includes("main.show()") &&
+    singleInstance.includes("main.set_focus()")
+);
 check("autostart plugin is wired", rust.includes("tauri_plugin_autostart::Builder") && mainCapability.permissions.includes("autostart:default") && widgetAutostart.includes("enableAutostart") && widgetAutostart.includes("disableAutostart"));
 check("widget backend commands are narrow", rust.includes("commands::widget_doc_get") && rust.includes("commands::widget_doc_save") && rust.includes("commands::widget_atomic_save") && !rust.includes("commands::widget_start") && !rust.includes("pub fn widget_start"));
 const handlerBlock = rust.match(/generate_handler!\[(.*?)\]/s)?.[1] ?? "";

@@ -51,7 +51,7 @@
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
   import { restoreMainWindow, showMainWindow } from "$lib/windowState";
-  import { markBootStart, markCleanExit } from "$lib/sessionHealth";
+  import { markBootStart, markCleanExit, BOOT_KEYS } from "$lib/sessionHealth";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
   // currentWorkspace) pollute featuresUsed before the async boot block
@@ -237,7 +237,7 @@
   let bootSlowSteps: string[] = [];
   function markBootStep(step: string): void {
     try {
-      localStorage.setItem("jwe-boot-step", step);
+      localStorage.setItem(BOOT_KEYS.step, step);
     } catch {
       /* storage unavailable: keep booting */
     }
@@ -252,9 +252,9 @@
       if (typeof t0 === "number") {
         const ms = Math.round(performance.now() - t0);
         console.info(`[boot] shell interactive in ${ms}ms${bootSlowSteps.length > 0 ? ` (slow steps: ${bootSlowSteps.join(", ")})` : ""}`);
-        localStorage.setItem("jwe-boot-ms", String(ms));
+        localStorage.setItem(BOOT_KEYS.ms, String(ms));
       }
-      localStorage.removeItem("jwe-boot-step");
+      localStorage.removeItem(BOOT_KEYS.step);
     } catch {
       /* timing unavailable: boot continues */
     }
@@ -497,8 +497,7 @@
     // Hang evidence: snapshot the previous session, then mark this one
     // open (pagehide below marks clean exits for the next launch).
     markBootStart();
-    const markExit = () => markCleanExit();
-    window.addEventListener('pagehide', markExit);
+    window.addEventListener('pagehide', markCleanExit);
     // Main-window geometry first (fire-and-forget, never blocks boot):
     // fresh installs open at the spec viewport, returning users get their
     // own size/position back.
@@ -679,7 +678,7 @@
 
     return () => {
       window.removeEventListener('resize', checkMobile);
-      window.removeEventListener('pagehide', markExit);
+      window.removeEventListener('pagehide', markCleanExit);
       window.visualViewport?.removeEventListener('resize', checkMobile);
       window.removeEventListener('keydown', handleGlobalKeydown);
       window.removeEventListener('editor-typing', handleEditorTyping);

@@ -13,6 +13,13 @@ const BOOT_MS_KEY = "jwe-boot-ms";
 const BOOT_STEP_KEY = "jwe-boot-step";
 const CLEAN_EXIT_KEY = "jwe-clean-exit";
 
+/** Storage keys, shared with App.svelte's boot reporter (one definition). */
+export const BOOT_KEYS = {
+  ms: BOOT_MS_KEY,
+  step: BOOT_STEP_KEY,
+  cleanExit: CLEAN_EXIT_KEY,
+} as const;
+
 export interface SessionHealth {
   /** This boot's navigation-start → interactive-shell ms (null until reported). */
   bootMs: number | null;
@@ -63,14 +70,15 @@ export function markCleanExit(): void {
 }
 
 export function readSessionHealth(): SessionHealth {
+  // Classify on the flag alone: "0" means a booted session never said
+  // goodbye (even a splash-hang before the first boot-ms), "1" is clean,
+  // anything else is a first run / wiped storage.
   const prevExit: SessionHealth["prevExit"] =
-    previous == null
+    previous == null || previous.exit == null || previous.exit === ""
       ? "unknown"
       : previous.exit === "1"
         ? "clean"
-        : previous.bootMs != null
-          ? "unclean"
-          : "unknown";
+        : "unclean";
   return {
     bootMs: toMs(readKey(BOOT_MS_KEY)),
     stuckStep: readKey(BOOT_STEP_KEY),

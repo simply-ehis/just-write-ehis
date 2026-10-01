@@ -4,7 +4,8 @@
   import { appLockConfigured, settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
-  import { api, isBrowserPreview, getSlowCalls } from "$lib/api";
+  import { api, isBrowserPreview, getSlowCalls, SLOW_CALL_MS } from "$lib/api";
+  import { formatSlowCalls } from "$lib/support";
   import { readSessionHealth } from "$lib/sessionHealth";
   import { showToast } from "$lib/stores/notifications";
   import { checkForUpdate, downloadAndInstall, friendlyUpdateError, getAppVersion, relaunchApp, type UpdateInfo } from "$lib/updates";
@@ -1521,8 +1522,8 @@
           </div>
         {/if}
         <div class="setting-row">
-          <span class="setting-label">Slow Calls (&gt;2s)</span>
-          <span class="value">{slow.length === 0 ? "none" : slow.map((c) => `${c.cmd} ${c.ms}ms`).join(", ")}</span>
+          <span class="setting-label">Slow Calls (&gt;{SLOW_CALL_MS / 1000}s)</span>
+          <span class="value">{slow.length === 0 ? "none" : formatSlowCalls(slow)}</span>
         </div>
 
         <h3>Export setup</h3>

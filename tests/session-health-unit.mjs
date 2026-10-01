@@ -4,7 +4,7 @@
  * sessionHealth: previous-session exit is captured before the flag is
  * overwritten (clean / unclean / unknown-first-run), stuck boot steps
  * surface, boot ms parses (garbage → null).
- * api slow calls: ring keeps the last 10 with shape {cmd, ms, at}.
+ * api slow calls: ring keeps the last 10 with shape {cmd, ms, timestamp}.
  *
  * Run: npm run test:sessionhealth (part of npm run test:source)
  */
@@ -67,6 +67,13 @@ h = health.readSessionHealth();
 check("unclean previous session", h.prevExit === "unclean" && h.prevBootMs === 2100);
 check("stuck step surfaces", h.stuckStep === "file-watcher");
 
+// Kill before the first boot-ms (splash hang): flag "0" alone means unclean.
+persisted.delete("jwe-boot-ms");
+persisted.delete("jwe-boot-step");
+health = await bundle("src/lib/sessionHealth.ts", "sh2b.mjs");
+health.markBootStart();
+check("pre-boot kill is unclean", health.readSessionHealth().prevExit === "unclean");
+
 // ── first run ever: no flags → unknown, never "unclean" ──────────
 persisted.clear();
 health = await bundle("src/lib/sessionHealth.ts", "sh3.mjs");
@@ -77,16 +84,17 @@ persisted.set("jwe-boot-ms", "garbage");
 check("garbage boot ms parses to null", health.readSessionHealth().bootMs === null);
 
 // ── slow-call ring (api.ts) ──────────────────────────────────────
-const { recordSlowCall, getSlowCalls, SLOW_CALL_MS } = await bundle("src/lib/api.ts", "api.mjs");
-check("slow threshold is 2s", SLOW_CALL_MS === 2000);
+const { recordSlowCall, getSlowCalls, shouldRecordSlowCall } = await bundle("src/lib/api.ts", "api.mjs");
+check("threshold boundary", shouldRecordSlowCall(2000) && !shouldRecordSlowCall(1999));
 for (let i = 0; i < 12; i++) recordSlowCall(`cmd-${i}`, 2000 + i);
 const slow = getSlowCalls();
 check("ring keeps last 10", slow.length === 10 && slow[0].cmd === "cmd-2" && slow[9].cmd === "cmd-11");
 check(
   "entries carry rounded ms + timestamp",
-  slow.every((s) => Number.isInteger(s.ms) && typeof s.at === "string" && s.at.length > 0)
+  slow.every((s) => Number.isInteger(s.ms) && typeof s.timestamp === "string" && s.timestamp.length > 0)
 );
-check("read returns a copy", getSlowCalls() !== slow);
+getSlowCalls().push({ cmd: "intruder", ms: 1, timestamp: "x" });
+check("ring is isolated from readers", getSlowCalls().every((s) => s.cmd !== "intruder"));
 
 // Remove the esbuild scratch bundle — never leave build trash behind.
 await rm(join(root, "tests", ".tmp-session"), { recursive: true, force: true });

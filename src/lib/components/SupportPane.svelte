@@ -22,6 +22,7 @@
     buildDiagnosticsSnapshot,
     buildFeedbackText,
     buildIssueUrl,
+    formatSlowCalls,
     type FeedbackSeverity,
   } from "$lib/support";
 
@@ -48,7 +49,7 @@
       bootMs: health.bootMs,
       prevExit: health.prevExit,
       stuckStep: health.stuckStep,
-      slowCalls: slow.length === 0 ? undefined : slow.map((c) => `${c.cmd} ${c.ms}ms`).join(", "),
+      slowCalls: slow.length === 0 ? undefined : formatSlowCalls(slow),
     });
   }
 

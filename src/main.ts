@@ -1,13 +1,26 @@
 import { mount } from "svelte";
-// Eager: the default editor face + Brutalist display type only. The other
-// editor families load on demand via ensureEditorFont (editorTheme.ts) so
-// they never tax first paint.
+// Eager: the default editor weight only. Display type + other editor
+// families arrive around first paint (below) so they never tax it.
 import "@fontsource/jetbrains-mono/400.css";
-import "@fontsource/jetbrains-mono/700.css";
-import "@fontsource/archivo-black/400.css";
-import "@fontsource/space-mono/400.css";
-import "@fontsource/space-mono/700.css";
 import "./app.css";
+import { ensureEditorFont } from "$lib/editorTheme";
+
+/** One stored setting without the store (pre-boot, pre-Svelte). */
+function storedSetting(key: string): string {
+  try {
+    const raw = JSON.parse(localStorage.getItem("writing-app-settings") || "{}") as Record<string, unknown>;
+    const v = raw[key];
+    return typeof v === "string" ? v : "";
+  } catch {
+    return "";
+  }
+}
+
+// Display type is only needed at first paint under Brutalist (the stored
+// theme is known pre-boot); any other theme loads it with the switch.
+// Awaited inside bootstrap (top-level await is unavailable in the
+// chrome105 build target), so only Brutalist pays for it before mount.
+const brutalistAtBoot = storedSetting("theme") === "brutalist";
 
 // Boot-timing baseline: milliseconds from navigation start to interactive
 // shell. App.svelte reports the delta when `ready` flips (see jwe-boot-ms).
@@ -22,6 +35,13 @@ window.addEventListener("vite:preloadError", (e) => {
 });
 
 async function bootstrap() {
+  if (brutalistAtBoot) {
+    await Promise.all([
+      import("@fontsource/archivo-black/400.css"),
+      import("@fontsource/space-mono/400.css"),
+      import("@fontsource/space-mono/700.css"),
+    ]);
+  }
   const isWidget = new URLSearchParams(window.location.search).get("widget") === "1";
   const route = isWidget
     ? await import("./WidgetApp.svelte")
@@ -29,6 +49,10 @@ async function bootstrap() {
   mount(route.default, {
     target: document.getElementById("app")!,
   });
+  // Post-paint: bold weight + the saved editor family (usually the eager
+  // default — a no-op then) so neither blocks first paint.
+  void import("@fontsource/jetbrains-mono/700.css");
+  ensureEditorFont(storedSetting("fontFamily"));
 }
 
 // A failed chunk load otherwise leaves #app permanently empty (a true
