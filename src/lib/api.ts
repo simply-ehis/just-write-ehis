@@ -404,6 +404,9 @@ export const api = {
   takeLaunchFile: () =>
     safeInvoke<string | null>("take_launch_file"),
 
+  autostartLaunch: () =>
+    safeInvoke<boolean>("autostart_launch"),
+
   openDefaultApps: () =>
     safeInvoke<void>("open_default_apps"),
 

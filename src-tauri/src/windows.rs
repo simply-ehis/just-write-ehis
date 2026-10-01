@@ -22,6 +22,26 @@ impl PendingLaunchFile {
     }
 }
 
+/// True when this process was launched by OS autostart (login) rather than
+/// the user. The frontend stays hidden and warms up instead of popping a
+/// window; the user opens it later via tray, dock, or a second launch.
+#[derive(Default)]
+pub struct AutostartLaunch {
+    warm: Mutex<bool>,
+}
+
+impl AutostartLaunch {
+    pub fn set(&self) {
+        if let Ok(mut warm) = self.warm.lock() {
+            *warm = true;
+        }
+    }
+
+    pub fn get(&self) -> bool {
+        self.warm.lock().map(|warm| *warm).unwrap_or(false)
+    }
+}
+
 pub fn find_text_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
     args.iter()
         .filter(|arg| !arg.starts_with("--"))

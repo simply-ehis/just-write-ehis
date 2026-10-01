@@ -51,7 +51,21 @@ check("main window may show itself", mainGrants.has("core:window:allow-show"));
 check("reveal chains off geometry restore", app.includes("restoreMainWindow().finally"));
 check(
   "reveal repeats on remaining boot exits",
-  app.includes("void showMainWindow();") && (app.match(/void showMainWindow\(\);/g) ?? []).length >= 3
+  app.includes("restoreMainWindow().finally(maybeShowMainWindow)") &&
+    (app.match(/maybeShowMainWindow\(\);/g) ?? []).length >= 2
+);
+// × quits for real: no hide-to-tray interception on the main window (the
+// dead "main-window-hidden" signal goes with it), and a destroyed main
+// window exits the process instead of lingering windowless.
+check("main close is not intercepted to tray", !bridge.includes("main-window-hidden") && !bridge.includes("onCloseRequested"));
+check(
+  "destroyed main window quits the app",
+  rust.includes('window.label() == "main"') && rust.includes("WindowEvent::Destroyed") && rust.includes("app_handle().exit(0)")
+);
+// Autostart warm boot: never pop a window — reveals stay gated on the flag.
+check(
+  "autostart boot stays hidden until user open",
+  app.includes("api.autostartLaunch()") && app.includes("maybeShowMainWindow")
 );
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");

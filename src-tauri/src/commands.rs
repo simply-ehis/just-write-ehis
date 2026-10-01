@@ -13,6 +13,7 @@ use std::process::Command;
 use serde::Serialize;
 use uuid::Uuid;
 use crate::windows::PendingLaunchFile;
+use crate::windows::AutostartLaunch;
 
 #[tauri::command]
 pub fn doc_create(
@@ -77,6 +78,13 @@ pub fn open_external_file(db: State<'_, Database>, path: String) -> Result<Optio
 #[tauri::command]
 pub fn take_launch_file(pending: State<'_, PendingLaunchFile>) -> Option<String> {
     pending.take()
+}
+
+/// True when launched by OS autostart: the frontend stays hidden and warms
+/// caches instead of popping a window (user opens it later via tray/dock).
+#[tauri::command]
+pub fn autostart_launch(warm: State<'_, AutostartLaunch>) -> bool {
+    warm.get()
 }
 
 #[tauri::command]

@@ -337,6 +337,10 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "take_launch_file":
       return null as T;
 
+    case "autostart_launch":
+      // No OS autostart in a plain browser tab: always a user launch.
+      return false as T;
+
     case "open_default_apps":
       return undefined as T;
 

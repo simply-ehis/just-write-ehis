@@ -95,18 +95,9 @@ export async function initializeMainWindowBridge(): Promise<() => void> {
   const cleanup = () => cleanups.forEach((off) => off());
 
   try {
-    cleanups.push(await mainWindow.onCloseRequested((event) => {
-      event.preventDefault();
-      void (async () => {
-        try {
-          await mainWindow.hide();
-          await emitTo("widget", "main-window-hidden");
-        } catch (e) {
-          console.warn("Failed to hide main window:", e);
-        }
-      })();
-    }));
-
+    // NOTE: no close interception here by design — × quits the app for
+    // real (Rust exits on main-window destroy), so a hidden main window
+    // only ever means an autostart warm boot or a widget handoff.
     cleanups.push(await listen<string>("widget-open-doc", (event) => {
       if (typeof event.payload === "string" && event.payload.length <= 128) {
         void openWidgetDoc(event.payload, mainWindow);

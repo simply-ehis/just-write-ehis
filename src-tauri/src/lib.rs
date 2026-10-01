@@ -82,6 +82,11 @@ pub fn run() {
 
             app.manage(db);
             app.manage(windows::PendingLaunchFile::default());
+            let autostart = windows::AutostartLaunch::default();
+            if std::env::args().any(|a| a == "--widget-autostart") {
+                autostart.set();
+            }
+            app.manage(autostart);
             #[cfg(target_os = "windows")]
             {
                 let args: Vec<String> = std::env::args().collect();
@@ -171,6 +176,7 @@ pub fn run() {
             commands::doc_create,
             commands::open_external_file,
             commands::take_launch_file,
+            commands::autostart_launch,
             commands::open_default_apps,
              commands::doc_get,
              commands::widget_doc_get,
@@ -344,6 +350,16 @@ pub fn run() {
              commands::remove_doc_tag,
              commands::search_by_tag,
         ])
+        .on_window_event(|window, event| {
+            // × quits for real: with no close-to-tray interception left, a
+            // destroyed main window means the session is over — exit instead
+            // of lingering windowless (the companion widget dies with us).
+            if window.label() == "main"
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                window.app_handle().exit(0);
+            }
+        })
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| eprintln!("Tauri application error: {}", e));
 }

@@ -498,15 +498,30 @@
     // open (pagehide below marks clean exits for the next launch).
     markBootStart();
     window.addEventListener('pagehide', markCleanExit);
+    // Autostart warm boot (OS login): never pop a window — restore
+    // geometry and warm every cache hidden, until the user opens the app
+    // (tray, dock, or a second launch via single-instance). A plain
+    // promise (not state): resolved before any reveal can run.
+    const autostarted: Promise<boolean> = (async () => {
+      try {
+        if (!isBrowserPreview()) return await api.autostartLaunch().catch(() => false);
+      } catch {
+        /* visible launch */
+      }
+      return false;
+    })();
+    const maybeShowMainWindow = () => {
+      void autostarted.then((a) => {
+        if (!a) void showMainWindow();
+      });
+    };
     // Main-window geometry first (fire-and-forget, never blocks boot):
     // fresh installs open at the spec viewport, returning users get their
     // own size/position back.
     // The window starts hidden (no black flash, no resize jump) and is
     // revealed once geometry lands; post-ready + failsafe re-show below
     // so no boot path can trap the user behind an invisible window.
-    void restoreMainWindow().finally(() => {
-      void showMainWindow();
-    });
+    void restoreMainWindow().finally(maybeShowMainWindow);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     window.visualViewport?.addEventListener('resize', checkMobile);
@@ -529,7 +544,7 @@
         }
         ready = true;
         reportBootMs();
-        void showMainWindow();
+        maybeShowMainWindow();
       }
     }, 20000);
     (async () => {
@@ -593,7 +608,9 @@
       if (!$settings.hasOnboarded) {
         if (!freshInstallAtBoot) {
           $settings = { ...$settings, hasOnboarded: true, onboardedVersion: ONBOARD_VERSION };
-        } else {
+        } else if (!(await autostarted)) {
+          // Hidden warm boot can't onboard (no visible window to greet);
+          // the flag stays clear so the first real open still greets.
           showOnboarding = true;
         }
       }
@@ -669,7 +686,7 @@
         markBootStep("done");
         ready = true;
         reportBootMs();
-        void showMainWindow();
+        maybeShowMainWindow();
       } finally {
         clearTimeout(bootFailsafe);
         reportBootMs();
