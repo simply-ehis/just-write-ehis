@@ -194,6 +194,25 @@ export async function showMainWindow(): Promise<void> {
 }
 
 /**
+ * Hide the main window again (autostart warm boot only). The reveal path
+ * below is deliberately fail-open — show first, hide on confirmed
+ * autostart — so a hung backend call can delay the hide, never trap an
+ * invisible window. Desktop shell only — no-op in preview.
+ */
+export async function hideMainWindow(): Promise<void> {
+  try {
+    const [{ isTauri }, { getCurrentWindow }] = await Promise.all([
+      import("@tauri-apps/api/core"),
+      import("@tauri-apps/api/window"),
+    ]);
+    if (!isTauri()) return;
+    await getCurrentWindow().hide();
+  } catch (e) {
+    console.warn("hideMainWindow failed:", e instanceof Error ? e.message : e);
+  }
+}
+
+/**
  * Restore the main window once at startup: user's saved geometry when it
  * still fits, else the spec viewport centered (never overlapping the
  * taskbar). Desktop shell only — no-op in the browser preview. Never

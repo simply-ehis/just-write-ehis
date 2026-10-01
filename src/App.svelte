@@ -50,7 +50,7 @@
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
-  import { restoreMainWindow, showMainWindow } from "$lib/windowState";
+  import { restoreMainWindow, showMainWindow, hideMainWindow } from "$lib/windowState";
   import { markBootStart, markCleanExit, BOOT_KEYS } from "$lib/sessionHealth";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
@@ -500,19 +500,29 @@
     window.addEventListener('pagehide', markCleanExit);
     // Autostart warm boot (OS login): never pop a window — restore
     // geometry and warm every cache hidden, until the user opens the app
-    // (tray, dock, or a second launch via single-instance). A plain
-    // promise (not state): resolved before any reveal can run.
-    const autostarted: Promise<boolean> = (async () => {
-      try {
-        if (!isBrowserPreview()) return await api.autostartLaunch().catch(() => false);
-      } catch {
-        /* visible launch */
-      }
-      return false;
-    })();
-    const maybeShowMainWindow = () => {
-      void autostarted.then((a) => {
-        if (!a) void showMainWindow();
+    // (tray, dock, or a second launch via single-instance).
+    // Fail-open by design: the flag resolves false on timeout/error, so a
+    // hung backend can delay the re-hide by seconds at most — never trap
+    // an invisible window, never stall boot past this race.
+    const autostarted: Promise<boolean> = Promise.race([
+      (async () => {
+        try {
+          if (!isBrowserPreview()) return await api.autostartLaunch().catch(() => false);
+        } catch {
+          /* visible launch */
+        }
+        return false;
+      })(),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+    // Reveal unconditionally once geometry lands; an autostart boot hides
+    // again the moment its flag resolves (local IPC — milliseconds, and
+    // invisible at login anyway).
+    const revealMainWindow = () => {
+      void showMainWindow().then(() => {
+        void autostarted.then((a) => {
+          if (a) void hideMainWindow();
+        });
       });
     };
     // Main-window geometry first (fire-and-forget, never blocks boot):
@@ -521,7 +531,7 @@
     // The window starts hidden (no black flash, no resize jump) and is
     // revealed once geometry lands; post-ready + failsafe re-show below
     // so no boot path can trap the user behind an invisible window.
-    void restoreMainWindow().finally(maybeShowMainWindow);
+    void restoreMainWindow().finally(revealMainWindow);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     window.visualViewport?.addEventListener('resize', checkMobile);
@@ -544,7 +554,7 @@
         }
         ready = true;
         reportBootMs();
-        maybeShowMainWindow();
+        revealMainWindow();
       }
     }, 20000);
     (async () => {
@@ -686,7 +696,7 @@
         markBootStep("done");
         ready = true;
         reportBootMs();
-        maybeShowMainWindow();
+        revealMainWindow();
       } finally {
         clearTimeout(bootFailsafe);
         reportBootMs();

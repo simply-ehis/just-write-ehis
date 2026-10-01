@@ -48,11 +48,11 @@ const mainGrants = new Set(
 check("main window may show itself", mainGrants.has("core:window:allow-show"));
 // Wiring, not a count: reveal must chain off the restore and repeat on the
 // post-ready + failsafe exits, so no boot path traps an invisible window.
-check("reveal chains off geometry restore", app.includes("restoreMainWindow().finally"));
+// The reveal is fail-open (no IPC gate); autostart hides again on its flag.
+check("reveal chains off geometry restore", app.includes("restoreMainWindow().finally(revealMainWindow)"));
 check(
   "reveal repeats on remaining boot exits",
-  app.includes("restoreMainWindow().finally(maybeShowMainWindow)") &&
-    (app.match(/maybeShowMainWindow\(\);/g) ?? []).length >= 2
+  (app.match(/revealMainWindow\(\);/g) ?? []).length >= 2
 );
 // × quits for real: no hide-to-tray interception on the main window (the
 // dead "main-window-hidden" signal goes with it), and a destroyed main
@@ -62,10 +62,13 @@ check(
   "destroyed main window quits the app",
   rust.includes('window.label() == "main"') && rust.includes("WindowEvent::Destroyed") && rust.includes("app_handle().exit(0)")
 );
-// Autostart warm boot: never pop a window — reveals stay gated on the flag.
+// Autostart warm boot: show unconditionally, hide again on a confirmed flag
+// (fail-open: a hung backend delays the hide, never traps the window).
 check(
   "autostart boot stays hidden until user open",
-  app.includes("api.autostartLaunch()") && app.includes("maybeShowMainWindow")
+  app.includes("api.autostartLaunch()") &&
+    app.includes("hideMainWindow") &&
+    app.includes("3000")
 );
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");
