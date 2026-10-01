@@ -70,7 +70,8 @@ check(
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");
 check("widget starts as a compact figure", widgetConfig?.width === 56 && widgetConfig?.height === 56 && widgetConfig?.minWidth === 48 && widgetConfig?.minHeight === 48);
-check("widget native flags", widgetConfig?.decorations === false && widgetConfig?.transparent === true && widgetConfig?.alwaysOnTop === true && widgetConfig?.resizable === true && widgetConfig?.skipTaskbar === true && widgetConfig?.visible === false);
+check("widget native flags", widgetConfig?.decorations === false && widgetConfig?.transparent === true && widgetConfig?.alwaysOnTop === false && widgetConfig?.resizable === true && widgetConfig?.skipTaskbar === true && widgetConfig?.visible === false);
+check("widget never intrudes over other apps", widgetConfig?.alwaysOnTop !== true);
 check("capability permits both labels", JSON.stringify(capability.windows) === JSON.stringify(["main", "widget"]));
 for (const permission of ["core:window:allow-show", "core:window:allow-hide", "core:window:allow-set-focus", "core:window:allow-start-dragging"]) {
   check(`capability ${permission}`, capability.permissions.includes(permission));
