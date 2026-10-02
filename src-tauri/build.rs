@@ -3,6 +3,7 @@ const COMMANDS: &[&str] = &[
     "open_external_file",
     "take_launch_file",
     "autostart_launch",
+    "app_boot_ready",
     "open_default_apps",
     "doc_get",
     "widget_doc_get",

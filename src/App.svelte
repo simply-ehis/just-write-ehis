@@ -17,13 +17,17 @@
   import TabBar from "$lib/components/TabBar.svelte";
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
-  import EditorPane from "$lib/components/EditorPane.svelte";
+  // EditorPane, Logs, JustWrite and Inbox are code-split via LazyWorkspace
+  // below rather than imported here. All four reach CodeMirror — EditorPane
+  // directly, Logs via its own EditorPane instance, JustWrite via ghostWidget,
+  // Inbox via DocDetail — and CodeMirror is a ~595 KB chunk. Statically
+  // importing ANY one of them kept the whole lot on the critical path, so
+  // ~1.07 MB had to download and parse before mount() could run the BootLoader
+  // and the progress UI could paint. Code-splitting one of them is not enough;
+  // all four have to move together or the chunk stays statically reachable.
   import EmptyState from "$lib/components/EmptyState.svelte";
-  import LogsWorkspace from "$lib/components/LogsWorkspace.svelte";
-  import JustWriteWorkspace from "$lib/components/JustWriteWorkspace.svelte";
   import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
   import InspectorPanel from "$lib/components/InspectorPanel.svelte";
-  import InboxWorkspace from "$lib/components/InboxWorkspace.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
   import QuickCaptureOverlay from "$lib/components/QuickCaptureOverlay.svelte";
   import SkillNudges from "$lib/components/SkillNudges.svelte";
@@ -51,6 +55,7 @@
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
   import { initializeMainWindowBridge } from "$lib/widgetBridge";
   import { restoreMainWindow, showMainWindow, hideMainWindow } from "$lib/windowState";
+import { waitForBackendReady } from "$lib/bootGate";
   import { markBootStart, markCleanExit, BOOT_KEYS } from "$lib/sessionHealth";
   let showOnboarding = $state(false);
   // Freshness snapshot at component init: mount effects (trackFeature on
@@ -263,18 +268,24 @@
     markBootStep(step);
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const result = await Promise.race([
-        fn(),
-        new Promise<null>((resolve) => {
-          timer = setTimeout(() => resolve(null), ms);
+      // The timeout must be distinguishable from a legitimate `null` result.
+      // Commands returning `Result<(), String>` (e.g. setup_file_watcher)
+      // serialise their Ok payload to null, so testing `result === null`
+      // reported them as timed-out even though they had already succeeded —
+      // a false warning plus a bogus entry in the slow-steps diagnostic.
+      const raced = await Promise.race([
+        fn().then((value) => ({ timedOut: false as const, value })),
+        new Promise<{ timedOut: true }>((resolve) => {
+          timer = setTimeout(() => resolve({ timedOut: true }), ms);
         }),
       ]);
-      if (result === null && timer !== null) {
+      if (raced.timedOut) {
         // fn() is still pending — stop waiting, keep booting.
         bootSlowSteps.push(step);
         console.warn(`Boot step "${step}" timed out after ${ms}ms — continuing without it.`);
+        return null;
       }
-      return result;
+      return raced.value;
     } catch (e) {
       console.warn(`Boot step "${step}" failed:`, e);
       return null;
@@ -464,17 +475,25 @@
 
     // Automatic backup per Vaults → Backup Frequency (desktop shell only:
     // in the browser preview a backup is a file download, never silent).
+    //
+    // Fired WITHOUT await: `backup_create` copies the whole database, and
+    // awaiting it here held the boot sequence (and, before the Rust fix, the
+    // app's only DB connection) for the duration — every later step, including
+    // the tab restore that decides which document the user lands on, waited
+    // behind a file copy. The backup still runs; it just no longer gates boot.
     if (!isBrowserPreview() && $settings.backupFrequency !== "never") {
       const every = $settings.backupFrequency === "daily" ? DAY_MS : $settings.backupFrequency === "weekly" ? 7 * DAY_MS : 30 * DAY_MS;
       const last = $settings.lastAutoBackup ? +new Date($settings.lastAutoBackup) : 0;
       if (now - last > every) {
-        try {
-          await api.backupCreate();
-          $settings = { ...$settings, lastAutoBackup: new Date().toISOString() };
-          showToast("Automatic backup complete", "success");
-        } catch (e) {
-          console.warn("Auto-backup failed:", e);
-        }
+        void (async () => {
+          try {
+            await api.backupCreate();
+            $settings = { ...$settings, lastAutoBackup: new Date().toISOString() };
+            showToast("Automatic backup complete", "success");
+          } catch (e) {
+            console.warn("Auto-backup failed:", e);
+          }
+        })();
       }
     }
   }
@@ -559,6 +578,18 @@
     }, 20000);
     (async () => {
     try {
+      // Every step below needs the Rust backend to be fully managed, and the
+      // webview starts loading before setup() finishes — so wait for the boot
+      // gate first. Without it these calls lose a race they cannot retry,
+      // which silently killed the file watcher, Home dashboard, status-bar
+      // stats, inbox banner and streak nudge. The companion window races the
+      // same setup and gates itself in WidgetApp.svelte.
+      if (!isBrowserPreview()) {
+        markBootStep("backend-ready");
+        if (!(await waitForBackendReady())) {
+          console.warn("Backend never reported ready — booting anyway.");
+        }
+      }
       if (!isBrowserPreview()) {
         const [appLockListener, appLockRequest] = await Promise.all([
           bootStep("app-lock-unlock", 8000, () => listen<{ requestId: string; pin: string }>("app-lock-unlock-request", async (event) => {
@@ -697,6 +728,19 @@
         ready = true;
         reportBootMs();
         revealMainWindow();
+      } catch (e) {
+        // A `finally` alone would clear the failsafe while skipping the
+        // ready/reveal above, leaving the BootLoader up and the window hidden
+        // — the exact ghost-window failure this gate exists to prevent.
+        console.warn("Boot sequence aborted:", e);
+        try {
+          showBanner("Startup hit an error — some features may be unavailable.", "warning");
+        } catch {
+          /* banners unavailable: shell still shows */
+        }
+        ready = true;
+        reportBootMs();
+        revealMainWindow();
       } finally {
         clearTimeout(bootFailsafe);
         reportBootMs();
@@ -817,10 +861,10 @@
         {:else if $currentWorkspace === "home"}
           <HomePane />
         {:else if $currentWorkspace === "logs"}
-          <LogsWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/LogsWorkspace.svelte")} label="Logs" />
         {:else if $currentWorkspace === "write"}
           {#if $currentDoc}
-            <JustWriteWorkspace />
+            <LazyWorkspace loader={() => import("$lib/components/JustWriteWorkspace.svelte")} label="Just Write" />
           {:else}
             <EmptyState />
           {/if}
@@ -837,11 +881,11 @@
         {:else if $currentWorkspace === "projects"}
           <LazyWorkspace loader={() => import("$lib/components/ProjectsWorkspace.svelte")} label="Projects" />
         {:else if $currentWorkspace === "inbox"}
-          <InboxWorkspace />
+          <LazyWorkspace loader={() => import("$lib/components/InboxWorkspace.svelte")} label="Inbox" />
         {:else if $currentWorkspace === "properties"}
           <LazyWorkspace loader={() => import("$lib/components/LibraryWorkspace.svelte")} label="Library" />
         {:else if $currentDoc}
-          <EditorPane />
+          <LazyWorkspace loader={() => import("$lib/components/EditorPane.svelte")} label="Editor" />
         {:else}
           <EmptyState />
         {/if}

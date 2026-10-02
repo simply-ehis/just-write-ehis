@@ -165,19 +165,43 @@ function localStructurize(text: string): string {
   return lines.join("\n").trimEnd();
 }
 
+/**
+ * Preview mirror of convert.rs::slugify.
+ *
+ * Rust maps every non-alphanumeric character to '-' and then collapses runs.
+ * `char::is_alphanumeric` is Unicode-aware, so "Café" keeps its é. The previous
+ * `[^a-z0-9]+` dropped it, so the same manuscript exported from the preview and
+ * from the desktop produced two different filenames. `\p{L}`/`\p{N}` is the
+ * closest JS equivalent (letters + numbers, all scripts).
+ */
 function slugify(title: string): string {
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const mapped = Array.from(title.toLowerCase())
+    .map((c) => (/[\p{L}\p{N}]/u.test(c) ? c : "-"))
+    .join("");
+  const slug = mapped.split("-").filter(Boolean).join("-");
   return slug || "untitled";
 }
 
+/**
+ * Preview mirror of convert.rs::markdown_to_text — per line:
+ *   1. trim ALL leading '#', '>', ' ' and '\t' (Rust `trim_start_matches`, so
+ *      "## Chapter" loses every leading hash, not just one level)
+ *   2. strip a "- [ ]" / "- [x]" / "- " list marker, or an "N. " number
+ *   3. strip inline emphasis / code spans, then reduce links to their text
+ *   4. drop horizontal rules
+ * The previous regexes removed exactly one heading level and only one space,
+ * which is why the preview disagreed with the desktop on ordinary markdown.
+ */
 function markdownToText(md: string): string {
   return md
     .split("\n")
     .map((line) => {
-      let l = line.replace(/^(#{1,6}|>)\s*/, "").replace(/^(\s*[-*]\s(\[[ x]\]\s)?|\s*\d+\.\s)/, "");
+      let l = line.replace(/^[#>\t ]+/, "");
+      l = l.replace(/^-\s\[[ xX]\]\s*/, "").replace(/^[-*]\s+/, "");
+      l = l.replace(/^\d+\.\s+/, "");
       l = l.replace(/(\*\*|__)(.*?)\1/g, "$2").replace(/(`|\*)(.*?)\1/g, "$2");
       l = l.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1");
-      return l.trim() === "---" || l.trim() === "***" ? "" : l;
+      return l.trim() === "---" || l.trim() === "***" || l.trim() === "___" ? "" : l;
     })
     .join("\n");
 }
@@ -197,6 +221,42 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 /**
+ * Preview mirror of convert.rs::inline_embeds.
+ *
+ * Replaces every `![[target]]` with the referenced note's body, or a visible
+ * `> [embed missing: …]` marker when it cannot be resolved (locked or absent).
+ *
+ * This step was MISSING entirely, so the preview silently dropped every
+ * `![[embed]]` from an export while the desktop inlined it — the doc comment
+ * above `previewPrepareExport` claimed otherwise.
+ */
+function previewInlineEmbeds(md: string): string {
+  const chars = Array.from(md);
+  let out = "";
+  let i = 0;
+  while (i < chars.length) {
+    if (chars[i] === "!" && i + 2 < chars.length && chars[i + 1] === "[" && chars[i + 2] === "[") {
+      let j = i + 3;
+      while (j + 1 < chars.length && !(chars[j] === "]" && chars[j + 1] === "]")) j += 1;
+      if (j + 1 < chars.length) {
+        const target = chars.slice(i + 3, j).join("").trim();
+        const body = previewLookup(target);
+        if (body !== null) {
+          out += `\n${body}\n`;
+        } else {
+          out += `\n> [embed missing: ${target.replace(/[[\]]/g, "")}]\n`;
+        }
+        i = j + 2;
+        continue;
+      }
+    }
+    out += chars[i];
+    i += 1;
+  }
+  return out;
+}
+
+/**
  * Preview mirror of the Rust export preprocess (convert.rs): embeds
  * inlined via the local store (locked/missing → note), wikilinks
  * resolved to display text, frontmatter injected as a YAML block.
@@ -209,12 +269,17 @@ function previewLookup(title: string): string | null {
   return hit.content;
 }
 
+/**
+ * Preview mirror of convert.rs::resolve_wikilinks: `[[Note|Display]]` collapses
+ * to its display text (the LAST `|` segment, matching Rust's `next_back`).
+ *
+ * An `![[embed]]` marker is deliberately left untouched, exactly as the Rust
+ * does — `inline_embeds` already consumed it in the previous pass. This used to
+ * inline embeds a second time here, duplicating that logic in two places.
+ */
 function previewResolveWikilinks(md: string): string {
   return md.replace(/!?\[\[([^\]]+)\]\]/g, (m, inner: string) => {
-    if (m.startsWith("!")) {
-      const body = previewLookup(inner.split("|")[0]);
-      return body != null ? `\n${body}\n` : `\n> [embed missing: ${inner.replace(/[[\]]/g, "")}]\n`;
-    }
+    if (m.startsWith("!")) return m;
     const parts = String(inner).split("|");
     return parts[parts.length - 1];
   });
@@ -243,7 +308,13 @@ function previewInjectFrontmatter(title: string, md: string, frontmatterJson: st
 }
 
 function previewPrepareExport(title: string, content: string, frontmatterJson: string | null): string {
-  return previewInjectFrontmatter(title, previewResolveWikilinks(content), frontmatterJson);
+  // Order matters and mirrors convert.rs::prepare_export_body exactly:
+  // inline embeds FIRST, then resolve wikilinks over the result. Collapsing
+  // both into one regex pass leaves a `[[wikilink]]` that lived inside an
+  // embedded note unresolved, because `String.replace` never rescans its own
+  // replacements — so the two backends produced different files.
+  const body = previewResolveWikilinks(previewInlineEmbeds(content));
+  return previewInjectFrontmatter(title, body, frontmatterJson);
 }
 
 function demoteHeadings(md: string): string {
@@ -337,9 +408,16 @@ export async function browserInvoke<T>(cmd: string, payload: Record<string, unkn
     case "take_launch_file":
       return null as T;
 
-    case "autostart_launch":
-      // No OS autostart in a plain browser tab: always a user launch.
-      return false as T;
+case "autostart_launch":
+  // No OS autostart in a plain browser tab: always a user launch.
+  return false as T;
+
+case "app_boot_ready":
+  // The browser preview has no Rust `setup` to race: the localStorage backend
+  // is managed synchronously as the module loads. Mirroring the *ready* state
+  // keeps the boot gate a no-op here instead of silently returning false, which
+  // would make the gate burn its whole 8s budget on every preview load.
+  return true as T;
 
     case "open_default_apps":
       return undefined as T;

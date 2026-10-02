@@ -47,8 +47,10 @@
     "test:aierror": "node tests/ai-error-probe.mjs",
     "test:aipanel": "node tests/ai-panel-error.mjs",
     "test:sidecar": "node tests/sidecar-validate.mjs",
+    "test:sidecarauth": "node tests/sidecar-auth.mjs",
     "test:ensure": "node tests/ensure-poll.mjs",
     "test:aclerrors": "node tests/acl-errors-unit.mjs",
+    "test:aclparity": "node tests/acl-parity.mjs",
     "test:providerprobe": "node tests/provider-probe-unit.mjs",
     "test:dailynote": "node tests/daily-note-unit.mjs",
     "test:stamp": "node tests/stamp-unit.mjs",
@@ -67,8 +69,13 @@
     "test:os": "node tests/os-integration.mjs",
     "test:widget-proof": "node tests/window-constraint-proof.mjs",
     "test:window": "node tests/window-state-unit.mjs",
+    "test:bootgate": "node tests/boot-gate-unit.mjs",
+    "test:ghostwindow": "node tests/ghost-window-guard.mjs",
+    "test:pathguard": "node tests/renderer-path-guard.mjs",
+    "test:parity": "node tests/backend-parity.mjs",
+    "test:csp": "node tests/csp-desktop.mjs",
     "test:support": "node tests/support-unit.mjs",
-    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:writeback && npm run test:window && npm run test:support"
+    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:aclparity && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:sidecarauth && npm run test:writeback && npm run test:window && npm run test:bootgate && npm run test:ghostwindow && npm run test:pathguard && npm run test:parity && npm run test:csp && npm run test:support"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.0",

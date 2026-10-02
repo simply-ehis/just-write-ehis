@@ -398,14 +398,28 @@ export const api = {
   docCreate: (workspace: string, kind: string, title: string, parentId?: string, content?: string, frontmatterJson?: string) =>
     safeInvoke<Doc>("doc_create", { workspace, kind, title, parentId, content, frontmatterJson }),
 
-  openExternalFile: (path: string) =>
-    safeInvoke<Doc | null>("open_external_file", { path }),
+  // Takes no path: the backend opens the file it recorded from argv / the OS
+  // file association. Accepting a renderer-supplied path here was an arbitrary
+  // read of any .txt/.md on the machine, outside the vault confinement every
+  // other fs command enforces.
+  openExternalFile: () =>
+    safeInvoke<Doc | null>("open_external_file"),
 
   takeLaunchFile: () =>
     safeInvoke<string | null>("take_launch_file"),
 
   autostartLaunch: () =>
     safeInvoke<boolean>("autostart_launch"),
+
+  /**
+   * False until the Rust backend has finished `setup`. Tauri starts the
+   * webviews before setup completes, so the frontend can otherwise boot into
+   * a half-managed backend and lose every command that needs `db`. Returns
+   * false (never throws) while the backend is still starting, so callers can
+   * poll it from their first tick.
+   */
+  appBootReady: () =>
+    safeInvoke<boolean>("app_boot_ready").catch(() => false),
 
   openDefaultApps: () =>
     safeInvoke<void>("open_default_apps"),

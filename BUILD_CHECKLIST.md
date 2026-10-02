@@ -1,5 +1,55 @@
 # BUILD_CHECKLIST.md — Writing App
 
+## Ghost window, boot race, and ACL parity (2026-10-01, native — first pass with a running binary)
+
+Reported together as "opens silently, no way to surface the app; widget, AI and every
+sidecar (pandoc, TTS, STT, LLM) dead". Root-caused to three independent defects, each
+reproduced before being fixed.
+
+- [x] **Service worker no longer registers in the desktop shell.** A hardcoded,
+      never-bumped cache name plus cache-first HTML serving meant an app update kept
+      serving a cached document whose content-hashed entry chunk no longer existed. The
+      module loaded as `text/html`, never executed, and took the entire IPC surface with
+      it. Registration is now web/PWA-only; the desktop branch unregisters any inherited
+      worker and clears caches so already-poisoned installs heal. `sw.js` is versioned,
+      purges stale caches on activate, and serves documents network-first.
+- [x] **`custom-protocol` feature restored** in `Cargo.toml`. Its absence made
+      `tauri-build` set `cfg(dev)` unconditionally, so every `cargo build --release`
+      produced a binary aimed at `localhost:5173` — a second, independent ghost window
+      whenever no dev server was running.
+- [x] **Startup race against the backend closed** with `commands::BootReady` + the
+      `bootGate` frontend gate. The file watcher, Home dashboard, status-bar stats,
+      inbox banner, streak nudge and widget commands were all failing with
+      `state not managed for field 'db'` and never retrying. The gate fails open.
+- [x] **ACL parity enforced** across `lib.rs`, `build.rs` and `permissions/*.toml`,
+      because the boot gate shipped registered-but-denied and failed only at runtime.
+- [x] **`bootStep` timeout sentinel** — commands returning `Result<(), String>` were
+      misreported as timed out, polluting the slow-steps diagnostic.
+- [x] Native evidence captured against a running release binary via Win32
+      (`EnumWindows`/`IsWindowVisible`) and the WebView2 CDP endpoint: main window
+      `Visible = True` (was `False` at correct geometry — the ghost), frontend
+      interactive, no service worker, TTS `ok` on 8091, LLM `ok` on 8093, pandoc
+      available with all six formats, companion widget rendering.
+- [x] Regression tests are falsifiable: `ghost-window-guard.mjs` fails 9 checks against
+      the pre-fix sources; `acl-parity.mjs` fails when the `allow-app-boot-ready` grant
+      is removed.
+- [x] `npm run check` 0 errors / 0 warnings, `npm run build` passes,
+      `npm run test:source` exit 0, `cargo build --release --features custom-protocol`
+      passes.
+- [x] **Rust compiles and tests pass: `cargo check` clean, `cargo test --lib` 64 passed /
+      0 failed** — covering every Rust change in this batch. `cargo check` caught 3 real
+      errors in new code that inspection had missed (an `Option<Vec<u32>>` `collect` with no
+      `FromIterator` impl, plus the two index failures it caused).
+- [x] **The six `doc_store` security tests are falsifiable.** Reintroducing the three
+      original bugs fails all six, each at its own assertion. Two were silently
+      non-discriminating until this was verified: `Path::starts_with` is lexical, so
+      `<vault>/logs/../../../x.md` *does* satisfy `starts_with(<vault>/logs)`; and the
+      original test titles had only one dash-separated segment before byte 10, so they
+      landed in the id-based branch even with the bug present. Both now normalise via
+      `normalize_lexically`, and the traversing shape is pinned separately.
+- [ ] `src-tauri/target` was cleared at the user's request after verification, so the
+      above native re-checks await the next build (~10 min).
+
 ## Phase 1: Core Engine ✅
 
 - [x] Tauri 2 project scaffold with Svelte 5

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-boot-ready"
+description = "Enables the app_boot_ready command without any pre-configured scope."
+commands.allow = ["app_boot_ready"]
+
+[[permission]]
+identifier = "deny-app-boot-ready"
+description = "Denies the app_boot_ready command without any pre-configured scope."
+commands.deny = ["app_boot_ready"]

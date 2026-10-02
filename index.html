@@ -43,14 +43,42 @@
       } catch (e) {}
     </script>
     <script>
-      // Register service worker
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
+      // Service worker: web/PWA (Android share target, notification capture)
+      // ONLY — never in the Tauri desktop shell.
+      //
+      // The desktop frontend is embedded in the binary, so there is no network
+      // origin to be resilient against: a cache buys nothing there. Worse, a
+      // cache-first worker outlives the content-hashed chunks it references —
+      // an app update leaves the cached document pointing at chunks the new
+      // build no longer ships. The entry module then 404s (served as text/html),
+      // main.ts never runs, #app stays empty, and the hidden main window is
+      // never revealed: a ghost window with a dead frontend, so every IPC
+      // command (AI, STT/TTS/LLM, memory, pandoc, the widget) fails too.
+      //
+      // So: register only outside Tauri, and actively unregister + drop caches
+      // inside it. The unregister is what heals installs that a previous build
+      // already poisoned — an active worker keeps controlling the page until it
+      // is removed, so skipping registration alone would not free them.
+      (function () {
+        if (!('serviceWorker' in navigator)) return;
+        var inTauri = !!(window.isTauri || (window.__TAURI_INTERNALS__));
+        if (inTauri) {
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            regs.forEach(function (reg) { reg.unregister(); });
+          }).catch(function () { /* nothing to heal */ });
+          if (window.caches && caches.keys) {
+            caches.keys().then(function (keys) {
+              keys.forEach(function (key) { caches.delete(key); });
+            }).catch(function () { /* nothing to clear */ });
+          }
+          return;
+        }
+        window.addEventListener('load', function () {
           navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('SW registered:', reg.scope))
-            .catch(err => console.log('SW registration failed:', err));
+            .then(function (reg) { console.log('SW registered:', reg.scope); })
+            .catch(function (err) { console.log('SW registration failed:', err); });
         });
-      }
+      })();
     </script>
   </head>
   <body>

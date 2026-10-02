@@ -14,6 +14,57 @@ fn uuid_v7() -> String {
 /// One dashboard goal row: (id, title, workspace, goal_words, word_count, deadline).
 type GoalRow = (String, String, String, i64, i64, Option<String>);
 
+/// Truncate to at most `max_bytes` without ever splitting a UTF-8 character.
+///
+/// Byte-index slicing (`&s[..n]`, `String::truncate`) panics whenever the index
+/// lands inside a multi-byte character. Titles, dates and document bodies here
+/// are free-form user text, and CJK, em-dashes and emoji are routine in a
+/// writing app — so a plain `len() > n` byte guard is not a safety check, it is
+/// a coin flip. Deliberately built from primitives that have been stable for
+/// the life of Rust, so this helper cannot itself become a version hazard.
+///
+/// The result is at most `max_bytes` long and always ends on a character
+/// boundary, so it can never exceed the original.
+fn truncate_bytes_safe(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// First `max_bytes` of `s` with an ellipsis when anything was cut. The single
+/// definition every AI-context snippet uses — these three copies previously
+/// drifted, and two of them used `n.min(len)`, which looks safe but is not:
+/// inside `if len > n` the `min` always collapses to `n`, so the byte slice
+/// that follows panicked exactly like the third one did.
+fn snippet_of(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        s.to_string()
+    } else {
+        format!("{}...", truncate_bytes_safe(s, max_bytes))
+    }
+}
+
+/// True only for a strict ASCII `YYYY-MM-DD` date — the shape the Logs calendar
+/// produces and the only shape `compute_disk_path` splits into `YYYY/MM`.
+///
+/// Checked by bytes, so multi-byte input is rejected outright rather than
+/// reaching path construction (where a non-ASCII byte index used to panic).
+/// Calendar validity is left to the Date the UI already built.
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..].iter().all(u8::is_ascii_digit)
+}
+
 /// Compute the on-disk path for a doc based on workspace, kind, title, and vault root.
 /// Spec §3.1:
 ///   logs/            YYYY/MM/YYYY-MM-DD.md
@@ -33,11 +84,23 @@ fn compute_disk_path(
 ) -> std::path::PathBuf {
     match workspace {
         "logs" => {
-            // Title is expected to be YYYY-MM-DD
-            let date_part = if title.len() >= 10 { &title[..10] } else { title };
-            let parts: Vec<&str> = date_part.split('-').collect();
+            // Title is expected to be YYYY-MM-DD. Anything else (or a title that
+            // is not ASCII) must not be able to shape the directory path: the
+            // segments are sanitized, and a title without three usable
+            // segments falls back to the id. See `log_get_or_create`, which
+            // now also validates the date format at the boundary.
+            let date_part = truncate_bytes_safe(title, 10);
+            let parts: Vec<String> = date_part
+                .split('-')
+                .map(|p| sanitize_component(p, ""))
+                .filter(|p| !p.is_empty())
+                .collect();
             if parts.len() >= 3 {
-                vault.join("logs").join(parts[0]).join(parts[1]).join(format!("{}.md", date_part))
+                vault
+                    .join("logs")
+                    .join(&parts[0])
+                    .join(&parts[1])
+                    .join(format!("{}.md", sanitize_component(&date_part, id)))
             } else {
                 vault.join("logs").join(format!("{}.md", id))
             }
@@ -76,16 +139,15 @@ fn sanitize_filename(s: &str) -> String {
             _ => result.push(c),
         }
     }
-    // Truncate to reasonable length
-    if result.len() > 64 {
-        result.truncate(64);
-    }
+    // Truncate to a reasonable length on a character boundary: a byte-index
+    // truncate panics on any multi-byte title (22 CJK chars is already 66 bytes).
+    let mut name = truncate_bytes_safe(&result, 64).to_string();
     // "." / ".." are path segments, not names: a title like ".." would
     // otherwise walk out of the workspace folder.
-    if result.is_empty() || result.chars().all(|c| c == '.') {
-        result = "untitled".to_string();
+    if name.is_empty() || name.chars().all(|c| c == '.') {
+        name = "untitled".to_string();
     }
-    result
+    name
 }
 
 /// One safe path segment for caller-supplied names (workspace folders).
@@ -346,9 +408,18 @@ impl Database {
         let content = req.content.unwrap_or_default();
         let word_count = content.split_whitespace().count() as i64;
 
-        // Compute proper on-disk path
+        // Compute proper on-disk path, then confine it before anything touches the
+        // disk. Every other write path in this file routes through
+        // `resolve_in_vault` (save/delete/move/restore/atomic_save);
+        // create_doc was the sole exception. That mattered because
+        // `PathBuf::join` *replaces* the accumulated path when handed an
+        // absolute segment, so a title could relocate the write out of the
+        // vault entirely — and quick capture feeds raw typed text in as the
+        // title, making this reachable from ordinary UI, not just a hostile
+        // webview.
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let disk_path = compute_disk_path(&vault, &req.workspace, &req.kind, &req.title, &id);
+        let proposed = compute_disk_path(&vault, &req.workspace, &req.kind, &req.title, &id);
+        let disk_path = resolve_in_vault(&vault, proposed.to_string_lossy().as_ref())?;
         let path_str = disk_path.to_string_lossy().to_string();
         drop(vault);
 
@@ -1010,7 +1081,7 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-             FROM docs WHERE workspace = ?1 ORDER BY pinned DESC, updated_at DESC"
+             FROM docs WHERE workspace = ?1 AND locked = 0 ORDER BY pinned DESC, updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map(params![workspace], |row| {
@@ -1120,6 +1191,14 @@ impl Database {
     }
 
     pub fn log_get_or_create(&self, date: &str) -> Result<Doc, String> {
+        // This value becomes the doc title AND, via `compute_disk_path`, the
+        // on-disk path (`logs/YYYY/MM/YYYY-MM-DD.md`). Every UI caller passes a
+        // `YYYY-MM-DD` string built from a Date, but the command takes whatever
+        // the renderer sends, so validate the shape at the boundary rather than
+        // trusting the caller. This also keeps the folder split meaningful.
+        if !is_iso_date(date) {
+            return Err(format!("Invalid daily-note date: {date} (expected YYYY-MM-DD)"));
+        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         match conn.query_row(
             "SELECT locked FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND title = ?1",
@@ -1182,8 +1261,8 @@ impl Database {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-             FROM docs WHERE workspace = 'logs' AND kind = 'daily'
-             ORDER BY title DESC LIMIT ?1"
+FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
+  ORDER BY title DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map(params![limit], |row| {
@@ -1471,14 +1550,14 @@ impl Database {
             match ws {
                 Some(w) => {
                     let mut stmt = conn.prepare(
-                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE workspace = ?1"
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE workspace = ?1 AND locked = 0"
                     ).map_err(|e| e.to_string())?;
                     let rows = stmt.query_map([w], map_row).map_err(|e| e.to_string())?;
                     rows.filter_map(|r| r.ok()).collect()
                 }
                 None => {
                     let mut stmt = conn.prepare(
-                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs"
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE locked = 0"
                     ).map_err(|e| e.to_string())?;
                     let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
                     rows.filter_map(|r| r.ok()).collect()
@@ -2568,9 +2647,18 @@ impl Database {
     }
 
     pub fn snapshot_list(&self, doc_id: &str) -> Result<Vec<Snapshot>, String> {
+        // Snapshots carry the FULL document body, so a locked doc's history is
+        // as sensitive as the doc itself. Every other read path filters on
+        // `docs.locked`; this one did not, and `allow-snapshot-list` is granted
+        // to the companion window — so it silently defeated the widget ACL's
+        // "locked docs stay out of the companion" guarantee.
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, doc_id, label, content, word_count, content_hash, created_at FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC"
+            "SELECT s.id, s.doc_id, s.label, s.content, s.word_count, s.content_hash, s.created_at
+             FROM snapshots s
+             WHERE s.doc_id = ?1
+               AND EXISTS (SELECT 1 FROM docs d WHERE d.id = s.doc_id AND d.locked = 0)
+             ORDER BY s.created_at DESC"
         ).map_err(|e| e.to_string())?;
 
         let snapshots = stmt.query_map(params![doc_id], |row| {
@@ -2759,15 +2847,44 @@ impl Database {
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = backup_dir.join(format!("backup_{}.db", timestamp));
 
-        // Use VACUUM INTO for backup (SQLite 3.27.0+). The path is ours
-        // (timestamped filename under app-data), but quote it anyway:
-        // a username with an apostrophe would otherwise break the SQL.
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute_batch(&format!("VACUUM INTO '{}';", backup_path.to_string_lossy().replace('\'', "''")))
-            .map_err(|e| e.to_string())?;
+// Use VACUUM INTO for backup (SQLite 3.27.0+). The path is ours
+  // (timestamped filename under app-data), but quote it anyway:
+  // a username with an apostrophe would otherwise break the SQL.
+  let quoted = backup_path.to_string_lossy().replace('\'', "''");
 
-        Ok(backup_path.to_string_lossy().to_string())
+  // VACUUM INTO copies the entire database. Run it on a SECOND connection
+  // when the backing file is known, so the app's only connection stays free to
+  // serve autosave, search and RAG for the duration; WAL allows a reader
+  // alongside the writer. Previously this ran under `self.conn.lock()`, which
+  // meant one full-database copy stalled every other command.
+  //
+  // A read-only connection cannot VACUUM, so this one is opened read/write;
+  // it is used for this one statement and dropped immediately.
+  let db_file = self.db_path.lock().ok().and_then(|p| p.clone());
+  match db_file {
+    Some(path) => {
+      let backup_conn = rusqlite::Connection::open(&path)
+        .map_err(|e| format!("Couldn't open the database for backup: {}", e))?;
+      // Match the main connection's durability settings so the copy sees a
+      // consistent snapshot rather than waiting on a different WAL state.
+      backup_conn
+        .execute_batch("PRAGMA busy_timeout=5000;")
+        .map_err(|e| e.to_string())?;
+      backup_conn
+        .execute_batch(&format!("VACUUM INTO '{}';", quoted))
+        .map_err(|e| e.to_string())?;
     }
+    // In-memory (tests): there is no file to reopen, so the locked path is the
+    // only option.
+    None => {
+      let conn = self.conn.lock().map_err(|e| e.to_string())?;
+      conn.execute_batch(&format!("VACUUM INTO '{}';", quoted))
+        .map_err(|e| e.to_string())?;
+    }
+  }
+
+  Ok(backup_path.to_string_lossy().to_string())
+  }
 
     pub fn backup_list(&self) -> Result<Vec<(String, String, u64)>, String> {
         let backup_dir = dirs::data_local_dir()
@@ -2946,29 +3063,54 @@ impl Database {
             return Ok(sorted);
         }
 
-        // Fetch chunk data for semantic results
-        let mut results = Vec::new();
-        for (chunk_id, distance) in semantic_results {
-            let chunk: RagChunk = conn.query_row(
-                "SELECT id, doc_id, chunk_index, content, start_word, end_word FROM rag_chunks WHERE id = ?1",
-                params![chunk_id],
-                |row| {
-                    Ok(RagChunk {
+        // Fetch chunk data for semantic results.
+        //
+        // Batched: this was one `query_row` per hit (default 10, each walking
+        // the b-tree again) while the single connection mutex was held for the
+        // whole loop. One `IN (...)` statement replaces it; the per-hit distance
+        // is re-attached afterwards so ordering and scoring are unchanged.
+        if semantic_results.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = semantic_results.iter().map(|(id, _)| id.clone()).collect();
+        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, doc_id, chunk_index, content, start_word, end_word FROM rag_chunks WHERE id IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let id_refs: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let by_id: std::collections::HashMap<String, RagChunk> = stmt
+            .query_map(id_refs.as_slice(), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    RagChunk {
                         id: row.get(0)?,
                         doc_id: row.get(1)?,
                         chunk_index: row.get(2)?,
                         content: row.get(3)?,
                         start_word: row.get(4)?,
                         end_word: row.get(5)?,
-                    })
-                },
-            ).map_err(|e| e.to_string())?;
+                    },
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut results = Vec::new();
+        for (chunk_id, distance) in semantic_results {
+            // A chunk can vanish between the vec scan and this read (a
+            // concurrent delete); skip it rather than failing the whole search,
+            // matching the previous `continue`-on-locked behaviour.
+            let Some(chunk) = by_id.get(&chunk_id) else { continue };
             if locked_ids.contains(&chunk.doc_id) {
                 continue;
             }
             // Convert distance to similarity score (lower distance = more similar)
             let score = 1.0 / (1.0 + distance);
-            results.push((chunk, score));
+            results.push((chunk.clone(), score));
         }
 
         Ok(results)
@@ -3541,11 +3683,7 @@ impl Database {
                 Ok((title, content, word_count))
             },
         ) {
-            let snippet = if doc.1.len() > 500 {
-                format!("{}...", &doc.1[..500])
-            } else {
-                doc.1.clone()
-            };
+            let snippet = snippet_of(&doc.1, 500);
             context.push_str(&format!(
                 "Current document: \"{}\" ({} words)\n{}\n\n",
                 doc.0, doc.2, snippet
@@ -3585,7 +3723,7 @@ impl Database {
                         params![pid, doc_id],
                         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     ) {
-                        let snippet = if prev.1.len() > 300 { format!("{}...", &prev.1[..300.min(prev.1.len())]) } else { prev.1 };
+                        let snippet = snippet_of(&prev.1, 300);
                         context.push_str(&format!("Previous scene: \"{}\"\n{}\n\n", prev.0, snippet));
                     }
                 }
@@ -3603,7 +3741,7 @@ impl Database {
                     if !notes.is_empty() {
                         context.push_str("Recent daily notes:\n");
                         for (title, content) in &notes {
-                            let snippet = if content.len() > 200 { format!("{}...", &content[..200.min(content.len())]) } else { content.clone() };
+                            let snippet = snippet_of(content, 200);
                             context.push_str(&format!("  [{}] {}\n", title, snippet));
                         }
                         context.push('\n');
@@ -4125,6 +4263,135 @@ mod vault_confinement_tests {
     }
 
     #[test]
+    fn rag_search_returns_content_and_honours_locked_docs() {
+        // Guards the batched chunk fetch: it replaced a per-hit `query_row` loop,
+        // so this pins both that results still come back in distance order and
+        // that a locked doc's chunks are still excluded after the rewrite.
+        let db = test_db("rag-batch");
+        let open_id = db
+            .create_doc(CreateDocRequest {
+                workspace: "write".into(),
+                kind: "doc".into(),
+                title: "Rag open".into(),
+                parent_id: None,
+                content: Some(
+                    "the compiler rewrites the borrow. borrow checking happens early. \
+                     borrow rules keep memory safe."
+                        .into(),
+                ),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        let secret_id = db
+            .create_doc(CreateDocRequest {
+                workspace: "write".into(),
+                kind: "doc".into(),
+                title: "Rag secret".into(),
+                parent_id: None,
+                content: Some(
+                    "borrow borrow borrow borrow borrow borrow borrow borrow borrow."
+                        .into(),
+                ),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        db.set_locked(&secret_id, true).unwrap();
+
+        // `create_doc` does not chunk; the RAG index is built on save (and via
+        // the rag_chunk_document command), so build it explicitly here.
+        db.rag_chunk_document(&open_id, 200, 50).unwrap();
+        db.rag_chunk_document(&secret_id, 200, 50).unwrap();
+
+        let results = db.rag_search("borrow", 10).unwrap();
+        assert!(
+            !results.is_empty(),
+            "rag_search returned nothing for a term present in both docs"
+        );
+        // Every returned chunk must have real content — a batching bug that lost
+        // the row mapping would surface as empty text.
+        for (chunk, score) in &results {
+            assert!(!chunk.content.trim().is_empty(), "empty chunk content");
+            assert!(score.is_finite(), "non-finite score {score}");
+        }
+        // Locked docs never surface in AI retrieval.
+        assert!(
+            !results.iter().any(|(c, _)| c.doc_id == secret_id),
+            "locked doc surfaced through rag_search"
+        );
+        // ...and the open one still does, so the filter is not over-broad.
+        assert!(
+            results.iter().any(|(c, _)| c.doc_id == open_id),
+            "open doc missing from rag_search"
+        );
+    }
+
+    #[test]
+    fn locked_docs_are_excluded_from_lists_and_graph() {
+        // `docs.locked` filtering was implemented per-query and had been
+        // forgotten in exactly these three read paths, so the app-lock guarantee
+        // silently depended on each call site remembering. Locked docs are
+        // excluded from search/RAG/dashboards/smart-tabs; these were the gaps.
+        let db = test_db("locked-filter");
+        let make = |title: &str, locked: bool| -> String {
+            let id = db
+                .create_doc(CreateDocRequest {
+                    workspace: "write".into(),
+                    kind: "doc".into(),
+                    title: title.into(),
+                    parent_id: None,
+                    content: Some(format!("body of {title}")),
+                    frontmatter_json: None,
+                })
+                .unwrap()
+                .id;
+            db.set_locked(&id, locked).unwrap();
+            id
+        };
+        let visible = make("Visible doc", false);
+        let secret = make("Secret doc", true);
+
+        // list_docs_by_workspace
+        let listed: Vec<String> = db
+            .list_docs_by_workspace("write")
+            .unwrap()
+            .into_iter()
+            .map(|d| d.id)
+            .collect();
+        assert!(listed.contains(&visible), "visible doc must be listed");
+        assert!(!listed.contains(&secret), "locked doc leaked into list_docs_by_workspace");
+
+        // log_list_entries (daily notes)
+        let log = db.log_get_or_create("2026-03-04").unwrap();
+        db.set_locked(&log.id, true).unwrap();
+        assert!(
+            !db.log_list_entries(50).unwrap().iter().any(|e| e.id == log.id),
+            "locked daily note leaked into log_list_entries"
+        );
+        // ...and an unlocked one still shows.
+        let open_log = db.log_get_or_create("2026-03-05").unwrap();
+        assert!(
+            db.log_list_entries(50).unwrap().iter().any(|e| e.id == open_log.id),
+            "unlocked daily note must still be listed"
+        );
+
+        // graph_query, both the workspace-scoped and the unfiltered branch.
+        for ws in [Some("write"), None] {
+            let graph = db.graph_query(ws, None).unwrap();
+            let ids: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();
+            assert!(
+                !ids.contains(&secret.as_str()),
+                "locked doc leaked into graph_query(ws={ws:?})"
+            );
+            assert!(
+                ids.contains(&visible.as_str()),
+                "visible doc missing from graph_query(ws={ws:?})"
+            );
+        }
+    }
+
+    #[test]
     fn move_to_a_path_outside_the_vault_fails() {
         let db = test_db("move");
         let id = db
@@ -4148,5 +4415,196 @@ mod vault_confinement_tests {
         // The row must be untouched.
         let after = db.get_doc(&id).unwrap().path;
         assert_eq!(before, after, "path changed after a refused move");
+    }
+
+    // ---- UTF-8 boundary safety -------------------------------------------------
+    //
+    // Byte-index slicing panics when the index lands inside a multi-byte
+    // character, and the old code guarded with a *byte* length check, so these
+    // inputs aborted the whole `doc_create` invoke. Tauri has no catch_unwind,
+    // so the panic unwound into a Tokio task and the JS promise never settled:
+    // no error toast, dialog spinning forever. Each case below panicked before
+    // the fix.
+
+    #[test]
+    fn truncate_bytes_safe_never_splits_a_character() {
+        // Owned Strings: several of these land mid-character at every boundary,
+        // and a borrowed literal would not express a seam at byte 499.
+        let cases: Vec<String> = vec![
+            "\u{4e00}".repeat(30),                             // 90 B, 3 B/char
+            "\u{2014}".repeat(30),                             // em-dash, 3 B/char
+            format!("{}😀", "a".repeat(62)),                    // emoji on the seam
+            format!("{}\u{4e00}", "a".repeat(499)),             // CJK on the seam
+            "a".repeat(200),                                    // pure ASCII
+            String::new(),
+        ];
+        for s in &cases {
+            for n in [0usize, 1, 7, 8, 63, 64, 200, 499, 500] {
+                let out = truncate_bytes_safe(s, n);
+                assert!(out.len() <= n, "n={n}: {} bytes", out.len());
+                // Every returned index must be a boundary, or slicing panics.
+                assert!(s.is_char_boundary(out.len()), "n={n}: not a char boundary");
+                assert!(s.starts_with(out), "n={n}: not a prefix of the input");
+            }
+        }
+    }
+
+    #[test]
+    fn sanitize_filename_survives_multibyte_titles() {
+        // 22 CJK chars = 66 bytes: byte 64 is mid-character.
+        let cases: Vec<String> = vec![
+            "\u{4e00}".repeat(22),         // exactly the reported boundary
+            "\u{4e00}".repeat(30),
+            "\u{2014}".repeat(30),
+            format!("{}😀", "a".repeat(62)),
+            "a".repeat(200),
+        ];
+        for title in &cases {
+            let out = sanitize_filename(title);
+            assert!(out.len() <= 64, "{} bytes for {} chars", out.len(), title.chars().count());
+            assert!(!out.is_empty());
+        }
+    }
+
+    #[test]
+    fn snippet_of_never_panics_on_multibyte_bodies() {
+        let cases: Vec<String> = vec![
+            "\u{4e00}".repeat(200),
+            "\u{2014}".repeat(250),
+            "\u{201c}".repeat(300),
+            format!("{}一", "a".repeat(499)),
+        ];
+        for body in &cases {
+            for n in [0usize, 1, 200, 300, 500] {
+                let out = snippet_of(body, n);
+                assert!(out.len() <= n + 3, "{} bytes for n={n}", out.len());
+            }
+        }
+        assert_eq!(snippet_of("short", 500), "short");
+        assert_eq!(
+            snippet_of(&"a".repeat(600), 500),
+            format!("{}...", "a".repeat(500))
+        );
+    }
+
+    // ---- Logs-workspace path traversal ----------------------------------------
+
+    #[test]
+    fn logs_titles_cannot_escape_the_vault() {
+        let vault = std::env::temp_dir().join("jwe-conf-logs");
+        // Quick capture passes raw typed text in as the title, so these are
+        // ordinary inputs, not just hostile ones. `PathBuf::join` replaces the
+        // accumulated path outright when a segment is absolute, so a drive
+        // prefix used to relocate the write entirely.
+        for title in [
+            "AAAAAAAAAA-C:\\evil-x",
+            "..-..-..-..-x",
+            "../../../etc-passwd",
+            "2026-01-02",
+        ] {
+            let path = compute_disk_path(&vault, "logs", "doc", title, "id-1");
+            // NORMALISE before comparing. `Path::starts_with` is lexical, so an
+            // escaping path like `<vault>/logs/../../../x.md` still satisfies
+            // `starts_with(<vault>/logs)` — the first components do match. The
+            // earlier version of this test asserted exactly that and therefore
+            // passed even with the traversal reintroduced; it was validating
+            // `resolve_in_vault`, not `compute_disk_path`.
+            let normalized = normalize_lexically(&path);
+            assert!(
+                normalized.starts_with(normalize_lexically(&vault).join("logs")),
+                "{title:?} produced {normalized:?}"
+            );
+            assert!(
+                normalized.starts_with(normalize_lexically(&vault)),
+                "{title:?} escaped the vault entirely: {normalized:?}"
+            );
+            // And it must still satisfy the same confinement every other write
+            // path relies on.
+            assert!(
+                resolve_in_vault(&vault, path.to_string_lossy().as_ref()).is_ok(),
+                "{title:?} failed vault confinement: {path:?}"
+            );
+        }
+    }
+
+    /// The specific shape that actually escaped: three dash-separated segments
+    /// inside the first 10 bytes, the first two being `..`. Pinned separately
+    /// because it is the only input that reaches the `parts.len() >= 3` join at
+    /// all — `"AAAAAAAAAA-C:\evil-x"` has one segment before byte 10 and so
+    /// fell through to the id-based branch even when unsanitised.
+    #[test]
+    fn dot_segment_log_titles_are_normalised_back_inside() {
+        let vault = std::env::temp_dir().join("jwe-conf-logs2");
+        let path = compute_disk_path(&vault, "logs", "doc", "..-..-..-x", "id-1");
+        let normalized = normalize_lexically(&path);
+        assert!(
+            normalized.starts_with(&normalize_lexically(&vault)),
+            "traversal reached {normalized:?}"
+        );
+    }
+
+    // ---- Daily-note date validation ---------------------------------------------
+
+    #[test]
+    fn iso_date_gate_accepts_only_yyyy_mm_dd() {
+        for ok in ["2026-01-02", "1999-12-31", "0000-00-00"] {
+            assert!(is_iso_date(ok), "{ok} should be accepted");
+        }
+        // Everything that would otherwise reach path construction, including the
+        // non-ASCII input that used to panic the byte slice.
+        for bad in [
+            "", "2026", "2026-1-2", "Journal — 2026", "第一章第一", "2026-01-02-03",
+            "2026/01/02", "2026-01-02 ", "..-..-..", "aaaaaaaaaa", "-", "----------",
+        ] {
+            assert!(!is_iso_date(bad), "{bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn log_get_or_create_rejects_a_non_iso_date() {
+        let db = test_db("logdate");
+        let err = db.log_get_or_create("Journal — 2026").unwrap_err();
+        assert!(err.contains("Invalid daily-note date"), "got: {err}");
+        // And the real shape still works end to end.
+        assert!(db.log_get_or_create("2026-01-02").is_ok());
+    }
+
+    #[test]
+    fn create_doc_confines_the_path_it_writes() {
+        let db = test_db("create-confine");
+        let vault = db.vault_path.lock().unwrap().clone();
+        // The gap this guards: create_doc used to skip resolve_in_vault, unlike
+        // every other write path in the file.
+        //
+        // These titles are chosen so the UNSANITISED path really did escape:
+        // they need three dash-separated segments inside the first 10 bytes with
+        // the leading ones being `..`, which is the only shape that reaches the
+        // `parts.len() >= 3` directory join. Earlier titles (a drive prefix far
+        // out at byte 10) had a single segment before byte 10 and so landed in
+        // the id-based branch even when buggy — the test passed either way.
+        for title in ["..-..-..-x", "..-..-..-..-x"] {
+            let res = db.create_doc(CreateDocRequest {
+                workspace: "logs".into(),
+                kind: "doc".into(),
+                title: title.into(),
+                parent_id: None,
+                content: Some("payload".into()),
+                frontmatter_json: None,
+            });
+            match res {
+                Ok(doc) => {
+                    // Normalised: a lexical starts_with would happily accept
+                    // `<vault>/logs/../../../x.md`.
+                    let written = normalize_lexically(std::path::Path::new(&doc.path));
+                    assert!(
+                        written.starts_with(normalize_lexically(&vault)),
+                        "{title:?} wrote outside the vault: {}",
+                        doc.path
+                    );
+                }
+                // Refusing outright is also acceptable; silently escaping is not.
+                Err(e) => assert!(e.contains("outside the vault"), "unexpected error: {e}"),
+            }
+        }
     }
 }

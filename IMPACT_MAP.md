@@ -27,7 +27,7 @@
 
 | Change | Files Affected | Risk Level |
 |---|---|---|
-| New Tauri command | `commands.rs`, `api.ts`, consuming component | Low |
+| New Tauri command | `commands.rs`, `lib.rs` (`invoke_handler!`), `build.rs` (`COMMANDS`), `permissions/*.toml` (`allow-*`), `api.ts`, consuming component — **all four Rust-side lists, or it fails at build/runtime only** | Medium |
 | New DB table | `database.rs`, `models.rs`, `doc_store.rs` | Medium |
 | New workspace | `stores/app.ts`, new component, `Sidebar.svelte` | Medium |
 | Editor changes | `EditorPane.svelte` | Low |
@@ -38,6 +38,12 @@
 | AI structurize | `models.rs` (StructurizeRequest/Response), `commands.rs` (ai_structurize), `lib.rs` (registration), `api.ts` (method), `AiPanel.svelte` (Structurize tab + directive highlighting + review) | Medium |
 | Performance diagnostics | `doc_store.rs` (perf_benchmark), `commands.rs` (perf_benchmark), `lib.rs` (registration), `api.ts` (method), `SettingsPane.svelte` (About panel with §14 budget metrics) | Low |
 | Browser preview backend | `browserStore.ts` (localStorage docs/snaps/tabs/conv/bible), `browserBackend.ts` (all Tauri commands), `api.ts` (safeInvoke + isBrowserPreview), `App.svelte` (preview banner, Tauri-only watcher guard) | Medium |
+| Desktop shell boot integrity | `index.html` (SW registration gated to non-Tauri + self-heal unregister), `public/sw.js` (versioned cache, network-first documents), `Cargo.toml` (`custom-protocol`), `lib.rs` (`BootReady` manage-first/flip-last), `commands.rs` (`app_boot_ready`), `build.rs`, `permissions/main.toml`, `src/lib/bootGate.ts`, `App.svelte` (gate before boot steps, timeout sentinel, boot `catch`), `WidgetApp.svelte` (gate), `browserBackend.ts` (`app_boot_ready` mirror), `api.ts`, `tauri.conf.json` (CSP `font-src data:`) — **breaks the whole app if any one is wrong; see `docs/DEVELOPMENT.md` triage table** | High |
+| UTF-8 boundary safety | `doc_store.rs` (`truncate_bytes_safe`, `snippet_of`, `sanitize_filename`, `compute_disk_path` logs branch, 3× `get_workspace_context`) — byte-index slicing panics on any multi-byte title/body, and Tauri has no `catch_unwind`, so the invoke promise never settles | High |
+| Vault confinement | `doc_store.rs` (`create_doc` now routes through `resolve_in_vault`; `logs` segments through `sanitize_component`), `is_iso_date` guard on `log_get_or_create` — a title can no longer relocate a write outside the vault; reachable from Quick Capture, which passes typed text as the title | High |
+| Locked-doc exclusion | `doc_store.rs` (`snapshot_list` now joins `docs.locked = 0`) — the filter is duplicated per-query across ~15 call sites and has been forgotten before; any new read path must repeat it | Medium |
+| Sidecar authentication | `sidecar.rs` (`SttManager`/`TtsManager`/`LlmManager` each mint a UUID `auth_token`, pass `JWE_SIDECAR_TOKEN`, send `X-JWE-Sidecar-Token` on every request; `llama-server` gets `--api-key`), `stt_server.py`/`tts_server.py` (`_authorized()` on GET+POST, refuse to boot without a token), `tauri.conf.json` (`connect-src` narrowed to the 4 ports) — **breaking the header contract silently 401s every voice feature; changing the port list requires updating both sides** | High |
+| Renderer path authority | `commands.rs` (`open_external_file` takes NO path, reads `PendingLaunchFile`; `provider_probe` only attaches the key via `may_send_key`), `api.ts` (`openExternalFile()` no arg), `nativeLaunch.ts` (`openNativeFile()` no param) — **the renderer may never name a filesystem path or choose which host receives a credential; changing either signature means updating commands.rs + api.ts + browserBackend together** | High |
 | Unified icon system | `Icon.svelte` (53 hand-authored stroke icons), Sidebar/BottomBar/TabBar/AiPanel/EditorPane/NodeMap/Inbox/Properties/FileBrowser/Home/Status/Settings/Palette/Empty/Onboarding/Projects/VersionHistory/JustWrite | Low |
 | Inbox multi-select triage | `InboxWorkspace.svelte` (select-all, bulk move/delete bar) | Low |
 | Conflict diff view | `ConflictBanner.svelte` (local vs latest-snapshot line diff modal) | Low |

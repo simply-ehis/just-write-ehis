@@ -10,6 +10,7 @@
   import { showConflict } from "$lib/stores/conflict";
   import { showToast } from "$lib/stores/notifications";
   import { promptWidgetAutostart } from "$lib/widgetAutostart";
+import { waitForBackendReady } from "$lib/bootGate";
   import LazyWorkspace from "$lib/components/LazyWorkspace.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import ConflictBanner from "$lib/components/ConflictBanner.svelte";
@@ -330,6 +331,15 @@
 
     void (async () => {
       try {
+        // The widget is created in the same pre-setup loop as the main window,
+        // so it races Rust `setup` exactly the same way. Without this gate the
+        // first `prepareWorkspace` below can hit "state not managed for field
+        // `db`", and because that error is surfaced as `prepareError` with no
+        // retry, the widget would sit there showing a raw Rust internal error
+        // until the user happened to switch workspace.
+        if (!(await waitForBackendReady())) {
+          console.warn("Widget: backend never reported ready — continuing anyway.");
+        }
         const widget = getCurrentWindow();
         await track(widget.onCloseRequested((event) => {
           event.preventDefault();

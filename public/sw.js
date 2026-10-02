@@ -1,4 +1,8 @@
-const CACHE_NAME = 'just-write-ehis-v2';
+// Bump CACHE_VERSION whenever the app shell or the precache list changes.
+// An unversioned name survives upgrades, so a cached document keeps pointing
+// at content-hashed chunks the new build no longer ships.
+const CACHE_VERSION = 'v3';
+const CACHE_NAME = `just-write-ehis-${CACHE_VERSION}`;
 const STATIC_ASSETS = [
   './',
   './index.html',
@@ -17,21 +21,45 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: drop every cache that is not the current version, so an upgraded
+// install can never be served a document from a previous build. The desktop
+// shell needs no host sniffing here: index.html unregisters the worker and
+// clears caches from the page, where the Tauri check is authoritative, and the
+// version bump below is what retires a cache a previous build poisoned.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    (async () => {
+      const cacheNames = await caches.keys();
+      await Promise.all(
         cacheNames
           .filter((name) => name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       );
-    })
+      await self.clients.claim();
+    })()
   );
-  self.clients.claim();
 });
 
-// Fetch: serve from cache, fallback to network
+/**
+ * Documents are network-first, always. Serving HTML from cache is what turns a
+ * routine update into a dead app: the document names a hashed entry chunk, the
+ * new build ships a different one, and the cached page requests a file that no
+ * longer exists. Hashed build assets are content-addressed, so cache-first is
+ * safe and correct for them.
+ */
+function isDocumentRequest(request) {
+  return (
+    (request.mode === 'navigate' ||
+      (request.headers.get('accept') || '').includes('text/html')) &&
+    !new URL(request.url).pathname.startsWith('/assets/')
+  );
+}
+
+function isHashedAsset(url) {
+  return url.pathname.startsWith('/assets/');
+}
+
+// Fetch: documents network-first, hashed assets cache-first, rest stale-while-revalidate
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -42,6 +70,54 @@ self.addEventListener('fetch', (event) => {
   // Skip external requests
   if (url.origin !== location.origin) return;
 
+  // Documents: network-first, cache only as the offline fallback.
+  if (isDocumentRequest(request)) {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse.ok) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return networkResponse;
+        })
+        .catch(() =>
+          caches.match(request).then(
+            (cached) =>
+              cached ||
+              caches.match('./index.html').then(
+                (shell) =>
+                  shell ||
+                  new Response('Offline', {
+                    status: 503,
+                    statusText: 'Service Unavailable',
+                  })
+              )
+          )
+        )
+    );
+    return;
+  }
+
+  // Hashed build assets are immutable: cache-first, no revalidation cost.
+  if (isHashedAsset(url)) {
+    event.respondWith(
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          fetch(request).then((networkResponse) => {
+            if (networkResponse.ok) {
+              const copy = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            }
+            return networkResponse;
+          })
+      )
+    );
+    return;
+  }
+
+  // Everything else same-origin: serve fast, refresh in the background.
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -69,10 +145,6 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       }).catch(() => {
-        // Offline fallback for HTML pages
-        if (request.headers.get('accept')?.includes('text/html')) {
-          return caches.match('./index.html');
-        }
         // Return offline response for other assets
         return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
       });

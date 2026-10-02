@@ -2,23 +2,66 @@ use rusqlite::{Connection, Result as SqlResult};
 use std::sync::Mutex;
 
 pub struct Database {
-    pub conn: Mutex<Connection>,
-    pub vault_path: Mutex<std::path::PathBuf>,
+  pub conn: Mutex<Connection>,
+  pub vault_path: Mutex<std::path::PathBuf>,
+  /// On-disk location of the database, when there is one.
+  ///
+  /// `backup_create` needs this to run `VACUUM INTO` on a SECOND connection:
+  /// the copy reads the whole file, and doing it on `conn` held the only
+  /// connection's mutex for the duration, stalling every concurrent command
+  /// (autosave, search, RAG) on a large vault. WAL permits a reader alongside
+  /// the writer, so a separate connection lets the app keep serving while the
+  /// backup runs. `None` for in-memory databases, where there is no file to
+  /// reopen and the caller must fall back to the locked path.
+  pub db_path: Mutex<Option<std::path::PathBuf>>,
 }
 
 impl Database {
-    pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
-        Self {
-            conn: Mutex::new(conn),
-            vault_path: Mutex::new(vault_path),
-        }
-    }
+pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
+  Self {
+  conn: Mutex::new(conn),
+  vault_path: Mutex::new(vault_path),
+  db_path: Mutex::new(None),
+  }
+  }
+
+  /// Record the backing file so long-running reads can use their own
+  /// connection. Separate from `new` so in-memory test databases stay valid.
+  pub fn with_db_path(self, path: std::path::PathBuf) -> Self {
+  if let Ok(mut slot) = self.db_path.lock() {
+  *slot = Some(path);
+  }
+  self
+  }
 
     pub fn initialize(&self) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch("PRAGMA vec_enable=ON;")?;
+
+        // WAL companions. Only `journal_mode` was set, so the rest ran at SQLite
+        // defaults, which cost real time in this app specifically:
+        //
+        // - `synchronous` defaults to FULL, so every commit fsyncs the WAL. The
+        //   editor autosaves on each pause while typing, making this the single
+        //   most frequent disk sync in the product. NORMAL is the standard
+        //   companion to WAL: still crash-safe against application crashes
+        //   (only a power loss/OS crash can lose the last commits), and the app
+        //   already has a snapshot + version-history layer for that case.
+        // - `cache_size` defaults to ~2 MB, which is small against a vault large
+        //   enough to make the scans in doc_store noticeable; these were
+        //   re-reading from disk repeatedly.
+        // - `mmap_size` unset means reads go through the syscall path rather
+        //   than memory mapping.
+        //
+        // Negative `cache_size` is kibibytes rather than pages.
+        conn.execute_batch(
+            "PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-20000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA temp_store=MEMORY;",
+        )?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS docs (

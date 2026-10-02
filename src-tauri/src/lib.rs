@@ -60,6 +60,11 @@ pub fn run() {
     );
     builder
         .setup(|app| {
+            // Boot gate must be managed before anything slow, so the frontend
+            // can wait for the backend instead of racing it (see BootReady).
+            let boot_ready = commands::BootReady::default();
+            app.manage(boot_ready);
+
             let app_dir = app.path().app_data_dir()
                 .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
             std::fs::create_dir_all(&app_dir)
@@ -76,7 +81,7 @@ pub fn run() {
             std::fs::create_dir_all(&vault_path)
                 .map_err(|e| format!("Failed to create vault directory {:?}: {}", vault_path, e))?;
 
-            let db = database::Database::new(conn, vault_path);
+            let db = database::Database::new(conn, vault_path).with_db_path(db_path.clone());
             db.initialize()
                 .map_err(|e| format!("Failed to initialize database schema: {}", e))?;
 
@@ -170,6 +175,10 @@ pub fn run() {
                 }
                 let _tray = tray.build(app)?;
             }
+
+            // Last statement of setup: the backend is now fully managed, so
+            // the frontend may stop waiting and run its boot steps.
+            app.state::<commands::BootReady>().mark_ready();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -177,6 +186,7 @@ pub fn run() {
             commands::open_external_file,
             commands::take_launch_file,
             commands::autostart_launch,
+            commands::app_boot_ready,
             commands::open_default_apps,
              commands::doc_get,
              commands::widget_doc_get,

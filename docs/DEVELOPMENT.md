@@ -2,9 +2,9 @@ PURPOSE: set up, run, and extend the codebase without breaking it
 OWNS: scripts, extension recipes, dependency policy
 READ-WHEN: first setup, adding commands/workspaces/deps, touching config
 KEY-FILES: package.json (scripts), src-tauri/tauri.conf.json, src-tauri/tauri.windows.conf.json, src-tauri/sidecars/build_sidecars.py, src-tauri/capabilities/default.json, tests/make-fixtures.py
-INVARIANTS: npm scripts are the only entry points; new deps must be browser-safe or lazy-loaded; capabilities must grant every plugin command the UI calls
-GOTCHAS: source-only work must not run PyInstaller/Tauri; release `tauri build` first packages native sidecars; mammoth is banned (node-only requires break both bundlers — docx parses via jszip)
-UPDATED: 2026-09-25
+INVARIANTS: npm scripts are the only entry points; new deps must be browser-safe or lazy-loaded; capabilities must grant every plugin command the UI calls; every Tauri command must be registered in lib.rs AND build.rs COMMANDS AND granted in permissions/*.toml
+GOTCHAS: source-only work must not run PyInstaller/Tauri; a bare `cargo build --release` yields a ghost-window binary unless `--features custom-protocol` is passed (use `npm run tauri build`); release `tauri build` first packages native sidecars; never register a service worker in the desktop shell; mammoth is banned (node-only requires break both bundlers — docx parses via jszip)
+UPDATED: 2026-10-01
 
 # Development
 
@@ -42,21 +42,55 @@ test:assets` checks the required model/runtime tree without performing a build.
 | `npm run preview` | serve `dist/` |
 | `npm run check` | `svelte-check` — must be **0 errors** |
 | `npm run test:e2e` | `tests/e2e-browser.mjs` — must exit 0; serves the existing `dist/` |
-| `npm run test:source` | CI-safe settings, sidecar validation/readiness, window, and support units |
+| `npm run test:source` | CI-safe settings, sidecar validation/readiness, window, boot-gate, ghost-window, CSP, ACL-parity and support units |
 | `npm run test:assets` | release asset preflight only; creates no venv or executable |
 | `npm run build:sidecars` | isolated PyInstaller build of STT/TTS/memory runtimes; release pipeline invokes it |
 | `npm run tauri …` | desktop shell; Windows `tauri build` runs the native sidecar packaging step first |
 
-## Adding a Tauri command (all five, no exceptions)
+## Adding a Tauri command (all six, no exceptions)
 
 1. Rust fn in `commands.rs` (+ logic in `doc_store.rs` / new module).
 2. Register in `lib.rs` `invoke_handler!`.
-3. Migration in `database.rs` first if storage changes (copy the pattern).
-4. Method in `src/lib/api.ts` via `safeInvoke`.
-5. `case` in `src/lib/browserBackend.ts` (+ `browserStore.ts` state if any).
-6. Update the in-app self-test (`SettingsPane.svelte`) if it exercises a user flow.
+3. Add the name to `COMMANDS` in `src-tauri/build.rs` — this is what generates the
+   `allow-*` permission. Skip it and step 4 fails the build with
+   `failed to resolve ACL`.
+4. Add `"allow-<command-name-in-kebab-case>"` to the right
+   `src-tauri/permissions/*.toml` set (`main.toml` and/or `widget.toml`). Skip this and
+   the build still succeeds but every call fails **at runtime** with
+   `Command <name> not allowed by ACL` — no compile error, no existing test failure.
+5. Migration in `database.rs` first if storage changes (copy the pattern).
+6. Method in `src/lib/api.ts` via `safeInvoke`.
+7. `case` in `src/lib/browserBackend.ts` (+ `browserStore.ts` state if any).
+8. Update the in-app self-test (`SettingsPane.svelte`) if it exercises a user flow.
 
-Step 5 is statically enforced by e2e (`api commands covered by browser backend`).
+`npm run test:aclparity` enforces steps 2–4 in both directions (a registered command with
+no grant, a grant for a command that does not exist, and a manifest entry that is not
+registered). Step 7 is statically enforced by e2e (`api commands covered by browser backend`).
+
+## Desktop builds must go through the Tauri CLI
+
+Use `npm run tauri build` (or `cargo build --release --features custom-protocol`). A bare
+`cargo build --release` compiles, links, and produces an executable — but it sets
+`cfg(dev)` unless `custom-protocol` is enabled, so the binary loads
+`http://localhost:5173` instead of the embedded frontend. With no dev server running the
+webview never loads, `#app` stays empty, and because the main window is configured
+`visible: false` and only revealed by frontend code, you get a **ghost window**: a live
+process with a correctly-sized window that never appears and cannot be surfaced.
+
+Symptom triage for "the app starts but nothing shows":
+
+| Check | Meaning |
+|---|---|
+| `IsWindowVisible` false on the `main` window, geometry correct | frontend never booted — see below |
+| frontend booted (`#app` has children) but window still hidden | reveal path failed; `showMainWindow()` in `src/lib/windowState.ts` |
+| binary loads `localhost:5173` | built without `custom-protocol` |
+| entry module rejected as `text/html` | stale service-worker cache serving a document whose hashed chunk is gone |
+
+Diagnose the live shell without a build step of your own: set
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`, attach to the
+`http://tauri.localhost` target over CDP, and read the console plus
+`document.getElementById('app').children.length`. From PowerShell, `EnumWindows` with
+`IsWindowVisible` distinguishes a ghost window from a window that never existed.
 
 ## Adding a workspace
 

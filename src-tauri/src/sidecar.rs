@@ -392,7 +392,19 @@ impl Drop for ManagedSidecar {
 
 pub struct SttManager {
     proc: ManagedSidecar,
+    /// Per-launch bearer token, minted in `new` and required by every request.
+    ///
+    /// Loopback is not a trust boundary: any process running as any local
+    /// account — and any website in any browser, because a POST with no body is
+    /// a CORS-simple request that needs no preflight — could otherwise drive
+    /// transcription, synthesis and local inference against this machine. This
+    /// mirrors `MemoryManager`, which already required one; STT/TTS/LLM did not.
+    auth_token: String,
 }
+
+/// Header carrying the per-launch token. One name for all four sidecars so the
+/// Python servers share a single enforcement helper.
+const TOKEN_HEADER: &str = "X-JWE-Sidecar-Token";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SttHealth {
@@ -422,6 +434,7 @@ impl SttManager {
     pub fn new(port: u16) -> Self {
         Self {
             proc: ManagedSidecar::new(port, "stt"),
+            auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -431,6 +444,7 @@ impl SttManager {
             check_model_name(m)?;
             args.push(m.to_string());
         }
+        let token = ("JWE_SIDECAR_TOKEN", self.auth_token.as_str());
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe") {
             let working_dir = sidecar_root_from_executable(&executable);
             let working_dir_text = working_dir.to_string_lossy();
@@ -439,14 +453,15 @@ impl SttManager {
                 &args,
                 &working_dir_text,
                 "STT",
-                &[("JWE_SIDECARS_DIR", &working_dir_text)],
+                &[("JWE_SIDECARS_DIR", &working_dir_text), token],
             );
         }
         let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")?;
         let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
-        self.proc.start(python_path, &python_args, &working_dir.to_string_lossy(), "STT")
+        let working_dir_text = working_dir.to_string_lossy().to_string();
+        self.proc.start_with_env(python_path, &python_args, &working_dir_text, "STT", &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -466,6 +481,7 @@ impl SttManager {
     pub async fn health(&self) -> Result<SttHealth, String> {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
@@ -478,6 +494,7 @@ impl SttManager {
             "format": format,
         });
         let resp = client.post(format!("{}/transcribe", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "sidecar").await?;
@@ -488,6 +505,7 @@ impl SttManager {
     pub async fn stream_start(&self) -> Result<(), String> {
         let client = http_client(30);
         let resp = client.post(format!("{}/stream/start", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         ensure_http_ok(resp, "sidecar").await?;
         Ok(())
@@ -497,6 +515,7 @@ impl SttManager {
         let client = http_client(30);
         let body = serde_json::json!({ "audio": audio_b64, "format": format });
         let resp = client.post(format!("{}/stream/chunk", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         ensure_http_ok(resp, "sidecar").await?;
@@ -506,6 +525,7 @@ impl SttManager {
     pub async fn stream_stop(&self) -> Result<String, String> {
         let client = http_client(30);
         let resp = client.post(format!("{}/stream/stop", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "sidecar").await?;
         let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
@@ -517,6 +537,8 @@ impl SttManager {
 
 pub struct TtsManager {
     proc: ManagedSidecar,
+    /// Per-launch bearer token; see `SttManager::auth_token`.
+    auth_token: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -538,6 +560,7 @@ impl TtsManager {
     pub fn new(port: u16) -> Self {
         Self {
             proc: ManagedSidecar::new(port, "tts"),
+            auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -547,6 +570,7 @@ impl TtsManager {
             check_model_name(m)?;
             args.push(m.to_string());
         }
+        let token = ("JWE_SIDECAR_TOKEN", self.auth_token.as_str());
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "tts-server.exe") {
             let working_dir = sidecar_root_from_executable(&executable);
             let working_dir_text = working_dir.to_string_lossy();
@@ -555,14 +579,15 @@ impl TtsManager {
                 &args,
                 &working_dir_text,
                 "TTS",
-                &[("JWE_SIDECARS_DIR", &working_dir_text)],
+                &[("JWE_SIDECARS_DIR", &working_dir_text), token],
             );
         }
         let script = resolve_sidecar_script(sidecars_dir, "tts_server.py")?;
         let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
-        self.proc.start(python_path, &python_args, &working_dir.to_string_lossy(), "TTS")
+        let working_dir_text = working_dir.to_string_lossy().to_string();
+        self.proc.start_with_env(python_path, &python_args, &working_dir_text, "TTS", &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -582,6 +607,7 @@ impl TtsManager {
     pub async fn health(&self) -> Result<TtsHealth, String> {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "sidecar").await?;
         resp.json().await.map_err(|e| e.to_string())
@@ -599,6 +625,7 @@ impl TtsManager {
             "chunk_size": chunk_size,
         });
         let resp = client.post(format!("{}/synthesize", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "sidecar").await?;
@@ -612,6 +639,7 @@ impl TtsManager {
     pub async fn stop_playback(&self) -> Result<(), String> {
         let client = http_client(30);
         let resp = client.post(format!("{}/stop", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         ensure_http_ok(resp, "sidecar").await?;
         Ok(())
@@ -795,6 +823,8 @@ fn resolve_llm_model_path(
 
 pub struct LlmManager {
     proc: ManagedSidecar,
+    /// Per-launch bearer token; see `SttManager::auth_token`.
+    auth_token: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -808,6 +838,7 @@ impl LlmManager {
     pub fn new(port: u16) -> Self {
         Self {
             proc: ManagedSidecar::new(port, "llm"),
+            auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -851,6 +882,13 @@ impl LlmManager {
 
         // NOTE (b11047+): --no-mmap/--mlock were removed upstream; the
         // 350M default model pages fine without them.
+        //
+        // `--api-key` is load-bearing, not decoration: llama.cpp's HTTP server
+        // defaults to permissive CORS, so without it any site the user visits
+        // could POST prompts to this server and READ the completions back
+        // cross-origin — a free persistent inference channel and an exfiltration
+        // sink. `--host 127.0.0.1` limits reach to this machine; the key limits
+        // it to this app.
         let args = vec![
             "-m".to_string(),
             model_file.to_string_lossy().to_string(),
@@ -858,6 +896,8 @@ impl LlmManager {
             self.proc.port().to_string(),
             "--host".to_string(),
             "127.0.0.1".to_string(),
+            "--api-key".to_string(),
+            self.auth_token.clone(),
             "--ctx-size".to_string(),
             ctx_size.unwrap_or(8192).to_string(),
             "--n-gpu-layers".to_string(),
@@ -868,10 +908,11 @@ impl LlmManager {
             "2".to_string(),
         ];
         let server_dir = server_exe.parent().unwrap_or(&sidecars);
+        let server_dir_text = server_dir.to_string_lossy().to_string();
         self.proc.start(
             &server_exe.to_string_lossy(),
             &args,
-            &server_dir.to_string_lossy(),
+            &server_dir_text,
             "LLM",
         )
     }
@@ -893,6 +934,7 @@ impl LlmManager {
     pub async fn health(&self) -> Result<LlmHealth, String> {
         let client = http_client(30);
         let resp = client.get(format!("{}/health", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "LLM health").await?;
         resp.json().await.map_err(|e| e.to_string())
@@ -907,6 +949,7 @@ impl LlmManager {
             "stream": false,
         });
         let resp = client.post(format!("{}/completion", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "LLM completion").await?;
@@ -924,6 +967,7 @@ impl LlmManager {
             "stream": false,
         });
         let resp = client.post(format!("{}/v1/chat/completions", self.base_url()))
+            .header(TOKEN_HEADER, &self.auth_token)
             .json(&body)
             .send().await.map_err(|e| e.to_string())?;
         let resp = ensure_http_ok(resp, "LLM chat completion").await?;

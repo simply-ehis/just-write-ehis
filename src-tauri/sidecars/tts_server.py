@@ -36,7 +36,13 @@ import os
 import re
 import sys
 import wave
+import hmac
 from http.server import HTTPServer, BaseHTTPRequestHandler
+
+# Per-launch token supplied by the desktop launcher (sidecar.rs). Required: the
+# server refuses to start without it, so it can never fall back to being an open
+# loopback endpoint. See TtsHandler._authorized.
+AUTH_TOKEN = os.environ.get("JWE_SIDECAR_TOKEN", "")
 
 HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MODEL_DIR = os.path.join(HERE, "models", "kokoro-multi-lang-v1_0")
@@ -360,7 +366,24 @@ class TtsHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(length) if length else b""
 
+    def _authorized(self) -> bool:
+        """Require the launcher's per-process token.
+
+        Loopback is not a trust boundary: any process running as any local
+        account can reach 127.0.0.1, and any website can issue a bodyless POST
+        (a CORS-simple request, no preflight) to make this machine speak. The
+        desktop launcher mints a token per launch and sends it as
+        X-JWE-Sidecar-Token; without a match every route is refused.
+        """
+        supplied = self.headers.get("X-JWE-Sidecar-Token", "")
+        if not AUTH_TOKEN or not hmac.compare_digest(supplied, AUTH_TOKEN):
+            self._json({"error": "unauthorized"}, 401)
+            return False
+        return True
+
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path == "/health":
             try:
                 eng = _engine()
@@ -374,6 +397,8 @@ class TtsHandler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._authorized():
+            return
         routes = {
             "/synthesize": self._handle_synthesize,
             "/stop": lambda: self._json({"status": "stopped"}),
@@ -417,6 +442,8 @@ class TtsHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    if not AUTH_TOKEN:
+        raise RuntimeError("JWE_SIDECAR_TOKEN is required")
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8091
     server = HTTPServer(("127.0.0.1", port), TtsHandler)
     print(f"[tts] Kokoro TTS (sherpa-onnx) on http://127.0.0.1:{port}", flush=True)

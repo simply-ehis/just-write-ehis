@@ -6,6 +6,7 @@
 |---|---|---|
 | Core orchestrator | `src-tauri/src/lib.rs` | Tauri app bootstrap, manages database lifecycle and command registration |
 | Command registry | `src-tauri/src/commands.rs` | All Tauri IPC commands exposed to the frontend |
+| Boot readiness | `src-tauri/src/lib.rs` | `setup()` — manages `BootReady` first, flips it last, so the frontend never races backend state |
 
 ## Nerves
 
@@ -77,6 +78,10 @@ Brand assets: `public/logo.svg` and `public/logo-light.svg` feed generated PNG/I
 | Lock store + app gate | tendon | frontend | `src/lib/stores/lock.ts` | SettingsPane keychain setup → App session gate → TabBar/LockScreen/AiPanel/EditorPane | ✅ wired (source-tested; native gate build pending) |
 | Native sidecar packager | tendon | build | `src-tauri/sidecars/build_sidecars.py` | `package.json` → `tauri.windows.conf.json` → `sidecar.rs` native-first launchers | ✅ wired (not built by user instruction) |
 | Window state | muscle | frontend | `src/lib/windowState.ts` | App startup → main-window geometry | ✅ wired (source-tested) |
+| Boot gate | tendon | engine+frontend | `src/lib/bootGate.ts` | `commands::BootReady` (setup) → App.svelte **and** WidgetApp.svelte boot steps | ✅ wired (source-tested) |
+| UTF-8 safe helpers | tendon | engine | `src-tauri/src/doc_store.rs` | `truncate_bytes_safe` + `snippet_of` — used by `sanitize_filename`, `compute_disk_path` and 3 AI-context snippets | ✅ wired (Rust tests unrun) |
+| Ghost-window guard | tendon | build | `tests/ghost-window-guard.mjs` | index.html SW gating + public/sw.js cache strategy | ✅ wired |
+| ACL parity guard | tendon | build | `tests/acl-parity.mjs` | lib.rs handler ↔ build.rs COMMANDS ↔ permissions/*.toml | ✅ wired |
 | Last-place store | tendon | frontend | `src/lib/stores/lastPlace.ts` | App workspace-restore effect | ✅ wired |
 | LockScreen | skin | ui | `src/lib/components/LockScreen.svelte` | App content-pane overlay | ✅ wired |
 | CanvasWorkspace | skin | ui | `src/lib/components/CanvasWorkspace.svelte` | App.svelte (canvas route) | ✅ wired |

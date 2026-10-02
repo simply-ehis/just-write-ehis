@@ -10,6 +10,14 @@ license = "AGPL-3.0-only"
 name = "just_write_ehis_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+# Required by tauri-build to decide whether the app serves the frontend
+# embedded in the binary or the Vite devUrl. Without it, `cfg(dev)` is always
+# set, so a release build silently targets http://localhost:5173: with no dev
+# server running the webview never loads, #app stays empty, and the hidden
+# main window is never revealed — a ghost window with no way to surface it.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
