@@ -4,7 +4,7 @@
  *  - mapLimit converts with bounded concurrency;
  *  - batchExport zips 20 same-titled docs with unique names + bundled
  *    attachments, through the REAL preview backend (no mocks);
- *  - no-pandoc matrix: docx in preview fails friendly (never throws
+ *  - desktop-only matrix: docx in preview fails friendly (never throws
  *    raw, never hangs); cancel aborts mid-batch.
  *
  * import.ts uses the $lib alias, so it is bundled first (established
@@ -121,13 +121,19 @@ check("missing attachments skipped + counted", out.attachmentsSkipped >= 1, `ski
   check("converted body inside", first.includes("Body") || first.includes("Same Title"));
 }
 
-// No-pandoc matrix: docx attempt fails friendly, never raw/hang.
+// Desktop-only matrix: in browser preview the Rust writers and the bundled
+// Typst are absent, so docx must fail friendly with a clear message and
+// never throw raw or hang.
 try {
   await imp.batchExport([ids[0]], "docx");
-  check("no-pandoc docx fails friendly", false, "resolved unexpectedly");
+  check("no-desktop docx fails friendly", false, "resolved unexpectedly");
 } catch (e) {
   const msg = e instanceof Error ? e.message : String(e);
-  check("no-pandoc docx fails friendly", msg.includes("pandoc"), msg.slice(0, 100));
+  check(
+    "no-desktop docx fails friendly",
+    msg.includes("desktop-only"),
+    msg.slice(0, 120),
+  );
 }
 
 // Cancel aborts mid-batch.

@@ -52,7 +52,7 @@
     "shortDescription": "A personal super app for writing and everything around writing",
     "longDescription": "Just Write ehis is a local-first desktop writing application built with Tauri 2 and Svelte 5. It provides a distraction-free writing environment with integrated AI features, voice input/output, document management, and knowledge organization tools.",
     "targets": "nsis",
-    "externalBin": ["binaries/pandoc"],
+    "externalBin": ["binaries/typst"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,6 +70,7 @@
       }
     },
     "resources": [
+      "../THIRD_PARTY_NOTICES.md",
       "sidecars/fetch_sidecars.py",
       "sidecars/requirements.txt",
       "sidecars/stt_server.py",

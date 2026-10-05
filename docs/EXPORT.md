@@ -1,57 +1,97 @@
-PURPOSE: how export formats resolve, pandoc setup, manuscript flow
-OWNS: conversion tiers, pandoc sidecar recipe, compile.run semantics
-READ-WHEN: export fails, adding a format, bundling the pandoc sidecar
-KEY-FILES: src-tauri/src/convert.rs, commands.rs (convert_run/compile_run/convert_status), src/lib/download.ts
+PURPOSE: how export formats resolve, Typst setup, manuscript flow
+OWNS: conversion tiers, Typst sidecar recipe, compile.run semantics
+READ-WHEN: export fails, adding a format, bundling the Typst sidecar
+KEY-FILES: src-tauri/src/convert.rs, docmodel.rs, docx.rs, epub.rs, pdf.rs, commands.rs (convert_run/compile_run/convert_status), src/lib/download.ts
 INVARIANTS: menus list exactly what convert_status reports; binary book formats import via parsers, never raw
-GOTCHAS: PDF needs a pandoc PDF engine; browser preview does md/txt/html only
-UPDATED: 2026-09-23
+GOTCHAS: only PDF needs the Typst binary; docx/epub are pure Rust; browser preview does md/txt/html only
+UPDATED: 2026-10-05
 
 # EXPORT.md — Document conversion & manuscript compile
 
-> PURPOSE: how export formats resolve, pandoc setup, manuscript flow.
-> READ WHEN: export fails, adding a format, bundling the pandoc sidecar.
-> KEY FILES: `src-tauri/src/convert.rs`, `commands.rs` (`convert_run`, `compile_run`, `convert_status`), `src/lib/download.ts`, editor export menu, Novel Compile dialog.
+> PURPOSE: how export formats resolve, Typst setup, manuscript flow.
+> READ WHEN: export fails, adding a format, bundling the Typst sidecar.
+> KEY FILES: `src-tauri/src/convert.rs`, `docmodel.rs`, `docx.rs`, `epub.rs`, `pdf.rs`, `commands.rs` (`convert_run`, `compile_run`, `convert_status`), `src/lib/download.ts`, editor export menu, Novel Compile dialog.
 
 ## Format tiers
 
 | Tier | Formats | Engine | Works offline | Browser preview |
 |---|---|---|---|---|
 | Built in | md, txt, html | Rust (`pulldown-cmark` + stripper) | yes | yes |
-| Pandoc | docx, epub, pdf | `pandoc` binary | yes, once installed | no (clear error) |
+| Built in (Rust writer) | docx, epub | Rust (`docx.rs` / `epub.rs`) | yes | no (clear error) |
+| Bundled binary | pdf | Typst CLI 0.15.1 | yes, once fetched | no (clear error) |
 
 All six formats are always listed in export menus and the Compile
-dialog; pandoc-gated ones render disabled with the reason inline
-("Needs pandoc — see Settings → About → Export setup") instead of
-vanishing or throwing at click. `convert_status` also reports
-`bundled` (sidecar vs PATH) so setup UI can say which.
+dialog. Only PDF is binary-gated; it renders disabled with the reason
+inline ("Needs the Typst binary — see Settings → About → Export setup")
+instead of vanishing or throwing at click. `convert_status` reports
+`typst` (binary found) and `typst_version` (pinned) so setup UI can say which.
 
-## Pandoc resolution (desktop)
+## Why five of six formats are pure Rust
 
-1. `<resource_dir>/binaries/pandoc[.exe]` (bundled sidecar — see below;
+Pandoc was previously bundled for all three book formats: **222.8 MB
+extracted**. It is gone. `docx` and `epub` are now written in-process by
+`docx.rs` and `epub.rs` — both are ZIP containers of XML parts, sharing the
+`zip` crate — so they cost ~5 MB and need no binary at all.
+
+The Typst **Rust crate** was evaluated for PDF and rejected: it compiles in a
+WASM runtime (`wasmi`) and two SVG rasterisers (`usvg`/`resvg`) that a prose
+exporter never calls — 13 GB of build for ~25 MB, with no feature flags to
+disable any of it. The prebuilt CLI is the same compiler at 50 MB with zero
+build cost.
+
+## Why Pandoc could not do PDF anyway
+
+Pandoc is a *converter*, not a typesetting engine: for PDF it shells out to
+LaTeX, Typst, or WeasyPrint. Bundling Pandoc without one of those produced
+222.8 MB and still no PDF. Typst is that engine, so PDF works from the bundle
+alone.
+
+## Typst resolution (desktop)
+
+1. `<resource_dir>/binaries/typst[.exe]` (bundled sidecar — see below;
    this is the shipped configuration).
-2. `pandoc` on `PATH` (e.g. `winget install pandoc`, `brew install pandoc`).
-3. Otherwise the command fails with install guidance, not a silent stub.
+2. `typst` on `PATH` — a dev fallback that keeps `cargo test` and local runs
+   working before the fetch step. Prefer the bundled copy: it is the pinned
+   version.
+3. Otherwise PDF fails with install guidance; md/txt/html/docx/epub still work.
 
-PDF additionally needs a pandoc PDF engine (LaTeX/Typst/WeasyPrint);
-pandoc's stderr is surfaced verbatim so the missing piece is obvious.
+The template pins `Libertinus Serif` explicitly, so output does not vary with
+the fonts installed on the host. Verified: exported PDFs carry subset-embedded
+`LibertinusSerif-Regular`/`-Bold`/`-Italic` and `DejaVuSansMono`.
 
-## Bundling pandoc as a sidecar (release — the shipped configuration)
+## Bundling Typst as a sidecar (release — the shipped configuration)
 
-1. Download the pandoc binary for each target into
-   `src-tauri/binaries/pandoc-<target-triple>[.exe]`
-   (e.g. `pandoc-x86_64-pc-windows-msvc.exe`).
-   The binary is git-ignored (233 MB for pandoc 3.11 Windows) — fetch it
-   before release builds; a build without it fails on the missing
-   `externalBin` rather than shipping a broken exporter.
+1. Fetch the pinned binary:
+   ```
+   python src-tauri/sidecars/fetch_sidecars.py --typst
+   # or: npm run fetch:typst
+   ```
+   This downloads `typst-x86_64-pc-windows-msvc.zip` for v0.15.1, verifies
+   its SHA-256 against a pinned digest, extracts `typst.exe` into
+   `src-tauri/binaries/`, then runs `--version` and asserts it matches
+   `TYPST_VERSION`. The binary is git-ignored — fetch it before release
+   builds; a build without it fails on the missing `externalBin`.
 2. Registered in `tauri.conf.json`:
-   `"bundle": { "externalBin": ["binaries/pandoc"] }`
-3. `find_pandoc` picks it up from the resource dir automatically;
-   `convert_status.bundled` tells setup UI it came from the bundle.
+   `"bundle": { "externalBin": ["binaries/typst"] }`
+3. `pdf::find_typst` accepts either spelling (`typst.exe` or
+   `typst-<triple>.exe`); `convert_status.typst` tells setup UI.
 
-Measured 2026-09-23: pandoc 3.11 windows-x86_64.zip is 41.8 MB
-download, **233.6 MB extracted** — budget ~90–120 MB of installer size
-after NSIS compression, not the old 30–50 MB figure. Revisit the bundle
-decision if that delta is unacceptable (PATH-only remains supported).
+Typst is **version-pinned** (0.15.1) in both `fetch_sidecars.py` and
+`pdf.rs::TYPST_VERSION`. Typst markup semantics are not frozen across
+releases, so a floating "latest" would silently change exported PDFs. When
+bumping, update both and re-run the PDF tests.
+
+Measured 2026-10-05: **21.4 MB download, 50.1 MB extracted** — down from
+Pandoc's 222.8 MB, a 172 MB saving, and PDF now actually works.
+
+Licence: Apache-2.0 (see `THIRD_PARTY_NOTICES.md`, shipped as a bundle
+resource). The CLI embeds Libertinus Serif and New Computer Modern Math
+(SIL OFL 1.1) and DejaVu Sans Mono (DejaVu Fonts Licence).
+
+Typst is **not** in the sidecar server list. STT/TTS/LLM are long-running
+HTTP servers on loopback ports with per-launch tokens; Typst is a one-shot
+CLI invoked per export. Different lifecycle, different auth — no token, no
+port, no health check.
 
 ## Manuscript compile
 
@@ -77,9 +117,13 @@ a clear error suggesting a zip-of-chapters export instead of OOMing.
 2. `[[wikilinks]]` resolved to display text (`[[a|b]]` → `b`); exports
    are standalone files, so links become text, not dead vault paths.
 3. Frontmatter injected as a YAML block (title/author/date first).
-4. `.attachments/` refs copied into the pandoc tempdir with
-   `--resource-path` (built-in HTML keeps `<img>` plus a vault-relative
-   note; the browser preview has no vault access and leaves refs as-is).
+4. `.attachments/` refs stay as written in the markdown the writers receive.
+   The Rust writers render an image as its **alt text** rather than embedding
+   the bytes (no media pipeline in `docx.rs`/`epub.rs`/`pdf.rs`), so content
+   is never lost. `stage_attachments` remains for the batch-export zip
+   bundler, which still copies the files alongside the converted output.
+   Built-in HTML keeps `<img>` plus a vault-relative note; the browser
+   preview has no vault access and leaves refs as-is.
 
 ## Publish scope
 

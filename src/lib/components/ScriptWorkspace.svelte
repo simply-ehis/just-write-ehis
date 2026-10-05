@@ -10,7 +10,7 @@
   import { downloadConvertOutput, downloadFountain } from '$lib/download';
   import { readImportFile, isBookFile, BOOK_ACCEPT } from '$lib/importFile';
   import { domainError } from '$lib/errors';
-  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS, exportLabel } from '$lib/exportFormats';
+  import { ALL_EXPORT_FORMATS, BINARY_FORMATS, exportLabel } from '$lib/exportFormats';
   import WorkspaceError from './WorkspaceError.svelte';
 
   let scripts = $state<Doc[]>([]);
@@ -29,7 +29,7 @@
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   let showExportMenu = $state(false);
-  let pandocAvailable = $state(true);
+  let typstAvailable = $state(true);
   let exportMenuLoaded = $state(false);
   let importInput = $state<HTMLInputElement | null>(null);
 
@@ -38,17 +38,17 @@
     if (showExportMenu && !exportMenuLoaded) {
       try {
         const status = await api.convertStatus();
-        pandocAvailable = status.pandoc;
+        typstAvailable = status.typst;
       } catch {
-        pandocAvailable = false;
+        typstAvailable = false;
       }
       exportMenuLoaded = true;
     }
   }
 
   function formatDisabled(fmt: string): string | null {
-    if (PANDOC_FORMATS.has(fmt) && !pandocAvailable) {
-      return "Needs pandoc — see Settings → About → Export setup";
+    if (BINARY_FORMATS.has(fmt) && !typstAvailable) {
+      return "Needs the Typst binary — see Settings → About → Export setup";
     }
     return null;
   }

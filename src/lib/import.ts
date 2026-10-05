@@ -113,7 +113,7 @@ export async function batchExport(
   const { api } = await import("$lib/api");
   const target = format === 'zip' ? 'md' : format;
 
-  // Convert with 4-way concurrency through the real backend (pandoc
+  // Convert with 4-way concurrency through the real backend (Rust
   // sidecar where needed). Failures are per-doc, never batch-aborting
   // (except explicit cancel).
   const { results, errors, cancelled } = await mapLimit(

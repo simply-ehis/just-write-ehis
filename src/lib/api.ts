@@ -346,10 +346,22 @@ export interface ConvertOutput {
   base64: string;
 }
 
+/**
+ * Export availability, from `convert_status`.
+ *
+ * md/txt/html/docx/epub are pure Rust and always work. `typst` reports
+ * whether the bundled Typst CLI was found, which is what enables pdf.
+ * `native` is true only when every format works with no binary at all.
+ */
 export interface ConvertStatus {
-  pandoc: boolean;
-  bundled: boolean;
+  /** Formats currently usable. */
   formats: string[];
+  /** True when all six formats work with no external binary. */
+  native: boolean;
+  /** True when the bundled Typst CLI was found (enables pdf). */
+  typst: boolean;
+  /** Pinned Typst version, for the About/setup line. */
+  typstVersion: string;
 }
 
 export interface GhostGroup {

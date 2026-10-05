@@ -4,6 +4,7 @@
   },
   "bundle": {
     "resources": [
+      "../THIRD_PARTY_NOTICES.md",
       "sidecars/fetch_sidecars.py",
       "sidecars/requirements.txt",
       "sidecars/stt_server.py",

@@ -6,7 +6,7 @@
  * apart again. Scope is deliberately small: headings, bold/italic/code,
  * unordered + ordered lists, blockquotes, paragraphs. Full fidelity
  * (tables, footnotes, images) belongs to the Rust pulldown-cmark path
- * (convert.rs) and pandoc — this is the offline/preview fallback.
+ * (convert.rs) and Typst — this is the offline/preview fallback.
  */
 
 const esc = (s: string): string =>

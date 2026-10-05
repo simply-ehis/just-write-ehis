@@ -27,6 +27,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:sidecars": "python src-tauri/sidecars/build_sidecars.py",
+    "fetch:typst": "python src-tauri/sidecars/fetch_sidecars.py --typst",
     "test:assets": "python src-tauri/sidecars/build_sidecars.py --check",
     "preview": "vite preview",
     "tauri": "tauri",

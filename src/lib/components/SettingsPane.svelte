@@ -4,7 +4,7 @@
   import { appLockConfigured, settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
-  import { api, isBrowserPreview, getSlowCalls, SLOW_CALL_MS } from "$lib/api";
+  import { api, isBrowserPreview, getSlowCalls, SLOW_CALL_MS, type ConvertStatus } from "$lib/api";
   import { formatSlowCalls } from "$lib/support";
   import { readSessionHealth } from "$lib/sessionHealth";
   import { showToast } from "$lib/stores/notifications";
@@ -42,9 +42,10 @@
   import { defaultAccentFor, ACCENT_PRESETS } from "$lib/appearance";
   import { EDITOR_FONTS } from "$lib/editorTheme";
 
-  // Export setup probe (Settings → About): surfaces pandoc presence +
-  // bundled-vs-PATH so menus, errors, and docs agree (see docs/EXPORT.md).
-  let exportStatus = $state<{ pandoc: boolean; bundled: boolean; formats: string[] } | null>(null);
+  // Export setup probe (Settings → About): surfaces Typst presence so
+  // menus, errors, and docs agree (see docs/EXPORT.md). md/txt/html/docx/
+  // epub are pure Rust and always available; only pdf needs the binary.
+  let exportStatus = $state<ConvertStatus | null>(null);
   let exportProbing = $state(false);
   let resolvedVaultPath = $state("");
 
@@ -1528,14 +1529,18 @@
 
         <h3>Export setup</h3>
         <div class="setting-row">
-          <span class="setting-label">Pandoc (.docx/.epub/.pdf)</span>
-          <span class="value">{exportStatus == null ? "…" : exportStatus.pandoc ? (exportStatus.bundled ? "bundled ✓" : "found on PATH ✓") : "missing"}</span>
+          <span class="setting-label">Word / eBook export</span>
+          <span class="value">built in ✓</span>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">PDF export (Typst {exportStatus?.typstVersion || "0.15.1"})</span>
+          <span class="value">{exportStatus == null ? "…" : exportStatus.typst ? "bundled ✓" : "missing"}</span>
           <button class="clear-btn" onclick={probeExportSetup} disabled={exportProbing}>
             {exportProbing ? "Probing…" : "Probe"}
           </button>
         </div>
-        {#if exportStatus != null && !exportStatus.pandoc}
-          <p class="setting-desc">Word/eBook/PDF export needs pandoc: install it (`winget install pandoc` / `brew install pandoc`) and press Probe. PDF additionally needs a PDF engine (LaTeX, Typst, or WeasyPrint) — pandoc reports the missing piece verbatim on failure.</p>
+        {#if exportStatus != null && !exportStatus.typst}
+          <p class="setting-desc">PDF export needs the bundled Typst binary. Run <code>npm run fetch:typst</code> (or <code>python src-tauri/sidecars/fetch_sidecars.py --typst</code>) and press Probe. Word and eBook export need no binary.</p>
         {/if}
 
         <h3>Performance Budget (§14)</h3>

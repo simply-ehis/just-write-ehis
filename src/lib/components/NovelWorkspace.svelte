@@ -10,7 +10,7 @@
   import DockSplit from './DockSplit.svelte';
   import DocForkPanel from './DocForkPanel.svelte';
   import Icon from './Icon.svelte';
-  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS } from '$lib/exportFormats';
+  import { ALL_EXPORT_FORMATS, BINARY_FORMATS } from '$lib/exportFormats';
 
   import ForkBadge from './ForkBadge.svelte';
   import { readImportFile, isBookFile, BOOK_ACCEPT, contentHash } from '$lib/importFile';
@@ -110,7 +110,7 @@
   let viewMode = $state<'board' | 'bible' | 'cast'>('board');
   let compiledOutput = $state('');
   let compileFormat = $state('md');
-  let compilePandoc = $state(true);
+  let compileTypst = $state(true);
   let compiling = $state(false);
   let loading = $state(false);
   let boardCollapsed = $state(false);
@@ -445,10 +445,10 @@
       compiledOutput = await api.novelCompile(projectId);
       try {
         const status = await api.convertStatus();
-        compilePandoc = status.pandoc;
-        if (!compilePandoc && PANDOC_FORMATS.has(compileFormat)) compileFormat = 'md';
+        compileTypst = status.typst;
+        if (!compileTypst && BINARY_FORMATS.has(compileFormat)) compileFormat = 'md';
       } catch {
-        compilePandoc = false;
+        compileTypst = false;
       }
     } catch (e) {
       domainError('Novel', "couldn't compile manuscript", e);
@@ -1122,8 +1122,8 @@
               {#each ALL_EXPORT_FORMATS as fmt}
                 <option
                   value={fmt}
-                  disabled={PANDOC_FORMATS.has(fmt) && !compilePandoc}
-                  title={PANDOC_FORMATS.has(fmt) && !compilePandoc ? "Needs pandoc — see Settings → About → Export setup" : `Compile as .${fmt}`}
+                  disabled={BINARY_FORMATS.has(fmt) && !compileTypst}
+                  title={BINARY_FORMATS.has(fmt) && !compileTypst ? "Needs the Typst binary — see Settings → About → Export setup" : `Compile as .${fmt}`}
                 >.{fmt}</option>
               {/each}
             </select>

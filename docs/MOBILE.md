@@ -44,7 +44,7 @@ Before shipping, decide these parity gaps (they are code, not layout):
 | Desktop | Mobile replacement needed |
 | --- | --- |
 | Python sidecars (memory, LLM, STT/TTS) | cloud API or bundled-on-device model; `sidecar.rs` cannot spawn Python on Android |
-| pandoc export (`convert.rs`) | in-app HTML→PDF or share the HTML/Markdown |
+| binary-backed export (`convert.rs`) | in-app HTML→PDF or share the HTML/Markdown |
 | Tray + `tray-capture` | notification / share-target plugin |
 | `fs_reveal`, absolute vault path, `<a download>` | Storage Access Framework / share sheet; `commands.rs` vault commands need a mobile path |
 | File watcher (`file-changed` event) | no equivalent; rely on in-app writes |

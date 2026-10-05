@@ -70,7 +70,7 @@ locked documents and unavailable local models are skipped safely.
   Needs one-time maintainer setup (`docs/UPDATES.md`); otherwise the panel
   says so instead of failing.
 - **Export**: any doc or compiled manuscript → md/txt/html always;
-  docx/epub/pdf need pandoc (`docs/EXPORT.md`).
+  docx and epub are built in; pdf needs the bundled Typst binary (`docs/EXPORT.md`).
 - **Backup**: automatic on open per your frequency + manual + snapshot
   pruning (Settings → Vaults).
 

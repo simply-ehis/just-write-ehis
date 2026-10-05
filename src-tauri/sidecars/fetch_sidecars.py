@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import urllib.request
@@ -55,11 +56,30 @@ LLM_GGUF_URL = (
 )
 LLM_GGUF_PATH = MODELS_DIR / "lfm2.5-350m-q4_k_m.gguf"
 
+# Typst CLI - PDF export only. Bundled via Tauri `externalBin` (not the
+# sidecar server list: it is a one-shot compiler, not a listening service).
+# Pinned exactly; Typst markup semantics are not frozen across releases, so a
+# floating "latest" would silently change exported PDFs. Keep TYPST_VERSION in
+# sync with src-tauri/src/pdf.rs.
+TYPST_VERSION = "0.15.1"
+TYPST_URL = (
+    "https://github.com/typst/typst/releases/download/"
+    f"v{TYPST_VERSION}/typst-x86_64-pc-windows-msvc.zip"
+)
+# Tauri expects `binaries/<name>-<target-triple><ext>` and strips the triple
+# when bundling, so the file on disk carries the triple and the shipped one is
+# plain `typst.exe`. pdf.rs::find_typst accepts either spelling.
+BINARIES_DIR = HERE.parent / "binaries"
+TYPST_TRIPLE = "x86_64-pc-windows-msvc" if os.name == "nt" else "x86_64-unknown-linux-musl"
+TYPST_BIN_FILE = f"typst-{TYPST_TRIPLE}" + (".exe" if os.name == "nt" else "")
+TYPST_BIN_PATH = BINARIES_DIR / TYPST_BIN_FILE
+
 SHA256 = {
     "stt_gguf": "",
     "tts_bundle": "",
     "llm_server": "",
     "llm_gguf": "",
+    "typst_cli": "19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736",
 }
 ALLOW_UNPINNED = os.environ.get("JWE_ALLOW_UNPINNED_SIDECARS") == "1"
 
@@ -274,6 +294,56 @@ def fetch_llm() -> None:
     print("[LLM] Done.", flush=True)
 
 
+def fetch_typst() -> None:
+    """Fetch the pinned Typst CLI used for PDF export.
+
+    Lives in src-tauri/binaries/ (Tauri `externalBin`) rather than under
+    models/, because it is a compiler invoked once per export, not a
+    long-running sidecar server. Replaces the 222MB pandoc binary with a
+    21MB one that can actually produce a PDF.
+    """
+    if not os.name == "nt":
+        raise RuntimeError(
+            "[TYPST] The pinned asset is Windows-only. On other platforms put a "
+            f"typst {TYPST_VERSION} on PATH or fetch the matching release archive."
+        )
+    if TYPST_BIN_PATH.exists():
+        print(f"[TYPST] Already present → {TYPST_BIN_PATH}", flush=True)
+        return
+
+    BINARIES_DIR.mkdir(parents=True, exist_ok=True)
+    archive = MODELS_DIR / f"typst-{TYPST_VERSION}.zip"
+    _download(TYPST_URL, archive, "TYPST-CLI", SHA256["typst_cli"])
+
+    extract_dir = MODELS_DIR / "typst-cli"
+    print(f"[TYPST] Extracting {archive} …", flush=True)
+    _extract_zip(archive, extract_dir)
+
+    # The zip holds typst.exe at its root.
+    found = next((p for p in extract_dir.rglob("typst*.exe") if p.is_file()), None)
+    if found is None:
+        raise RuntimeError(f"[TYPST] typst.exe not found in {TYPST_URL}")
+    shutil.copy2(found, TYPST_BIN_PATH)
+    print(f"[TYPST] Copied {found.name} → {TYPST_BIN_PATH}", flush=True)
+
+    archive.unlink(missing_ok=True)
+    shutil.rmtree(extract_dir, ignore_errors=True)
+
+    # Fail loudly now rather than at first PDF export.
+    version = subprocess.run(
+        [str(TYPST_BIN_PATH), "--version"], capture_output=True, text=True
+    )
+    if version.returncode != 0:
+        raise RuntimeError(f"[TYPST] --version failed: {version.stderr.strip()}")
+    reported = version.stdout.strip()
+    if TYPST_VERSION not in reported:
+        raise RuntimeError(
+            f"[TYPST] expected version {TYPST_VERSION}, got '{reported}'"
+        )
+    print(f"[TYPST] Verified {reported}", flush=True)
+    print("[TYPST] Done.", flush=True)
+
+
 def main() -> None:
     # Windows consoles default to cp1252, which chokes on the arrows/emoji
     # used in progress prints — force UTF-8 so a fetch never dies mid-run.
@@ -281,14 +351,15 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError, OSError):
         pass
-    ap = argparse.ArgumentParser(description="Fetch STT/TTS/LLM sidecar assets")
+    ap = argparse.ArgumentParser(description="Fetch sidecar assets")
     ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
     ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle)")
     ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server + LFM 2.5-350M GGUF)")
+    ap.add_argument("--typst", action="store_true", help=f"Fetch the pinned Typst {TYPST_VERSION} CLI (PDF export)")
     args = ap.parse_args()
 
-    if not (args.stt or args.tts or args.llm):
-        ap.error("Choose --stt, --tts, and/or --llm")
+    if not (args.stt or args.tts or args.llm or args.typst):
+        ap.error("Choose --stt, --tts, --llm, and/or --typst")
 
     failed: list[str] = []
     if args.stt:
@@ -306,6 +377,11 @@ def main() -> None:
             fetch_llm()
         except Exception as e:
             failed.append(f"llm: {e}")
+    if args.typst:
+        try:
+            fetch_typst()
+        except Exception as e:
+            failed.append(f"typst: {e}")
 
     print("\nAll done. Sidecars will auto-discover under:", MODELS_DIR, flush=True)
     if failed:

@@ -3,6 +3,10 @@ mod database;
 mod doc_store;
 mod commands;
 mod convert;
+mod docmodel;
+mod docx;
+mod epub;
+mod pdf;
 mod sidecar;
 mod windows;
 

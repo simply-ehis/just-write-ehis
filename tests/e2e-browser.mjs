@@ -554,11 +554,32 @@ async function auditBatchWiring() {
   const convert = await readFile(join(root, "src-tauri/src/convert.rs"), "utf8");
   check("export preprocess shared", convert.includes("fn prepare_export") && convert.includes("fn resolve_wikilinks") && convert.includes("fn inline_embeds") && convert.includes("fn inject_frontmatter"));
   check("compile join demotes + caps", convert.includes("fn demote_headings") && convert.includes("fn join_manuscript") && convert.includes("COMPILE_CHAR_CAP"));
-  check("attachment staging + bundled flag", convert.includes("fn stage_attachments") && convert.includes("fn attachment_refs") && convert.includes("fn is_bundled"));
+  // Pandoc is gone: docx/epub are in-process Rust writers and pdf resolves the
+  // bundled Typst binary. assert the old pandoc resolution chain is dead, so a
+  // future reintroduction cannot come back unnoticed.
+  check(
+    "attachment staging + rust writers, no pandoc chain",
+    convert.includes("fn stage_attachments") &&
+      convert.includes("fn attachment_refs") &&
+      convert.includes("crate::epub::write") &&
+      convert.includes("crate::docx::write") &&
+      convert.includes("crate::pdf::write") &&
+      !convert.includes("fn find_pandoc") &&
+      !convert.includes("fn is_bundled") &&
+      !convert.includes("fn pandoc_convert"),
+  );
+  const pdfRust = await readFile(join(root, "src-tauri/src/pdf.rs"), "utf8");
+  check(
+    "pdf pins typst version and resolves the bundled binary",
+    pdfRust.includes('pub const TYPST_VERSION: &str = "0.15.1"') &&
+      pdfRust.includes("pub fn find_typst") &&
+      pdfRust.includes('"--root"') &&
+      pdfRust.includes("const FONT: &str ="),
+  );
   const dl = await readFile(join(root, "src/lib/download.ts"), "utf8");
   check("fountain helper shared", dl.includes("downloadFountain"));
   const ed = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("export menus list all six gated", ed.includes("exportFormats") && ed.includes("Needs pandoc"));
+  check("export menus list all six gated", ed.includes("exportFormats") && ed.includes("Needs the Typst binary"));
   const imp = await readFile(join(root, "src/lib/import.ts"), "utf8");
   check("batch concurrency + cancel + dedupe", imp.includes("mapLimit") && imp.includes("shouldCancel") && imp.includes("dedupeFilename") && imp.includes("streamFiles"));
   const pub_ = await readFile(join(root, "src/lib/stores/publish.ts"), "utf8");

@@ -1,13 +1,14 @@
-//! Document conversion: manuscript/doc → md, txt, html (built in) or
-//! docx, epub, pdf (via pandoc when available).
+//! Document conversion: doc/manuscript -> md, txt, html, docx, epub, pdf.
 //!
-//! Built-in formats always work, including offline. Pandoc formats resolve
-//! `pandoc` from a bundled sidecar first, then `PATH`, and fail with install
-//! guidance (see docs/EXPORT.md) when neither exists.
+//! md/txt/html/docx/epub are produced in-process by this module plus the
+//! `docx` and `epub` writers, all from the shared `docmodel::Doc`. They
+//! always work, including fully offline.
+//!
+//! pdf goes through the bundled Typst CLI (`externalBin`), because the
+//! Typst Rust crate compiles in a WASM runtime and two SVG rasterisers a
+//! prose exporter never calls. See `pdf.rs`.
 
 use serde::Serialize;
-use std::path::PathBuf;
-use std::process::Command;
 
 #[derive(Serialize)]
 pub struct ConvertOutput {
@@ -16,40 +17,51 @@ pub struct ConvertOutput {
     pub base64: String,
 }
 
+/// Export format availability.
+///
+/// Five formats are pure Rust and always work. pdf needs the bundled Typst
+/// binary, so it is reported separately and the frontend can gate it with
+/// an actionable message instead of failing at click time.
 #[derive(Serialize)]
 pub struct ConvertStatus {
-    pub pandoc: bool,
-    /// True when pandoc resolved from the bundled sidecar (vs PATH).
-    /// Lets menus/setup say "bundled" instead of a generic present/absent.
-    pub bundled: bool,
+    /// Formats currently usable.
     pub formats: Vec<String>,
+    /// True when every format works with no external binary at all.
+    pub native: bool,
+    /// True when the bundled Typst binary was found (this enables pdf).
+    pub typst: bool,
+    /// Pinned Typst version, for the About/setup line.
+    pub typst_version: String,
 }
 
-const PANDOC_FORMATS: [&str; 3] = ["docx", "epub", "pdf"];
+/// The six export/compile formats, in menu order.
+pub const ALL_FORMATS: [&str; 6] = ["md", "txt", "html", "docx", "epub", "pdf"];
 
+/// Formats that never need an external binary.
 pub fn builtin_formats() -> Vec<String> {
-    vec!["md".into(), "txt".into(), "html".into()]
+    vec![
+        "md".into(),
+        "txt".into(),
+        "html".into(),
+        "docx".into(),
+        "epub".into(),
+    ]
 }
 
-pub fn all_formats(pandoc: bool) -> Vec<String> {
+/// All supported formats; `pdf` is included only when Typst is present.
+pub fn all_formats(typst: bool) -> Vec<String> {
     let mut fmts = builtin_formats();
-    if pandoc {
-        fmts.extend(PANDOC_FORMATS.iter().map(|s| s.to_string()));
+    if typst {
+        fmts.push("pdf".into());
     }
     fmts
 }
 
-/// True when a pandoc path is the bundled sidecar (`…/binaries/pandoc`)
-/// vs a bare `pandoc` resolved from PATH.
-pub fn is_bundled(pandoc: &Option<PathBuf>) -> bool {
-    match pandoc {
-        Some(p) => p
-            .parent()
-            .and_then(|d| d.file_name())
-            .map(|n| n == "binaries")
-            .unwrap_or(false),
-        None => false,
-    }
+/// Every format the app knows about, whether or not it is currently
+/// usable. The menu shows pdf as a disabled option rather than hiding it.
+#[allow(dead_code)] // consumed by the frontend gating test
+pub fn all_formats_declared() -> Vec<String> {
+    ALL_FORMATS.iter().map(|s| s.to_string()).collect()
 }
 
 pub fn slugify(title: &str) -> String {
@@ -172,79 +184,6 @@ pub fn html_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-}
-
-/// Locate pandoc: bundled sidecar beside the resources first, then PATH.
-/// The bundled file carries its target triple per the Tauri externalBin
-/// recipe (`binaries/pandoc-x86_64-pc-windows-msvc.exe`), so scan for the
-/// `pandoc*` prefix — not just the bare `pandoc.exe` name.
-pub fn find_pandoc(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
-    if let Some(dir) = resource_dir {
-        let bindir = dir.join("binaries");
-        #[cfg(windows)]
-        let exact = bindir.join("pandoc.exe");
-        #[cfg(not(windows))]
-        let exact = bindir.join("pandoc");
-        if exact.is_file() {
-            return Some(exact);
-        }
-        if let Ok(entries) = std::fs::read_dir(&bindir) {
-            let mut hits: Vec<PathBuf> = entries
-                .filter_map(|e| e.ok().map(|x| x.path()))
-                .filter(|p| {
-                    p.is_file()
-                        && p.file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|n| {
-                                #[cfg(windows)]
-                                {
-                                    n.starts_with("pandoc-") && n.ends_with(".exe")
-                                }
-                                #[cfg(not(windows))]
-                                {
-                                    n.starts_with("pandoc-") && !n.contains('.')
-                                }
-                            })
-                            .unwrap_or(false)
-                })
-                .collect();
-            hits.sort();
-            if let Some(first) = hits.into_iter().next() {
-                return Some(first);
-            }
-        }
-    }
-    match Command::new("pandoc").arg("--version").output() {
-        Ok(o) if o.status.success() => Some(PathBuf::from("pandoc")),
-        _ => None,
-    }
-}
-
-fn pandoc_convert(
-    pandoc: &PathBuf,
-    workdir: &std::path::Path,
-    out_fmt: &str,
-) -> Result<Vec<u8>, String> {
-    // workdir holds input.md + staged attachments; it doubles as
-    // --resource-path so image refs resolve inside the sandbox.
-    let output_path = workdir.join(format!("output.{}", out_fmt));
-    let output = Command::new(pandoc)
-        .arg("-f")
-        .arg("markdown")
-        .arg("-t")
-        .arg(out_fmt)
-        .arg("--resource-path")
-        .arg(workdir)
-        .arg("-o")
-        .arg(&output_path)
-        .arg(workdir.join("input.md"))
-        .output()
-        .map_err(|e| format!("Failed to run pandoc: {}. See docs/EXPORT.md.", e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("pandoc failed ({}). {}", out_fmt, stderr.trim()));
-    }
-    std::fs::read(&output_path).map_err(|e| format!("Failed to read pandoc output: {}", e))
 }
 
 /// Whole-manuscript RAM bound for compile_run: refuse past this many
@@ -471,6 +410,10 @@ pub fn prepare_export_body(
 /// refs to bare basenames. Returns the rewritten markdown. Refs with
 /// `..` were already filtered by attachment_refs; double-check here and
 /// skip missing files loudly (warn string in place, never silent drop).
+///
+/// Used by the batch-export zip bundler, which still stages attachments
+/// alongside the converted files.
+#[allow(dead_code)] // batch export zips call this from a separate path
 pub fn stage_attachments(
     md: &str,
     vault: &std::path::Path,
@@ -506,15 +449,16 @@ pub fn stage_attachments(
 }
 
 /// Convert one markdown source into the requested format.
-/// `vault` enables attachment staging for pandoc formats (images resolve
-/// via --resource-path); built-in HTML keeps <img> tags with a
-/// vault-relative note appended (see stage note below).
+///
+/// md/txt/html/docx/epub are produced here from the shared document model.
+/// pdf needs the bundled Typst binary, passed in as `typst`; when it is
+/// None the caller gets an actionable message instead of a silent failure.
 pub fn convert_markdown(
     title: &str,
     markdown: &str,
     out_fmt: &str,
-    pandoc: Option<PathBuf>,
-    vault: Option<&std::path::Path>,
+    typst: Option<std::path::PathBuf>,
+    _vault: Option<&std::path::Path>,
 ) -> Result<ConvertOutput, String> {
     let slug = slugify(title);
     let (bytes, ext) = match out_fmt {
@@ -527,21 +471,24 @@ pub fn convert_markdown(
             }
             (markdown_to_html_doc(title, &body_md).into_bytes(), "html")
         }
-        "docx" | "epub" | "pdf" => {
-            let bin = pandoc.ok_or_else(|| {
-                format!(
-                    "The .{} format needs pandoc, which was not found. See docs/EXPORT.md.",
-                    out_fmt
-                )
+        "epub" => {
+            let doc = crate::docmodel::parse(title, markdown);
+            (crate::epub::write(&doc)?, "epub")
+        }
+        "docx" => {
+            let doc = crate::docmodel::parse(title, markdown);
+            (crate::docx::write(&doc)?, "docx")
+        }
+        "pdf" => {
+            // PDF needs the bundled Typst binary (externalBin); everything
+            // above is pure Rust.
+            let bin = typst.ok_or_else(|| {
+                "The .pdf format needs the bundled Typst binary, which was not found. \
+                 Run `npm run fetch:sidecars` or see docs/EXPORT.md."
+                    .to_string()
             })?;
-            let dir = tempfile::tempdir().map_err(|e| format!("Temp dir failed: {}", e))?;
-            let (staged, _) = match vault {
-                Some(v) => stage_attachments(markdown, v, dir.path()),
-                None => (markdown.to_string(), Vec::new()),
-            };
-            std::fs::write(dir.path().join("input.md"), &staged)
-                .map_err(|e| format!("Temp write failed: {}", e))?;
-            (pandoc_convert(&bin, dir.path(), out_fmt)?, out_fmt)
+            let doc = crate::docmodel::parse(title, markdown);
+            (crate::pdf::write(&doc, &bin)?, "pdf")
         }
         other => return Err(format!("Unsupported export format: {}", other)),
     };
@@ -620,15 +567,16 @@ mod convert_tests {
     }
 
     #[test]
-    fn bundled_pandoc_detected() {
-        // `src-tauri/binaries/pandoc*.exe` (release fetch, git-ignored).
-        let here = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let found = find_pandoc(Some(here.clone()));
-        if let Some(p) = &found {
-            assert!(is_bundled(&found), "expected bundled, got {:?}", p);
-        }
-        assert!(!is_bundled(&None));
-        assert!(!is_bundled(&Some(PathBuf::from("pandoc"))));
+    fn pdf_is_the_only_format_gated_on_a_binary() {
+        let without = all_formats(false);
+        let with = all_formats(true);
+        // Five formats are pure Rust and always available.
+        assert_eq!(without, vec!["md", "txt", "html", "docx", "epub"]);
+        assert_eq!(with.len(), 6);
+        assert_eq!(*with.last().unwrap(), "pdf");
+        // Order is stable and menu-order, not alphabetical.
+        assert_eq!(all_formats(true), all_formats_declared());
+        assert!(!without.contains(&"pdf".to_string()));
     }
 
     #[test]

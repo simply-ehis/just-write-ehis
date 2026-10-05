@@ -261,7 +261,7 @@ function previewInlineEmbeds(md: string): string {
  * inlined via the local store (locked/missing → note), wikilinks
  * resolved to display text, frontmatter injected as a YAML block.
  * Same contract, browser data source. Built-in conversions only
- * (md/txt/html) — pandoc formats need the desktop app.
+ * (md/txt/html) — the Rust writers and the bundled Typst need the desktop app.
  */
 function previewLookup(title: string): string | null {
   const hit = getBrowserStore().docs.find((d) => d.title.toLowerCase() === title.trim().toLowerCase());
@@ -339,7 +339,9 @@ function convertMarkdown(title: string, markdown: string, outFmt: string): { fil
   if (outFmt === "html") {
     return { filename: `${slug}.html`, mime: "text/html", base64: toBase64(enc.encode(markdownToHtmlDoc(title, markdown))) };
   }
-  throw new Error(`The .${outFmt} format needs pandoc in the desktop app. See docs/EXPORT.md.`);
+  throw new Error(
+    `The .${outFmt} format is desktop-only (Rust writer / bundled Typst). See docs/EXPORT.md.`,
+  );
 }
 
 export const FILTER_WORDS = [
@@ -1211,7 +1213,9 @@ case "app_boot_ready":
       return { configured: false, endpoint: null } as T;
 
     case "convert_status":
-      return { pandoc: false, bundled: false, formats: ["md", "txt", "html"] } as T;
+      // Browser preview has no Rust writers and no bundled binaries, so only the
+  // three pure-TS formats work here. Mirrors convert_status with typst=false.
+  return { formats: ["md", "txt", "html"], native: false, typst: false, typstVersion: "" } as T;
 
     case "convert_run": {
       const doc = store.get(String(payload.docId));

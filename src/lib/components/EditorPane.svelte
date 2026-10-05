@@ -12,7 +12,7 @@
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { recordSave } from "$lib/stores/saveState";
-  import { ALL_EXPORT_FORMATS, PANDOC_FORMATS, exportLabel } from "$lib/exportFormats";
+  import { ALL_EXPORT_FORMATS, BINARY_FORMATS, exportLabel } from "$lib/exportFormats";
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
@@ -676,7 +676,7 @@ import { countWords } from "$lib/text";
     ghostVisible = false;
   }
 
-  let pandocAvailable = $state(true);
+  let typstAvailable = $state(true);
   let exportMenuLoaded = $state(false);
 
   /** Export what's on screen: flush live editor content, then convert. */
@@ -708,17 +708,17 @@ import { countWords } from "$lib/text";
     if (showExportMenu && !exportMenuLoaded) {
       try {
         const status = await api.convertStatus();
-        pandocAvailable = status.pandoc;
+        typstAvailable = status.typst;
       } catch {
-        pandocAvailable = false;
+        typstAvailable = false;
       }
       exportMenuLoaded = true;
     }
   }
 
   function formatDisabled(fmt: string): string | null {
-    if (PANDOC_FORMATS.has(fmt) && !pandocAvailable) {
-      return "Needs pandoc — see Settings → About → Export setup";
+    if (BINARY_FORMATS.has(fmt) && !typstAvailable) {
+      return "Needs the Typst binary — see Settings → About → Export setup";
     }
     return null;
   }

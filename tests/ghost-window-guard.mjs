@@ -9,7 +9,7 @@
  * text/html and never executed: #app stayed empty, showMainWindow() never ran,
  * and the hidden main window was never revealed. A ghost window with a dead
  * frontend — which also took every IPC command with it (AI, STT/TTS/LLM,
- * memory, pandoc, the widget).
+ * memory, the Typst binary, the widget).
  *
  * These assertions are static so they run in CI without a build or a display.
  */

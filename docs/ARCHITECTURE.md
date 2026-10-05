@@ -19,7 +19,7 @@ Svelte components → stores → api.ts ─┬─ Tauri shell? ── invoke →
 backend under Tauri and the localStorage mirror in a plain browser. The
 mirror implements the **same command surface** (CRUD, search, graph,
 snapshots, RAG-keyword, dashboards, canvas, export md/txt/html, …).
-Anything needing native binaries (pandoc formats, updater, file watcher)
+Anything needing native binaries (the Typst CLI, updater, file watcher)
 fails in preview with a message saying so — never silently. Voice is the
 exception: preview uses the browser's built-in speech recognition and
 synthesis instead of the desktop Moonshine/Kokoro sidecars.
@@ -36,7 +36,11 @@ this statically (api ⊆ backend cases).
 | `commands.rs` | thin IPC wrappers (incl. SSE `ai_generate_stream` via Channel) |
 | `doc_store.rs` | all SQL: docs, backlinks, snapshots, RAG chunks, metrics, dashboards |
 | `database.rs` | schema + ordered migrations (new columns go here, same pattern) |
-| `convert.rs` | md/txt/html built in (`pulldown-cmark`); docx/epub/pdf via pandoc |
+| `convert.rs` | format dispatch + shared export preprocess (`docmodel.rs` parses markdown once) |
+| `docmodel.rs` | markdown → neutral `Doc`/`Block`/`Span` model, parsed once and shared by all writers |
+| `docx.rs` | WordprocessingML writer (`zip` + XML, hand-rolled — the `docx` crate pulls a broken transitive dep) |
+| `epub.rs` | EPUB 3 writer (`zip` + `quick-xml`; mimetype STORED first, nav + NCX) |
+| `pdf.rs` | Typst source generation + escaping; invokes the bundled Typst CLI per export |
 | `sidecar.rs` | native-first process managers for memory, Moonshine STT, Kokoro TTS, and llama.cpp LLM; Python scripts are the source/dev fallback |
 | `models.rs` | shared structs (all `#[serde(default)]` for forward compat) |
 

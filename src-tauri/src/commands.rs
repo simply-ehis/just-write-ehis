@@ -2592,10 +2592,9 @@ fn export_lookup<'a>(db: &'a State<'a, Database>) -> impl Fn(&str) -> Option<Str
     }
 }
 
-/// Convert one doc's current content into md/txt/html (built in) or
-/// docx/epub/pdf (pandoc). Content runs through the shared export
-/// preprocess (embeds, wikilinks, frontmatter, attachments) first.
-/// Returns filename + mime + base64 for download.
+/// Convert one doc's current content into any export format. Content runs
+/// through the shared export preprocess (embeds, wikilinks, frontmatter)
+/// first. Returns filename + mime + base64 for download.
 #[tauri::command]
 pub fn convert_run(
     db: State<'_, Database>,
@@ -2605,15 +2604,21 @@ pub fn convert_run(
 ) -> Result<crate::convert::ConvertOutput, String> {
     let doc = db.get_doc(&doc_id)?;
     let lookup = export_lookup(&db);
-    let prepared = crate::convert::prepare_export(&doc.title, &doc.content, doc.frontmatter_json.as_deref(), &lookup);
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())
-        .ok();
-    let pandoc = crate::convert::find_pandoc(resource_dir);
+    let prepared = crate::convert::prepare_export(
+        &doc.title,
+        &doc.content,
+        doc.frontmatter_json.as_deref(),
+        &lookup,
+    );
+    let typst = crate::pdf::find_typst(resource_dir(&app));
     let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
-    crate::convert::convert_markdown(&doc.title, &prepared, &out_fmt, pandoc, Some(&vault))
+    crate::convert::convert_markdown(&doc.title, &prepared, &out_fmt, typst, Some(&vault))
+}
+
+/// The installed resource directory, when there is one. Dev runs from the
+/// raw exe may have none.
+fn resource_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path().resource_dir().ok()
 }
 
 /// Compile an explicitly ordered set of docs into one manuscript file
@@ -2669,26 +2674,21 @@ pub fn compile_run(
         extra: Vec::new(),
     };
     let manuscript = crate::convert::inject_frontmatter(&manuscript, &header);
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())
-        .ok();
-    let pandoc = crate::convert::find_pandoc(resource_dir);
+    let typst = crate::pdf::find_typst(resource_dir(&app));
     let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
-    crate::convert::convert_markdown(&name, &manuscript, &out_fmt, pandoc, Some(&vault))
+    crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, Some(&vault))
 }
 
-/// Which export formats are available right now (pandoc present or not).
+/// Which export formats are available right now. Five are pure Rust and
+/// always work; pdf needs the bundled Typst binary.
 #[tauri::command]
 pub fn convert_status(app: tauri::AppHandle) -> Result<crate::convert::ConvertStatus, String> {
-    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string()).ok();
-    let pandoc = crate::convert::find_pandoc(resource_dir);
-    let available = pandoc.is_some();
+    let typst = crate::pdf::typst_available(resource_dir(&app));
     Ok(crate::convert::ConvertStatus {
-        formats: crate::convert::all_formats(available),
-        pandoc: available,
-        bundled: crate::convert::is_bundled(&pandoc),
+        formats: crate::convert::all_formats(typst),
+        native: typst,
+        typst,
+        typst_version: crate::pdf::TYPST_VERSION.to_string(),
     })
 }
 
