@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 
 /// HTTP client with a real timeout — replaces bare Client::new() (which
 /// waits forever) everywhere in this module.
-fn http_client(timeout_secs: u64) -> reqwest::Client {
+fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .expect("reqwest client with a timeout always builds")
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 /// Resolve a sidecar script, tolerating raw portable exes run without the
@@ -479,7 +479,7 @@ impl SttManager {
     }
 
     pub async fn health(&self) -> Result<SttHealth, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.get(format!("{}/health", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -488,7 +488,7 @@ impl SttManager {
     }
 
     pub async fn transcribe(&self, audio_b64: &str, format: &str) -> Result<String, String> {
-        let client = http_client(180);
+        let client = http_client(180)?;
         let body = serde_json::json!({
             "audio": audio_b64,
             "format": format,
@@ -503,7 +503,7 @@ impl SttManager {
     }
 
     pub async fn stream_start(&self) -> Result<(), String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.post(format!("{}/stream/start", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -512,7 +512,7 @@ impl SttManager {
     }
 
     pub async fn stream_chunk(&self, audio_b64: &str, format: &str) -> Result<(), String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let body = serde_json::json!({ "audio": audio_b64, "format": format });
         let resp = client.post(format!("{}/stream/chunk", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
@@ -523,7 +523,7 @@ impl SttManager {
     }
 
     pub async fn stream_stop(&self) -> Result<String, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.post(format!("{}/stream/stop", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -605,7 +605,7 @@ impl TtsManager {
     }
 
     pub async fn health(&self) -> Result<TtsHealth, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.get(format!("{}/health", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -615,7 +615,7 @@ impl TtsManager {
 
     pub async fn synthesize(&self, text: &str, voice: &str, speed: f64,
                             lang_code: &str, split_pattern: &str, chunk_size: u32) -> Result<(String, u32), String> {
-        let client = http_client(180);
+        let client = http_client(180)?;
         let body = serde_json::json!({
             "text": text,
             "voice": voice,
@@ -637,7 +637,7 @@ impl TtsManager {
     }
 
     pub async fn stop_playback(&self) -> Result<(), String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.post(format!("{}/stop", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -712,7 +712,7 @@ impl MemoryManager {
     }
 
     async fn post_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.post(format!("{}{}", self.base_url(), path))
             .header("X-JWE-Memory-Token", &self.auth_token)
             .json(&body)
@@ -722,7 +722,7 @@ impl MemoryManager {
     }
 
     pub async fn health(&self) -> Result<MemoryHealth, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.get(format!("{}/health", self.base_url()))
             .header("X-JWE-Memory-Token", &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -736,7 +736,7 @@ impl MemoryManager {
     }
 
     pub async fn recall(&self, query: &str) -> Result<String, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.get(format!("{}/recall", self.base_url()))
             .header("X-JWE-Memory-Token", &self.auth_token)
             .query(&[("q", query)])
@@ -932,7 +932,7 @@ impl LlmManager {
     }
 
     pub async fn health(&self) -> Result<LlmHealth, String> {
-        let client = http_client(30);
+        let client = http_client(30)?;
         let resp = client.get(format!("{}/health", self.base_url()))
             .header(TOKEN_HEADER, &self.auth_token)
             .send().await.map_err(|e| e.to_string())?;
@@ -941,7 +941,7 @@ impl LlmManager {
     }
 
     pub async fn completion(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
-        let client = http_client(180);
+        let client = http_client(180)?;
         let body = serde_json::json!({
             "prompt": prompt,
             "max_tokens": max_tokens,
@@ -959,7 +959,7 @@ impl LlmManager {
     }
 
     pub async fn chat_completion(&self, messages: Vec<serde_json::Value>, max_tokens: u32, temperature: f32) -> Result<String, String> {
-        let client = http_client(180);
+        let client = http_client(180)?;
         let body = serde_json::json!({
             "messages": messages,
             "max_tokens": max_tokens,
