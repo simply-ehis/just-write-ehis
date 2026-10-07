@@ -285,34 +285,77 @@ pub fn typst_available(resource_dir: Option<PathBuf>) -> bool {
 ///
 /// Errors carry the CLI's own stderr, so a bad document reports the same
 /// message an author would see from the command line.
-fn compile_with(bin: &Path, source: &str) -> Result<Vec<u8>, String> {
-    let dir = tempfile::tempdir().map_err(|e| format!("Temp dir failed: {}", e))?;
-    let input = dir.path().join("input.typ");
-    let output = dir.path().join("output.pdf");
-    std::fs::write(&input, source).map_err(|e| format!("Temp write failed: {}", e))?;
+/// Hard limit on a single typst compile. convert_run/compile_run are sync
+    /// commands, so this runs on the UI thread — an unbounded wait here freezes
+    /// the whole app with no way out.
+    const TYPST_TIMEOUT_SECS: u64 = 120;
 
-    let result = Command::new(bin)
-        .arg("compile")
-        // Root is the temp dir so no document-relative path can reach the
-        // vault or the wider filesystem.
-        .arg("--root")
-        .arg(dir.path())
-        .arg(&input)
-        .arg(&output)
-        .output()
-        .map_err(|e| format!("Failed to run typst: {}", e))?;
+    /// Run typst over `source` and return the PDF bytes.
+    ///
+    /// Spawns the child and polls with a hard timeout, so a hung compile is
+    /// killed and reported instead of blocking the UI thread forever.
+    fn compile_with(bin: &Path, source: &str) -> Result<Vec<u8>, String> {
+        use std::time::Instant;
+        let dir = tempfile::tempdir().map_err(|e| format!("Temp dir failed: {}", e))?;
+        let input = dir.path().join("input.typ");
+        let output = dir.path().join("output.pdf");
+        std::fs::write(&input, source).map_err(|e| format!("Temp write failed: {}", e))?;
 
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        let msg = stderr.trim();
-        return Err(if msg.is_empty() {
-            format!("typst failed (exit {:?}).", result.status.code())
-        } else {
-            format!("typst failed: {}", msg)
-        });
+        let mut child = Command::new(bin)
+            .arg("compile")
+            // Root is the temp dir so no document-relative path can reach the
+            // vault or the wider filesystem.
+            .arg("--root")
+            .arg(dir.path())
+            .arg(&input)
+            .arg(&output)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to run typst: {}", e))?;
+
+        let start = Instant::now();
+        let timeout = std::time::Duration::from_secs(TYPST_TIMEOUT_SECS);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() {
+                        let stderr = child
+                            .stderr
+                            .take()
+                            .map(|mut s| {
+                                let mut buf = String::new();
+                                use std::io::Read;
+                                let _ = s.read_to_string(&mut buf);
+                                buf
+                            })
+                            .unwrap_or_default();
+                        let msg = stderr.trim();
+                        return Err(if msg.is_empty() {
+                            format!("typst failed (exit {:?}).", status.code())
+                        } else {
+                            format!("typst failed: {}", msg)
+                        });
+                    }
+                    return std::fs::read(&output)
+                        .map_err(|e| format!("Failed to read typst output: {}", e));
+                }
+                Ok(None) => {
+                    if start.elapsed() > timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(format!(
+                            "typst compile timed out after {}s — the document may be too large or the binary is hung",
+                            TYPST_TIMEOUT_SECS
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(e) => return Err(format!("Failed to wait on typst: {}", e)),
+            }
+        }
     }
-    std::fs::read(&output).map_err(|e| format!("Failed to read typst output: {}", e))
-}
 
 /// Compile a `Doc` to PDF bytes.
 ///
