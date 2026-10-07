@@ -2614,12 +2614,18 @@ fn export_lookup<'a>(db: &'a State<'a, Database>) -> impl Fn(&str) -> Option<Str
 /// through the shared export preprocess (embeds, wikilinks, frontmatter)
 /// first. Returns filename + mime + base64 for download.
 #[tauri::command]
-pub fn convert_run(
+pub async fn convert_run(
     db: State<'_, Database>,
     app: tauri::AppHandle,
     doc_id: String,
     out_fmt: String,
 ) -> Result<crate::convert::ConvertOutput, String> {
+    // Run on spawn_blocking: convert_markdown can invoke the Typst
+    // subprocess (up to 120s) and holds vault_path for its duration. As a
+    // sync command this ran on the UI thread and froze the whole app.
+    //
+    // Extract owned data before the closure: State<'_, Database> is not
+    // 'static, so it cannot be moved into spawn_blocking.
     let doc = db.get_doc(&doc_id)?;
     let lookup = export_lookup(&db);
     let prepared = crate::convert::prepare_export(
@@ -2629,8 +2635,13 @@ pub fn convert_run(
         &lookup,
     );
     let typst = crate::pdf::find_typst(resource_dir(&app));
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
-    crate::convert::convert_markdown(&doc.title, &prepared, &out_fmt, typst, Some(&vault))
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
+    let title = doc.title.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::convert::convert_markdown(&title, &prepared, &out_fmt, typst, Some(&vault))
+    })
+    .await
+    .map_err(|e| format!("Export task failed: {}", e))?
 }
 
 /// The installed resource directory, when there is one. Dev runs from the
@@ -2644,7 +2655,7 @@ fn resource_dir(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 /// (caller-owned: board order). Each doc gets an H1 title with its
 /// content demoted a level, so titles can never collide with content.
 #[tauri::command]
-pub fn compile_run(
+pub async fn compile_run(
     db: State<'_, Database>,
     app: tauri::AppHandle,
     doc_ids: Vec<String>,
@@ -2692,9 +2703,15 @@ pub fn compile_run(
         extra: Vec::new(),
     };
     let manuscript = crate::convert::inject_frontmatter(&manuscript, &header);
+    // spawn_blocking: same reason as convert_run — the Typst subprocess can
+    // run up to 120s and holds vault_path for its duration.
     let typst = crate::pdf::find_typst(resource_dir(&app));
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
-    crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, Some(&vault))
+    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, Some(&vault))
+    })
+    .await
+    .map_err(|e| format!("Compile task failed: {}", e))?
 }
 
 /// Which export formats are available right now. Five are pure Rust and
