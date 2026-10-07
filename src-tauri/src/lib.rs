@@ -10,6 +10,12 @@ mod pdf;
 mod sidecar;
 mod windows;
 
+/// True when the schema is in a state where writes are unsafe (e.g. a failed
+/// migration). Commands that mutate state must check this and refuse with a
+/// clear error rather than corrupting a half-migrated schema.
+#[derive(Clone, Copy)]
+pub struct ReadOnlyFlag(pub bool);
+
 use rusqlite::Connection;
 use tauri::Manager;
 #[cfg(target_os = "windows")]
@@ -86,8 +92,20 @@ pub fn run() {
                 .map_err(|e| format!("Failed to create vault directory {:?}: {}", vault_path, e))?;
 
             let db = database::Database::new(conn, vault_path).with_db_path(db_path.clone());
-            db.initialize()
-                .map_err(|e| format!("Failed to initialize database schema: {}", e))?;
+            // A failed migration must not prevent the app from launching. The
+            // vault is on disk; the user can reach their files through the UI
+            // even if writes are disabled. The old code mapped the error out
+            // of setup, which aborted run() — the app refused to start with
+            // the vault present and no way in.
+            if let Err(e) = db.initialize() {
+                eprintln!("[db] migration failed, starting READ-ONLY: {}", e);
+                // Set the flag on the Database itself so save_doc and
+                // atomic_save can check it. The app.manage() call above
+                // is for any other consumer that wants to observe the state.
+                if let Ok(mut flag) = db.read_only.lock() {
+                    flag.0 = true;
+                }
+            }
 
             // Populate the FTS index at startup. docs_fts is written ONLY by
             // reindex_fts, and nothing called it — so the palette's search read

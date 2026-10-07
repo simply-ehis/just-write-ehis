@@ -535,6 +535,18 @@ impl Database {
     }
 
     pub fn save_doc(&self, req: SaveDocRequest) -> Result<Doc, String> {
+        // Refuse writes when the schema is in a known-unsafe state (e.g. a
+        // failed migration). Writing to a half-migrated schema can corrupt it
+        // further; the user is better off with a clear error and read-only
+        // access to their files.
+        if let Ok(flag) = self.read_only.lock() {
+            if flag.0 {
+                return Err(
+                    "Database is read-only: a migration failed. Your files are safe but writes are disabled."
+                        .into(),
+                );
+            }
+        }
         let content_changed = req.content.is_some();
         // Read the PREVIOUS content before the UPDATE overwrites it. The
         // auto-snapshot guard below compares old vs new; reading it after
@@ -3604,6 +3616,16 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     }
 
     pub fn atomic_save(&self, doc_id: &str, body: &str) -> Result<(), String> {
+        // Same read-only guard as save_doc: refuse writes when the schema is
+        // in a known-unsafe state.
+        if let Ok(flag) = self.read_only.lock() {
+            if flag.0 {
+                return Err(
+                    "Database is read-only: a migration failed. Your files are safe but writes are disabled."
+                        .into(),
+                );
+            }
+        }
         let doc = self.get_doc(doc_id)?;
 
         // Auto-snapshot on a meaningful diff (>20 words) per A10.2.

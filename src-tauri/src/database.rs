@@ -4,6 +4,9 @@ use std::sync::Mutex;
 pub struct Database {
   pub conn: Mutex<Connection>,
   pub vault_path: Mutex<std::path::PathBuf>,
+  /// True when writes must be refused (e.g. a failed migration left the
+  /// schema in an unsafe state). Checked by save_doc and atomic_save.
+  pub read_only: Mutex<crate::ReadOnlyFlag>,
   /// On-disk location of the database, when there is one.
   ///
   /// `backup_create` needs this to run `VACUUM INTO` on a SECOND connection:
@@ -22,6 +25,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
   conn: Mutex::new(conn),
   vault_path: Mutex::new(vault_path),
   db_path: Mutex::new(None),
+  read_only: Mutex::new(crate::ReadOnlyFlag(false)),
   }
   }
 
@@ -35,6 +39,12 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
   }
 
     pub fn initialize(&self) -> SqlResult<()> {
+        // Back up the DB file before any DDL runs. A failed migration is
+        // recoverable only if the pre-migration state still exists — and the
+        // old code had no backup at all, so a half-migrated schema meant the
+        // app refused to launch with the vault on disk and no way in.
+        self.backup_before_migration()?;
+
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
@@ -387,6 +397,60 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         // leaving the schema exactly as it was.
         conn.execute_batch("COMMIT;")?;
 
+        Ok(())
+    }
+
+    /// Copy the DB file to a timestamped backup before migrations run.
+    ///
+    /// A failed migration is only recoverable if the pre-migration state still
+    /// exists. The old code had no backup, so a half-migrated schema meant the
+    /// app refused to launch with the vault on disk and no way in through the
+    /// UI.
+    ///
+    /// Best-effort: a backup failure must not prevent the app from starting.
+    /// The migration itself is transactional, so the backup is a second layer
+    /// of safety, not the only one.
+    fn backup_before_migration(&self) -> SqlResult<()> {
+        let db_file = self.db_path.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let Some(path) = db_file else {
+            return Ok(()); // in-memory (tests): nothing to back up
+        };
+        if !path.is_file() {
+            return Ok(()); // first run: nothing to back up
+        }
+        let backup_dir = dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("writing-app")
+            .join("pre-migration-backups");
+        std::fs::create_dir_all(&backup_dir).map_err(|e| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(1),
+                Some(format!("backup dir: {}", e)),
+            )
+        })?;
+        let name = format!(
+            "writing-{}.db",
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        );
+        let dest = backup_dir.join(name);
+        std::fs::copy(&path, &dest).map_err(|e| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(1),
+                Some(format!("backup copy: {}", e)),
+            )
+        })?;
+        // Keep only the newest 5 pre-migration backups.
+        if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+            let mut backups: Vec<_> = entries
+                .filter_map(|e| e.ok().map(|x| x.path()))
+                .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("db"))
+                .collect();
+            backups.sort();
+            let excess = backups.len().saturating_sub(5);
+            for old in backups.iter().take(excess) {
+                let _ = std::fs::remove_file(old);
+            }
+        }
         Ok(())
     }
 }
