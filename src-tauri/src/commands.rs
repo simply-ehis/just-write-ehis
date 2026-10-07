@@ -2501,9 +2501,13 @@ fn run_python_probe(python: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn sidecar_python_probe(python_path: String) -> Result<String, String> {
+pub async fn sidecar_python_probe(python_path: String) -> Result<String, String> {
+    // spawn_blocking: run_python_probe polls with thread::sleep for up to 5s.
+    // As a sync command this ran on the UI thread and froze the app.
     let python = trusted_python_command(&python_path)?;
-    run_python_probe(&python)
+    tauri::async_runtime::spawn_blocking(move || run_python_probe(&python))
+        .await
+        .map_err(|e| format!("Python probe task failed: {}", e))?
 }
 
 #[tauri::command]
