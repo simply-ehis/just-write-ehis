@@ -677,42 +677,63 @@ impl Database {
             }
         }
 
-        // 2. Remove files (best-effort; a missing file is already gone).
-        //    Files are the source of truth — a row-only delete would leave
-        //    ghosts visible in Files and re-importable clutter.
+        // 2. Delete rows FIRST, inside one transaction. FK cascades
+        //    (foreign_keys=ON) clean snapshots, usage, craft metrics,
+        //    backlinks, links, rag chunks. Tables WITHOUT an FK get explicit
+        //    cleanup below.
+        //
+        //    The old order removed files first, so a failure after the unlink
+        //    deleted the user's .md while the row (and its content column)
+        //    survived — permanent data loss with an error returned.
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
-        for del_id in &ids {
-            if let Ok(doc) = self.get_doc(del_id) {
-                if let Ok(full) = resolve_in_vault(&vault, &doc.path) {
-                    let _ = std::fs::remove_file(&full);
-                }
-            }
-        }
-
-        // 3. Delete rows. FK cascades (foreign_keys=ON) clean snapshots,
-        //    usage, craft metrics, backlinks, links, rag chunks.
-        //    Tables WITHOUT an FK get explicit cleanup below.
+        let mut removed_paths: Vec<std::path::PathBuf> = Vec::new();
         {
-            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
             for del_id in &ids {
-                conn.execute("DELETE FROM docs WHERE id = ?1", params![del_id])
+                // Collect paths before deleting rows, so files can be
+                // removed after the transaction commits.
+                if let Ok(doc) = tx.query_row(
+                    "SELECT path FROM docs WHERE id = ?1",
+                    params![del_id],
+                    |row| row.get::<_, String>(0),
+                ) {
+                    if let Ok(full) = resolve_in_vault(&vault, &doc) {
+                        removed_paths.push(full);
+                    }
+                }
+                tx.execute("DELETE FROM docs WHERE id = ?1", params![del_id])
                     .map_err(|e| e.to_string())?;
             }
             for del_id in &ids {
                 // bible_facts + conversations have no FK to docs.
-                conn.execute("DELETE FROM bible_facts WHERE doc_id = ?1", params![del_id])
+                tx.execute("DELETE FROM bible_facts WHERE doc_id = ?1", params![del_id])
                     .map_err(|e| e.to_string())?;
-                conn.execute("DELETE FROM conversations WHERE doc_id = ?1", params![del_id])
+                tx.execute("DELETE FROM conversations WHERE doc_id = ?1", params![del_id])
                     .map_err(|e| e.to_string())?;
                 // Canvas cards keep existing; just unlink the dead doc.
-                conn.execute("UPDATE canvas_nodes SET doc_id = NULL WHERE doc_id = ?1", params![del_id])
+                tx.execute("UPDATE canvas_nodes SET doc_id = NULL WHERE doc_id = ?1", params![del_id])
                     .map_err(|e| e.to_string())?;
             }
             // Chunks cascade; vectors have no FK — sweep the orphans.
-            let _ = conn.execute(
+            let _ = tx.execute(
                 "DELETE FROM rag_vec WHERE chunk_id NOT IN (SELECT id FROM rag_chunks)",
                 [],
             );
+            tx.commit().map_err(|e| e.to_string())?;
+        }
+
+        // 3. Remove files AFTER the transaction commits. A failure here
+        //    leaves the rows gone but the files present — recoverable (the
+        //    files are orphaned, not the data). The reverse order was
+        //    permanent data loss.
+        for full in &removed_paths {
+            if let Err(e) = std::fs::remove_file(full) {
+                // Report but do not fail: the rows are already gone, and a
+                // locked file (AV, another editor) should not make a
+                // successful delete look failed.
+                eprintln!("delete_doc: failed to remove {}: {}", full.display(), e);
+            }
         }
         Ok(())
     }
@@ -892,13 +913,18 @@ impl Database {
     pub fn move_doc(&self, req: MoveDocRequest) -> Result<Doc, String> {
         // Validate the destination before mutating the row: a path that
         // escapes the vault must fail loudly, not rewrite the index.
+        let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
         if let Some(path) = &req.new_path {
-            let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
             resolve_in_vault(&vault, path)?;
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
         let old_parent: Option<String> = conn.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        // Read the current path so the file can be moved to match the row.
+        // Without this the DB pointed at a path with no file and the original
+        // .md was orphaned on disk.
+        let old_path: Option<String> = conn.query_row("SELECT path FROM docs WHERE id = ?1", params![&req.id], |row| row.get(0))
             .map_err(|e| e.to_string())?;
 
         if let Some(parent_id) = &req.new_parent_id {
@@ -912,6 +938,20 @@ impl Database {
             ).map_err(|e| e.to_string())?;
         }
         if let Some(path) = &req.new_path {
+            // Move the file first, then update the row. If the rename fails
+            // the row is untouched; if the row update fails after a successful
+            // rename the file is at the new path and the DB still points at
+            // the old one, which is recoverable (the file exists at both
+            // paths until the next save overwrites the old one).
+            if let Some(old) = &old_path {
+                let old_full = resolve_in_vault(&vault, old)?;
+                let new_full = resolve_in_vault(&vault, path)?;
+                if old_full != new_full {
+                    std::fs::rename(&old_full, &new_full).map_err(|e| {
+                        format!("Failed to move file from {} to {}: {}", old_full.display(), new_full.display(), e)
+                    })?;
+                }
+            }
             conn.execute(
                 "UPDATE docs SET path = ?1, updated_at = ?2 WHERE id = ?3",
                 params![path, now, req.id],
@@ -2719,6 +2759,22 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     }
 
     pub fn snapshot_restore(&self, snapshot_id: &str) -> Result<Doc, String> {
+        // Snapshot the CURRENT content before overwriting it. Without this,
+        // restoring the wrong snapshot was unrecoverable — the text the user
+        // was on before pressing Restore was gone forever.
+        let current = {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            conn.query_row(
+                "SELECT doc_id, content FROM snapshots WHERE id = ?1",
+                params![snapshot_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .ok()
+        };
+        if let Some((doc_id, content)) = current {
+            let _ = self.snapshot_create_from(&doc_id, &content);
+        }
+
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let snapshot = {
@@ -2775,12 +2831,14 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             }).map_err(|e| e.to_string())?
         };
 
-        // Write restored content to disk
+        // Write restored content to disk. Propagate the error: a silent failure
+        // here leaves the DB with the restored text and the .md with the old
+        // text, and the caller sees Ok.
         drop(conn);
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
         let full_path = resolve_in_vault(&vault, &doc.path)?;
         drop(vault);
-        let _ = write_to_disk(&full_path, &doc.content);
+        write_to_disk(&full_path, &doc.content)?;
 
         // Re-extract backlinks
         if let Some(content) = &snapshot.content {
