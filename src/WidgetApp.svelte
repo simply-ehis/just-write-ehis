@@ -460,7 +460,7 @@ import { waitForBackendReady } from "$lib/bootGate";
   >
     <img src={logo} alt="" />
     {#if $saveState !== "idle"}
-      <span class="save-signal {$saveState}" aria-label={$saveState === "saving" ? "Saving" : "Saved"}></span>
+      <span class="save-signal {$saveState}" aria-label={$saveState === "saving" ? "Saving" : $saveState === "error" ? "Save failed" : "Saved"}></span>
     {/if}
   </div>
 {:else}
@@ -476,7 +476,7 @@ import { waitForBackendReady } from "$lib/bootGate";
         <img src={logo} alt="Just Write ehis" />
         <span>{selectedLabel}</span>
         {#if $saveState !== "idle"}
-          <span class="save-status" aria-live="polite">{$saveState === "saving" ? "Saving" : "Saved"}</span>
+          <span class="save-status" aria-live="polite">{$saveState === "saving" ? "Saving" : $saveState === "error" ? "Save failed" : "Saved"}</span>
         {/if}
       </div>
       <div class="titlebar-actions">

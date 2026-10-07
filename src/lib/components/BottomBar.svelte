@@ -160,7 +160,12 @@
     <span
       class="save-dot"
       class:saving={$saveState === "saving"}
-      title={$saveState === "saving" ? "Saving…" : "Saved"}
+      class:error={$saveState === "error"}
+      title={$saveState === "saving"
+      ? "Saving…"
+      : $saveState === "error"
+      ? "Save failed — your text may not be on disk"
+      : "Saved"}
       aria-hidden="true"
     ></span>
   {/if}

@@ -365,6 +365,11 @@ fn mention_signature_from_parts(fact_key: &str, kind: &str, snippet: &str, attri
 
 const EMBEDDING_DIM: usize = 256;
 
+/// Word-count change that triggers an automatic version snapshot (A10.2).
+/// Named so the threshold cannot drift between the save and atomic-save
+/// paths, which previously both hardcoded `20`.
+const SNAPSHOT_WORD_THRESHOLD: usize = 20;
+
 /// Simple TF-IDF-inspired vectorizer: hashes words into a fixed-size vector
 fn text_to_embedding(text: &str) -> Vec<f32> {
     let mut vec = vec![0.0f32; EMBEDDING_DIM];
@@ -547,6 +552,20 @@ impl Database {
                     params![title, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
+            // Read the PREVIOUS content before the UPDATE overwrites it. The
+            // auto-snapshot guard below compares old vs new; reading it after
+            // the commit (as this once did) made the delta identically zero,
+            // so the >20-word safety net never fired.
+            let old_content_before_update: Option<String> = match &req.content {
+                Some(_) => tx
+                    .query_row(
+                        "SELECT content FROM docs WHERE id = ?1",
+                        params![&req.id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok(),
+                None => None,
+            };
             if let Some(content) = &req.content {
                 let word_count = content.split_whitespace().count() as i64;
                 tx.execute(
@@ -583,15 +602,33 @@ impl Database {
         if content_changed {
             let doc = self.get_doc(&req.id)?;
 
-            // Check if diff is meaningful (>20 words changed) — auto-snapshot per A10.2
+            // Auto-snapshot on a meaningful diff (>20 words) — A10.2.
+            //
+            // The guard compares the text being OVERWRITTEN against the text
+            // replacing it. `old_content_before_update` was read inside the
+            // transaction before the UPDATE; reading the doc afterwards made
+            // the delta identically zero, so this net never fired.
+            //
+            // Ordering matters twice over: the delta must use the pre-edit
+            // body, and `snapshot_create_from` must be given that same body —
+            // `snapshot_create` re-reads the row and would archive the NEW
+            // text, which is worthless as a restore point.
             if let Some(new_content) = &req.content {
-                let old_word_count = doc.word_count as usize;
                 let new_word_count = new_content.split_whitespace().count();
-                let word_delta = (old_word_count as i64 - new_word_count as i64).abs();
-                if word_delta > 20 {
-                    let _ = self.snapshot_create(&req.id);
-                    // Same throttle feeds retrieval: re-chunk only on real movement.
-                    self.refresh_rag_chunks(&req.id);
+                let word_delta = match old_content_before_update.as_deref() {
+                    Some(old) => (old.split_whitespace().count() as i64)
+                        - (new_word_count as i64),
+                    // No previous content (brand-new row): snapshot whatever
+                    // precedes the first write.
+                    None => -(new_word_count as i64),
+                };
+                if word_delta.abs() > SNAPSHOT_WORD_THRESHOLD {
+                    // Not best-effort: silently dropping this is exactly the
+                    // invisible safety net the guard exists to provide.
+                    let prior = old_content_before_update.unwrap_or_default();
+                    self.snapshot_create_from(&req.id, &prior)?;
+                    // Derived index stays best-effort.
+                    let _ = self.refresh_rag_chunks(&req.id);
                 }
             }
 
@@ -2555,45 +2592,40 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         Ok((streak, total_words))
     }
 
+    /// Snapshot a doc's content **as it stands right now**.
+    ///
+    /// For a pre-edit safety net this MUST be called before the UPDATE —
+    /// it reads the row from the DB, so calling it afterwards would archive
+    /// the text being written rather than the text being overwritten.
+    /// See `snapshot_create_from`.
     pub fn snapshot_create(&self, doc_id: &str) -> Result<Snapshot, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let doc = {
-            let mut stmt = conn.prepare(
-                "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE id = ?1"
-            ).map_err(|e| e.to_string())?;
-            stmt.query_row(params![doc_id], |row| {
-                Ok(Doc {
-                    id: row.get(0)?,
-                    workspace: row.get(1)?,
-                    kind: row.get(2)?,
-                    title: row.get(3)?,
-                    path: row.get(4)?,
-                    parent_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    content: row.get(8)?,
-                    word_count: row.get(9)?,
-                    reading_position: row.get(10)?,
-                    status: row.get(11)?,
-                    frontmatter_json: row.get(12)?,
-                    activity_score: row.get(13)?,
-                    embedding_ref: row.get(14)?,
-                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                    goal_words: row.get(16)?,
-                    deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
-                })
-            }).map_err(|e| e.to_string())?
-        };
+        let content: String = conn
+            .query_row(
+                "SELECT content FROM docs WHERE id = ?1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        drop(conn);
+        self.snapshot_create_from(doc_id, &content)
+    }
 
-        let hash = compute_content_hash(&doc.content);
+    /// Snapshot an explicit body. Used by the save path, which already holds
+    /// the pre-edit content and must not re-read the row after committing.
+    pub fn snapshot_create_from(&self, doc_id: &str, content: &str) -> Result<Snapshot, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+
+        let hash = compute_content_hash(content);
 
         // Dedup: skip if content_hash matches the most recent snapshot
-        let last_hash: Option<String> = conn.query_row(
-            "SELECT content_hash FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC LIMIT 1",
-            params![doc_id],
-            |row| row.get(0),
-        ).unwrap_or(None);
+        let last_hash: Option<String> = conn
+            .query_row(
+                "SELECT content_hash FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
 
         if last_hash.as_deref() == Some(hash.as_str()) {
             // Identical content — skip snapshot (dedup per A10.2)
@@ -2618,17 +2650,19 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
         let id = uuid_v7();
         let now = now_iso();
-        let word_count = doc.content.split_whitespace().count() as i64;
+        let word_count = content.split_whitespace().count() as i64;
 
         // Label: include word diff from previous snapshot
-        let prev_content: Option<String> = conn.query_row(
-            "SELECT content FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC LIMIT 1",
-            params![doc_id],
-            |row| row.get(0),
-        ).unwrap_or(None);
+        let prev_content: Option<String> = conn
+            .query_row(
+                "SELECT content FROM snapshots WHERE doc_id = ?1 ORDER BY created_at DESC LIMIT 1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
         let label = match prev_content {
             Some(ref prev) => {
-                let diff = word_diff_count(prev, &doc.content);
+                let diff = word_diff_count(prev, content);
                 if diff >= 0 {
                     format!("v{} (+{} words)", now.split('T').next().unwrap_or(&now), diff)
                 } else {
@@ -2640,10 +2674,10 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
         conn.execute(
             "INSERT INTO snapshots (id, doc_id, label, content, word_count, content_hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, doc_id, label, doc.content, word_count, hash, now],
+            params![id, doc_id, label, content, word_count, hash, now],
         ).map_err(|e| e.to_string())?;
 
-        Ok(Snapshot { id, doc_id: doc_id.to_string(), label, content: Some(doc.content), word_count, content_hash: Some(hash), created_at: now })
+        Ok(Snapshot { id, doc_id: doc_id.to_string(), label, content: Some(content.to_string()), word_count, content_hash: Some(hash), created_at: now })
     }
 
     pub fn snapshot_list(&self, doc_id: &str) -> Result<Vec<Snapshot>, String> {
@@ -3445,12 +3479,16 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn atomic_save(&self, doc_id: &str, body: &str) -> Result<(), String> {
         let doc = self.get_doc(doc_id)?;
 
-        // Auto-snapshot on meaningful diff (>20 words changed) per A10.2
-        let old_word_count = doc.word_count as usize;
+        // Auto-snapshot on a meaningful diff (>20 words) per A10.2.
+        // `doc.content` is read BEFORE the UPDATE below, so the delta is real
+        // here — unlike the same guard in save_doc. Snapshot the pre-edit body
+        // explicitly so the restore point is the text being replaced, and
+        // propagate failure rather than losing the safety net silently.
+        let old_word_count = doc.content.split_whitespace().count();
         let new_word_count = body.split_whitespace().count();
         let word_delta = (old_word_count as i64 - new_word_count as i64).abs();
-        if word_delta > 20 {
-            let _ = self.snapshot_create(doc_id);
+        if word_delta > SNAPSHOT_WORD_THRESHOLD {
+            self.snapshot_create_from(doc_id, &doc.content)?;
         }
 
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
@@ -3471,7 +3509,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let _ = self.extract_backlinks(doc_id, body);
 
         // Same >20-word throttle as above: keep the retrieval index fresh.
-        if word_delta > 20 {
+        if word_delta > SNAPSHOT_WORD_THRESHOLD {
             self.refresh_rag_chunks(doc_id);
         }
 

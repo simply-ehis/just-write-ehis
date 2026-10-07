@@ -68,9 +68,9 @@
       <RhythmHeatmap content={$currentDoc.content} height={10} />
     </div>
   {/if}
-  <div class="item save-indicator" class:saving={$saveState === "saving"}>
+  <div class="item save-indicator" class:saving={$saveState === "saving"} class:error={$saveState === "error"}>
     <span class="save-dot" class:pulse={$saveState === "saving"}></span>
-    <span>{$saveState === "saving" ? "Saving..." : "Saved"}</span>
+    <span>{$saveState === "saving" ? "Saving..." : $saveState === "error" ? "Save failed" : "Saved"}</span>
   </div>
   <div class="spacer"></div>
   {#if streak}

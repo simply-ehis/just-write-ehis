@@ -11,7 +11,7 @@
   import { api, type Doc } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
-  import { recordSave } from "$lib/stores/saveState";
+  import { recordSave, saveSettled, saveFailed } from "$lib/stores/saveState";
   import { ALL_EXPORT_FORMATS, BINARY_FORMATS, exportLabel } from "$lib/exportFormats";
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
@@ -582,9 +582,9 @@ import { countWords } from "$lib/text";
 
   let saveQueue: Promise<void> = Promise.resolve();
 
-  function queueDocSave(editingDocId: string, content: string) {
-    saveQueue = saveQueue.then(async () => {
-      try {
+function queueDocSave(editingDocId: string, content: string, saveEpoch: number) {
+      saveQueue = saveQueue.then(async () => {
+        try {
         const updated = await (companionMode
           ? api.widgetDocSave(editingDocId, undefined, content)
           : api.docSave(editingDocId, undefined, content));
@@ -601,11 +601,15 @@ import { countWords } from "$lib/text";
             api.memoryRecordMetric(editingDocId, "avg_sentence_length", stats.avgSentence).catch((e) => warnOnce("Write craft telemetry", e));
           }
         }
-      } catch (e) {
-        // Data-loss risk: the user must see this, not just the console.
-        domainError("Write", "couldn't save document", e);
-      }
-    });
+} catch (e) {
+          // Data-loss risk: the user must see this, not just the console.
+          domainError("Write", "couldn't save document", e);
+          // The indicator must NOT decay to "Saved" after a failed write.
+          saveFailed(saveEpoch, e);
+          return;
+        }
+        saveSettled(saveEpoch);
+      });
   }
 
   function handleContentChange(content: string) {
@@ -613,26 +617,30 @@ import { countWords } from "$lib/text";
     const editingDocId = $currentDoc.id;
     liveContent = content;
 
-    recordSave();
-    if (typewriterEnabled) {
-      requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
-    }
+// Epoch-scoped: the indicator follows the actual write, so a save that
+      // is superseded (or fails) can never report the wrong phase.
+      const saveEpoch = recordSave();
+      if (typewriterEnabled) {
+        requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
+      }
 
-    if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => queueDocSave(editingDocId, content), 500);
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => queueDocSave(editingDocId, content, saveEpoch), 500);
 
-    if (flushTimeout) clearTimeout(flushTimeout);
-    flushTimeout = setTimeout(() => {
-      saveQueue = saveQueue.then(async () => {
-        try {
-          await (companionMode
-            ? api.widgetAtomicSave(editingDocId, content)
-            : api.atomicSave(editingDocId, content));
-        } catch (e) {
-          domainError("Write", "couldn't flush document to disk", e);
-        }
-      });
-    }, 5000);
+      if (flushTimeout) clearTimeout(flushTimeout);
+      flushTimeout = setTimeout(() => {
+        saveQueue = saveQueue.then(async () => {
+          try {
+            await (companionMode
+              ? api.widgetAtomicSave(editingDocId, content)
+              : api.atomicSave(editingDocId, content));
+            saveSettled(saveEpoch);
+          } catch (e) {
+            domainError("Write", "couldn't flush document to disk", e);
+            saveFailed(saveEpoch, e);
+          }
+        });
+      }, 5000);
 
     if (!companionMode && $settings.ghostEnabled && content.length > 20) {
       if (ghostDebounce) clearTimeout(ghostDebounce);
@@ -869,15 +877,51 @@ import { countWords } from "$lib/text";
     writeBack.clear();
   });
 
+  /**
+   * Persist anything still debounced before the component goes away.
+   *
+   * `onDestroy` fires on workspace switch, doc deselect and window close, so
+   * clearing the timers without writing first threw away the last <500ms of
+   * typing — while the status bar already said "Saved". Fire-and-forget by
+   * necessity (the webview is going away), but the write is *initiated* here
+   * rather than discarded.
+   */
+  function flushPendingSave() {
+    if (!saveTimeout && !flushTimeout) return;
+    if (saveTimeout) clearTimeout(saveTimeout);
+    if (flushTimeout) clearTimeout(flushTimeout);
+    saveTimeout = null;
+    flushTimeout = null;
+    const id = $currentDoc?.id;
+    if (!id || !liveContent) return;
+    const epoch = recordSave();
+    saveQueue = saveQueue.then(async () => {
+      try {
+        await api.atomicSave(id, liveContent);
+        saveSettled(epoch);
+      } catch (e) {
+        // Nowhere left to show an error at this point; log rather than
+        // pretend it worked.
+        console.error("Final flush failed", e);
+        saveFailed(epoch, e);
+      }
+    });
+  }
+
+  // `pagehide` covers the browser-level teardown paths (window close,
+  // navigation, webview reload) that `onDestroy` may not see in time.
+  function onPageHide() {
+    flushPendingSave();
+  }
+
   onDestroy(() => {
+    flushPendingSave();
     if (editorView) editorView.destroy();
-     if (saveTimeout) clearTimeout(saveTimeout);
-     if (flushTimeout) clearTimeout(flushTimeout);
-     if (ghostDebounce) clearTimeout(ghostDebounce);
+    if (ghostDebounce) clearTimeout(ghostDebounce);
   });
 </script>
 
-<svelte:window onclick={closeExportOnOutside} />
+<svelte:window onclick={closeExportOnOutside} onpagehide={onPageHide} />
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
 <div
   class="editor-pane"
