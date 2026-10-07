@@ -2635,10 +2635,12 @@ pub async fn convert_run(
         &lookup,
     );
     let typst = crate::pdf::find_typst(resource_dir(&app));
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
     let title = doc.title.clone();
+    // vault_path is NOT held across the spawn_blocking closure: the
+    // _vault parameter of convert_markdown is unused, so the lock was
+    // starving autosave for the entire export duration for nothing.
     tauri::async_runtime::spawn_blocking(move || {
-        crate::convert::convert_markdown(&title, &prepared, &out_fmt, typst, Some(&vault))
+        crate::convert::convert_markdown(&title, &prepared, &out_fmt, typst, None)
     })
     .await
     .map_err(|e| format!("Export task failed: {}", e))?
@@ -2704,11 +2706,11 @@ pub async fn compile_run(
     };
     let manuscript = crate::convert::inject_frontmatter(&manuscript, &header);
     // spawn_blocking: same reason as convert_run — the Typst subprocess can
-    // run up to 120s and holds vault_path for its duration.
+    // run up to 120s. vault_path is not held: the _vault parameter of
+    // convert_markdown is unused.
     let typst = crate::pdf::find_typst(resource_dir(&app));
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, Some(&vault))
+        crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, None)
     })
     .await
     .map_err(|e| format!("Compile task failed: {}", e))?
