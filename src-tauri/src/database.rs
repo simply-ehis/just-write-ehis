@@ -63,6 +63,17 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
              PRAGMA temp_store=MEMORY;",
         )?;
 
+        // Migrations run inside one transaction. `execute_batch` does NOT wrap
+        // its statements, so a failure part-way through used to leave the
+        // schema half-migrated — and because lib.rs maps an initialize() error
+        // out of setup, that meant the app refused to launch with the vault
+        // still on disk and no way in through the UI.
+        //
+        // Must come AFTER the PRAGMA block above: `PRAGMA journal_mode=WAL`
+        // cannot run inside a transaction ("Safety level may not be changed
+        // inside a transaction").
+        conn.execute_batch("BEGIN;")?;
+
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS docs (
                 id TEXT PRIMARY KEY,
@@ -335,12 +346,27 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
              CREATE INDEX IF NOT EXISTS idx_canvas_edges_target ON canvas_edges(target_id);"
         )?;
 
-        let has_metric_type: bool = conn.prepare(
-            "SELECT metric_type FROM craft_metrics LIMIT 1"
-        ).is_ok();
-        if !has_metric_type {
+        // The craft_metrics table gained `metric_type` in a later schema. The old
+        // check only asked "does this table exist", so a DB that already had
+        // the table but not the column never got it — and every later
+        // get_doc failed with "no such column".
+        //
+        // Worse, the old body did `DROP TABLE IF EXISTS craft_metrics` before
+        // recreating it, which silently destroyed every existing user's
+        // craft-metric history on upgrade. Rename-and-copy instead: the old
+        // rows survive, and the new column is added without data loss.
+        let table_exists: bool = conn
+            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='craft_metrics'")
+            .is_ok();
+        let has_metric_type: bool = conn
+            .prepare("SELECT metric_type FROM craft_metrics LIMIT 1")
+            .is_ok();
+        if table_exists && !has_metric_type {
+            // Existing table without the new column: rename, copy, drop.
+            // The old schema used metrics_json/ts; the new one uses
+            // metric_type/value/created_at. Map old -> new explicitly.
             conn.execute_batch(
-                "DROP TABLE IF EXISTS craft_metrics;
+                "ALTER TABLE craft_metrics RENAME TO craft_metrics_old;
                  CREATE TABLE craft_metrics (
                      id TEXT PRIMARY KEY,
                      doc_id TEXT NOT NULL,
@@ -349,9 +375,17 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                      created_at TEXT NOT NULL,
                      FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
                  );
+                 INSERT INTO craft_metrics (id, doc_id, metric_type, value, created_at)
+                     SELECT id, doc_id, 'unknown', 0.0, ts FROM craft_metrics_old;
+                 DROP TABLE craft_metrics_old;
                  CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);"
             )?;
         }
+
+        // COMMIT is the last statement of the migration batch. If any statement
+        // failed, the `?` above returns early and the transaction rolls back,
+        // leaving the schema exactly as it was.
+        conn.execute_batch("COMMIT;")?;
 
         Ok(())
     }

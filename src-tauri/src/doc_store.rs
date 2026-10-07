@@ -536,6 +536,26 @@ impl Database {
 
     pub fn save_doc(&self, req: SaveDocRequest) -> Result<Doc, String> {
         let content_changed = req.content.is_some();
+        // Read the PREVIOUS content before the UPDATE overwrites it. The
+        // auto-snapshot guard below compares old vs new; reading it after
+        // the commit (as this once did) made the delta identically zero,
+        // so the >20-word safety net never fired.
+        //
+        // Declared outside the transaction block so it is visible after
+        // commit: the snapshot must archive the text being overwritten, and
+        // snapshot_create re-reads the row (which would return the NEW text
+        // after the UPDATE).
+        let old_content_before_update: Option<String> = if req.content.is_some() {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            conn.query_row(
+                "SELECT content FROM docs WHERE id = ?1",
+                params![&req.id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        } else {
+            None
+        };
         {
             let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
             let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -552,20 +572,6 @@ impl Database {
                     params![title, now, req.id],
                 ).map_err(|e| e.to_string())?;
             }
-            // Read the PREVIOUS content before the UPDATE overwrites it. The
-            // auto-snapshot guard below compares old vs new; reading it after
-            // the commit (as this once did) made the delta identically zero,
-            // so the >20-word safety net never fired.
-            let old_content_before_update: Option<String> = match &req.content {
-                Some(_) => tx
-                    .query_row(
-                        "SELECT content FROM docs WHERE id = ?1",
-                        params![&req.id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .ok(),
-                None => None,
-            };
             if let Some(content) = &req.content {
                 let word_count = content.split_whitespace().count() as i64;
                 tx.execute(
@@ -622,7 +628,7 @@ impl Database {
                     // precedes the first write.
                     None => -(new_word_count as i64),
                 };
-                if word_delta.abs() > SNAPSHOT_WORD_THRESHOLD {
+                if word_delta.abs() > SNAPSHOT_WORD_THRESHOLD as i64 {
                     // Not best-effort: silently dropping this is exactly the
                     // invisible safety net the guard exists to provide.
                     let prior = old_content_before_update.unwrap_or_default();
@@ -3484,10 +3490,10 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         // here — unlike the same guard in save_doc. Snapshot the pre-edit body
         // explicitly so the restore point is the text being replaced, and
         // propagate failure rather than losing the safety net silently.
-        let old_word_count = doc.content.split_whitespace().count();
-        let new_word_count = body.split_whitespace().count();
-        let word_delta = (old_word_count as i64 - new_word_count as i64).abs();
-        if word_delta > SNAPSHOT_WORD_THRESHOLD {
+        let old_word_count = doc.content.split_whitespace().count() as i64;
+        let new_word_count = body.split_whitespace().count() as i64;
+        let word_delta = (old_word_count - new_word_count).abs();
+        if word_delta > SNAPSHOT_WORD_THRESHOLD as i64 {
             self.snapshot_create_from(doc_id, &doc.content)?;
         }
 
@@ -3509,7 +3515,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let _ = self.extract_backlinks(doc_id, body);
 
         // Same >20-word throttle as above: keep the retrieval index fresh.
-        if word_delta > SNAPSHOT_WORD_THRESHOLD {
+        if word_delta > SNAPSHOT_WORD_THRESHOLD as i64 {
             self.refresh_rag_chunks(doc_id);
         }
 
