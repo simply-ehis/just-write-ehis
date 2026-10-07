@@ -89,6 +89,20 @@ pub fn run() {
             db.initialize()
                 .map_err(|e| format!("Failed to initialize database schema: {}", e))?;
 
+            // Populate the FTS index at startup. docs_fts is written ONLY by
+            // reindex_fts, and nothing called it — so the palette's search read
+            // an empty index forever and reported "no results" for everything.
+            // A full reindex is cheap at startup and keeps the index correct
+            // even if a save path forgets to refresh it.
+            match db.reindex_fts() {
+                Ok(n) => {
+                    if n > 0 {
+                        eprintln!("[fts] indexed {} documents at startup", n);
+                    }
+                }
+                Err(e) => eprintln!("[fts] startup reindex failed: {}", e),
+            }
+
             app.manage(db);
             app.manage(windows::PendingLaunchFile::default());
             let autostart = windows::AutostartLaunch::default();
@@ -275,6 +289,9 @@ pub fn run() {
             commands::doc_search_full,
             commands::search_docs_fts,
             commands::reindex_fts,
+             commands::backup_restore,
+             commands::backup_delete,
+             commands::backup_prune,
             commands::doc_get_stats,
             commands::snapshot_create,
             commands::snapshot_list,

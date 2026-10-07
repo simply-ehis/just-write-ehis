@@ -1602,6 +1602,24 @@ pub fn backup_list(db: State<'_, Database>) -> Result<Vec<(String, String, u64)>
     db.backup_list()
 }
 
+/// Restore a backup into a separate file. The live DB is never touched.
+#[tauri::command]
+pub fn backup_restore(db: State<'_, Database>, backup_name: String) -> Result<String, String> {
+    db.backup_restore(&backup_name)
+}
+
+/// Delete a backup, reclaiming its disk space.
+#[tauri::command]
+pub fn backup_delete(db: State<'_, Database>, backup_name: String) -> Result<(), String> {
+    db.backup_delete(&backup_name)
+}
+
+/// Keep only the newest `count` backups, deleting the rest.
+#[tauri::command]
+pub fn backup_prune(db: State<'_, Database>, count: usize) -> Result<u64, String> {
+    db.backup_prune(count)
+}
+
 #[tauri::command]
 pub fn rag_chunk_document(db: State<'_, Database>, doc_id: String, chunk_size: Option<usize>, overlap: Option<usize>) -> Result<Vec<RagChunk>, String> {
     db.rag_chunk_document(&doc_id, chunk_size.unwrap_or(200), overlap.unwrap_or(50))

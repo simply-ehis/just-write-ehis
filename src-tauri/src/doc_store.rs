@@ -3016,6 +3016,69 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         Ok(backups)
     }
 
+    /// Restore a backup into a NEW database file, leaving the live DB alone.
+    ///
+    /// Backups were write-only: backup_create + backup_list existed, but there
+    /// was no way to get data back out of one. The backup also lands on the same
+    /// volume as the live DB, so a disk failure takes both.
+    ///
+    /// Returns the path to the restored file. The caller decides what to do
+    /// with it (swap it in, inspect it, delete it).
+    pub fn backup_restore(&self, backup_name: &str) -> Result<String, String> {
+        let backup_dir = dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("writing-app")
+            .join("backups");
+        let backup_path = backup_dir.join(backup_name);
+        if !backup_path.is_file() {
+            return Err(format!("Backup not found: {}", backup_name));
+        }
+        // Restore to a sibling file, never over the live DB in place.
+        let restored = backup_dir.join(format!("{}.restored", backup_name));
+        std::fs::copy(&backup_path, &restored).map_err(|e| {
+            format!("Failed to restore backup {}: {}", backup_name, e)
+        })?;
+        // Verify the copy is a readable database before handing it back.
+        let conn = rusqlite::Connection::open(&restored)
+            .map_err(|e| format!("Restored backup is not a readable database: {}", e))?;
+        let docs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
+            .map_err(|e| format!("Restored backup failed integrity check: {}", e))?;
+        eprintln!("[backup] restored {} ({} docs) to {}", backup_name, docs, restored.display());
+        Ok(restored.to_string_lossy().to_string())
+    }
+
+    /// Delete a backup. Without this, backups accumulated forever — each a
+    /// full-DB copy — with no way to reclaim the space.
+    pub fn backup_delete(&self, backup_name: &str) -> Result<(), String> {
+        let backup_dir = dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("writing-app")
+            .join("backups");
+        let path = backup_dir.join(backup_name);
+        if !path.is_file() {
+            return Err(format!("Backup not found: {}", backup_name));
+        }
+        std::fs::remove_file(&path).map_err(|e| {
+            format!("Failed to delete backup {}: {}", backup_name, e)
+        })
+    }
+
+    /// Prune backups to the newest `keep`, deleting the rest. Called after a
+    /// successful backup_create so retention is automatic rather than manual.
+    pub fn backup_prune(&self, keep: usize) -> Result<u64, String> {
+        let backups = self.backup_list()?;
+        if backups.len() <= keep {
+            return Ok(0);
+        }
+        let mut deleted = 0u64;
+        for (name, _, _) in backups.iter().skip(keep) {
+            self.backup_delete(name)?;
+            deleted += 1;
+        }
+        Ok(deleted)
+    }
+
     pub fn rag_chunk_document(&self, doc_id: &str, chunk_size: usize, overlap: usize) -> Result<Vec<RagChunk>, String> {
         let doc = self.get_doc(doc_id)?;
         let content = doc.content;
