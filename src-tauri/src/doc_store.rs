@@ -657,11 +657,26 @@ impl Database {
             // disk write must surface, never pass as a successful save.
             // (Derived indexes stay best-effort below.)
             write_to_disk(&full_path, &doc.content)?;
-            let _ = self.extract_backlinks(&req.id, &doc.content);
+            // refresh_entities is per-doc and fast — keep it on the save path.
+            // extract_backlinks is O(docs × content) and holds self.conn for
+            // the duration, so it stays off the hot path; call
+            // reindex_entities explicitly after batch imports or renames.
             let _ = self.refresh_entities(&req.id, &doc.content);
         }
 
         self.get_doc(&req.id)
+    }
+
+    /// Rebuild the entity + backlink index for one doc. Explicit because the
+    /// save path no longer does it automatically: extract_backlinks is
+    /// O(docs × content) and holds the DB lock, which froze the UI on large
+    /// vaults. Call this after a batch import or a vault rename.
+    #[allow(dead_code)] // wired to a Tauri command in a follow-up
+    pub fn reindex_entities(&self, doc_id: &str) -> Result<(), String> {
+        let doc = self.get_doc(doc_id)?;
+        self.extract_backlinks(doc_id, &doc.content)?;
+        self.refresh_entities(doc_id, &doc.content)?;
+        Ok(())
     }
 
     pub fn delete_doc(&self, id: &str) -> Result<(), String> {
