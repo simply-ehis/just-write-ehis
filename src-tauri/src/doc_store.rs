@@ -662,6 +662,12 @@ impl Database {
             // the duration, so it stays off the hot path; call
             // reindex_entities explicitly after batch imports or renames.
             let _ = self.refresh_entities(&req.id, &doc.content);
+            // extract_backlinks is needed for the entity graph to be correct.
+            // It is O(docs × content) and holds the DB lock, which is a real
+            // performance concern on large vaults — but a missing backlink is
+            // a correctness bug. Keep it on the save path for now; the proper
+            // fix is an incremental index or a debounced background task.
+            let _ = self.extract_backlinks(&req.id, &doc.content);
         }
 
         self.get_doc(&req.id)
@@ -2792,7 +2798,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let current = {
             let conn = self.conn.lock().map_err(|e| e.to_string())?;
             conn.query_row(
-                "SELECT doc_id, content FROM snapshots WHERE id = ?1",
+                "SELECT d.id, d.content FROM docs d JOIN snapshots s ON s.doc_id = d.id WHERE s.id = ?1",
                 params![snapshot_id],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             )
@@ -4808,5 +4814,127 @@ mod vault_confinement_tests {
                 Err(e) => assert!(e.contains("outside the vault"), "unexpected error: {e}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod save_path_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn test_db(name: &str) -> Database {
+        unsafe {
+            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+        let vault = std::env::temp_dir().join(format!("jwe-save-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&vault);
+        std::fs::create_dir_all(&vault).unwrap();
+        let db = Database::new(Connection::open_in_memory().unwrap(), vault);
+        db.initialize().unwrap();
+        db
+    }
+
+    fn mk_doc(db: &Database, title: &str, content: &str) -> (String, std::path::PathBuf) {
+        let doc = db
+            .create_doc(CreateDocRequest {
+                workspace: "write".into(),
+                kind: "doc".into(),
+                title: title.into(),
+                parent_id: None,
+                content: Some(content.into()),
+                frontmatter_json: None,
+            })
+            .unwrap();
+        let vault = db.vault_path.lock().unwrap().clone();
+        let full = resolve_in_vault(&vault, &doc.path).unwrap();
+        (doc.id, full)
+    }
+
+    #[test]
+    fn atomic_save_updates_row_and_file_together() {
+        let db = test_db("atomic");
+        let (id, file) = mk_doc(&db, "Chapter", "first draft");
+        db.atomic_save(&id, "second draft, longer by a few words indeed").unwrap();
+        let doc = db.get_doc(&id).unwrap();
+        assert_eq!(doc.content, "second draft, longer by a few words indeed");
+        let on_disk = std::fs::read_to_string(&file).unwrap();
+        assert!(on_disk.contains("second draft"), "file not updated: {on_disk:?}");
+    }
+
+    #[test]
+    fn snapshot_restore_returns_old_content_and_keeps_current_recoverable() {
+        let db = test_db("snap");
+        let (id, _) = mk_doc(&db, "Scene", "original opening sentence");
+        let snap = db.snapshot_create(&id).unwrap();
+        db.save_doc(SaveDocRequest {
+            id: id.clone(),
+            title: None,
+            content: Some("overwritten with newer material entirely different".into()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })
+        .unwrap();
+        let restored = db.snapshot_restore(&snap.id).unwrap();
+        assert_eq!(restored.content, "original opening sentence");
+        // Restore snapshots the pre-restore state first, so the overwrite is
+        // itself recoverable now.
+        let snaps = db.snapshot_list(&id).unwrap();
+        assert!(snaps.len() >= 2, "restore must leave a snapshot of the overwritten state");
+    }
+
+    #[test]
+    fn delete_doc_removes_file_after_committing_rows() {
+        let db = test_db("delete");
+        let (id, file) = mk_doc(&db, "Doomed", "content that will be deleted");
+        assert!(file.is_file(), "fixture: file should exist before delete");
+        db.delete_doc(&id).unwrap();
+        assert!(db.get_doc(&id).is_err(), "row survived delete_doc");
+        assert!(!file.exists(), "file survived delete_doc");
+    }
+
+    #[test]
+    fn move_doc_renames_the_file_on_disk() {
+        let db = test_db("move-file");
+        let (id, old_file) = mk_doc(&db, "Moving", "body");
+        let moved = db
+            .move_doc(MoveDocRequest {
+                id: id.clone(),
+                new_parent_id: None,
+                new_path: Some("Moving.md".into()),
+            })
+            .unwrap();
+        let vault = db.vault_path.lock().unwrap().clone();
+        let new_file = resolve_in_vault(&vault, &moved.path).unwrap();
+        assert!(!old_file.exists(), "old file still present after move");
+        assert!(new_file.is_file(), "new file missing after move: {new_file:?}");
+        assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "body");
+    }
+
+    #[test]
+    fn backup_create_list_delete_round_trip() {
+        let db = test_db("backup");
+        let (id, _) = mk_doc(&db, "Backed", "precious manuscript words");
+        let name = db.backup_create().unwrap();
+        assert!(name.ends_with(".db"), "unexpected backup name: {name}");
+        let file_name = std::path::Path::new(&name)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let listed = db.backup_list().unwrap();
+        assert!(listed.iter().any(|(n, _, _)| n == &file_name), "backup not listed");
+        let restored = db.backup_restore(&file_name).unwrap();
+        let conn = Connection::open(&restored).unwrap();
+        let found: i64 = conn
+            .query_row("SELECT COUNT(*) FROM docs WHERE id = ?1", params![&id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(found, 1, "restored backup is missing the doc");
+        drop(conn);
+        db.backup_delete(&file_name).unwrap();
+        assert!(!db.backup_list().unwrap().iter().any(|(n, _, _)| n == &file_name));
+        let _ = std::fs::remove_file(&restored);
     }
 }
