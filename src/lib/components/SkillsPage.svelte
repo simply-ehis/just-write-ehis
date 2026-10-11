@@ -36,7 +36,7 @@
     dialogueTrend = [];
     sentenceTrend = [];
     filterTrend = [];
-    if (!doc || doc.locked) {
+    if (!doc) {
       loading = false;
       return;
     }

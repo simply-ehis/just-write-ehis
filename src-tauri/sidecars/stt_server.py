@@ -1,6 +1,6 @@
 """
 Moonshine STT Server (torch-free)
-================================
+=================================
 Transcribes via in-process `transcribe_cpp` (pip: transcribe-cpp)
 against a local Moonshine-base GGUF — no PyTorch, no Ollama, no network
 at runtime. A vendored transcribe CLI binary is used as fallback if one
@@ -12,19 +12,30 @@ is ever shipped (upstream native archives currently ship DLLs only).
 Fetch the GGUF with:  python src-tauri/sidecars/fetch_sidecars.py --stt
 Runtime dep:          pip install -r src-tauri/sidecars/requirements.txt
 
-Endpoints:
-  GET  /health              → {"status": "ok", "model_loaded": bool, "model": str}
-  POST /transcribe          → {"text": str}  (one-shot, full WAV audio)
-  POST /stream/start        → start accumulating audio chunks
-  POST /stream/chunk        → send a chunk ({audio b64, format: wav|pcm_s16})
-  POST /stream/stop         → transcribe accumulated audio → {"text": str}
+Transport: private stdio JSON-line pipe (no TCP port, no HTTP). One JSON
+request per line on stdin, one response per line on stdout, diagnostics
+on stderr. Request/response envelopes:
 
-argv: [port] [model]
-  port  — default 8090
+  Request:  {"id": 1, "method": "...", "params": {...}}
+  Response: {"id": 1, "ok": true, "result": {...}}
+         or {"id": 1, "ok": false, "error": "..."}.
+
+Methods:
+  health         {}                   → {"status", "ready", "model_loaded",
+                                          "model", "error"}
+  transcribe     {audio, format}      → {"text": str}  (one-shot WAV)
+  stream_start   {}                   → {"status": "streaming"}
+  stream_chunk   {audio, format}      → {"ok": true, "chunks": N}
+  stream_stop    {}                   → {"text": str}
+
+argv: [model]
   model — GGUF path override (paste-to-swap from Settings → AI).
           Bare filename resolves inside <server_dir>/models/.
           Legacy onnx ids (moonshine-v2-q6 …) are ignored with a warning
           and the bundled GGUF is used.
+
+The launcher sets JWE_SIDECAR_TOKEN (required at startup — the pipe is
+private, but the contract keeps old/new builds interchangeable).
 """
 
 import base64
@@ -37,12 +48,7 @@ import subprocess
 import sys
 import tempfile
 import wave
-import hmac
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Per-launch token supplied by the desktop launcher (sidecar.rs). Required: the
-# server refuses to start without it, so it can never fall back to being an open
-# loopback endpoint. See SttHandler._authorized.
 AUTH_TOKEN = os.environ.get("JWE_SIDECAR_TOKEN", "")
 
 HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
@@ -70,7 +76,7 @@ def _inside_models(path: str) -> bool:
 
 
 def _resolve_model() -> str:
-    override = sys.argv[2].strip() if len(sys.argv) > 2 and sys.argv[2].strip() else ""
+    override = sys.argv[1].strip() if len(sys.argv) > 1 and sys.argv[1].strip() else ""
     if not override:
         return DEFAULT_GGUF
     if override in _LEGACY_IDS:
@@ -339,133 +345,75 @@ def _b64_to_wav(b64: str, fmt: str) -> bytes:
     raise ValueError(f"Unknown audio format: {fmt}")
 
 
-# ── HTTP handler ─────────────────────────────────────────────────
-class SttHandler(BaseHTTPRequestHandler):
-    def log_message(self, _fmt, *_args):
-        pass
-
-    def _json(self, data: dict, status: int = 200):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length", 0))
-        return self.rfile.read(length) if length else b""
-
-    def _authorized(self) -> bool:
-        """Require the launcher's per-process token.
-
-        Loopback is not a trust boundary: any process running as any local
-        account can reach 127.0.0.1, and any website can issue a bodyless POST
-        (a CORS-simple request, no preflight) to drive transcription on this
-        machine. The desktop launcher mints a token per launch and sends it as
-        X-JWE-Sidecar-Token; without a match every route is refused.
-        """
-        supplied = self.headers.get("X-JWE-Sidecar-Token", "")
-        if not AUTH_TOKEN or not hmac.compare_digest(supplied, AUTH_TOKEN):
-            self._json({"error": "unauthorized"}, 401)
-            return False
-        return True
-
-    def do_GET(self):
-        if not self._authorized():
-            return
-        if self.path == "/health":
-            try:
-                eng = _engine()
-                self._json({"status": "ok" if eng.loaded else "error",
-                            "ready": eng.loaded, "model_loaded": eng.loaded,
-                            "model": os.path.basename(eng.model),
-                            "error": eng.ready_error})
-            except Exception as e:
-                self._json({"status": "error", "ready": False,
-                            "model_loaded": False, "model": "", "error": str(e)})
-        else:
-            self._json({"error": "not found"}, 404)
-
-    def do_POST(self):
-        if not self._authorized():
-            return
-        routes = {
-            "/transcribe": self._transcribe,
-            "/stream/start": self._stream_start,
-            "/stream/chunk": self._stream_chunk,
-            "/stream/stop": self._stream_stop,
-        }
-        handler = routes.get(self.path)
-        if handler:
-            handler()
-        else:
-            self._json({"error": "not found"}, 404)
-
-    def _transcribe(self):
-        raw = self._read_body()
-        if not raw:
-            self._json({"error": "empty body"}, 400)
-            return
+# ── stdio dispatch + frame loop ──────────────────────────────────
+def _dispatch(method: str, params: dict) -> dict:
+    global _streaming_wavs
+    if method == "health":
         try:
-            data = json.loads(raw)
-            wav = _b64_to_wav(data["audio"], data.get("format", "wav"))
-            text = _engine().transcribe_wav(wav)
-            self._json({"text": text})
+            eng = _engine()
+            return {"status": "ok" if eng.loaded else "error",
+                    "ready": eng.loaded, "model_loaded": eng.loaded,
+                    "model": os.path.basename(eng.model),
+                    "error": eng.ready_error}
         except Exception as e:
-            print(f"[stt] Error: {e}", flush=True)
-            self._json({"error": str(e)}, 500)
-
-    def _stream_start(self):
-        global _streaming_wavs
+            return {"status": "error", "ready": False,
+                    "model_loaded": False, "model": "", "error": str(e)}
+    if method == "transcribe":
+        wav = _b64_to_wav(str(params.get("audio", "")), params.get("format", "wav"))
+        return {"text": _engine().transcribe_wav(wav)}
+    if method == "stream_start":
         _streaming_wavs = []
-        self._json({"status": "streaming"})
-
-    def _stream_chunk(self):
-        global _streaming_wavs
-        raw = self._read_body()
-        try:
-            data = json.loads(raw)
-            _streaming_wavs.append(_b64_to_wav(data["audio"], data.get("format", "wav")))
-            self._json({"ok": True, "chunks": len(_streaming_wavs)})
-        except Exception as e:
-            self._json({"error": str(e)}, 400)
-
-    def _stream_stop(self):
-        global _streaming_wavs
+        return {"status": "streaming"}
+    if method == "stream_chunk":
+        _streaming_wavs.append(
+            _b64_to_wav(str(params.get("audio", "")), params.get("format", "wav")))
+        return {"ok": True, "chunks": len(_streaming_wavs)}
+    if method == "stream_stop":
         if not _streaming_wavs:
-            self._json({"text": ""})
-            return
+            return {"text": ""}
         # Concatenate frames of all chunks (must share params — enforced here).
         chunks = _streaming_wavs
         _streaming_wavs = []
-        try:
-            decoded = [_decode_wav_frames(c) for c in chunks]
-            params = {(n_ch, sw, sr) for _, n_ch, sw, sr in decoded}
-            if len(params) != 1:
-                raise ValueError("Stream chunks have mismatched WAV params.")
-            frames = b"".join(frames for frames, _, _, _ in decoded)
-            n_ch, sw, sr = params.pop()
-            buf = io.BytesIO()
-            with wave.open(buf, "wb") as wf:
-                wf.setnchannels(n_ch)
-                wf.setsampwidth(sw)
-                wf.setframerate(sr)
-                wf.writeframes(frames)
-            text = _engine().transcribe_wav(buf.getvalue())
-            self._json({"text": text})
-        except Exception as e:
-            print(f"[stt] Stream error: {e}", flush=True)
-            self._json({"error": str(e)}, 500)
+        decoded = [_decode_wav_frames(c) for c in chunks]
+        params_set = {(n_ch, sw, sr) for _, n_ch, sw, sr in decoded}
+        if len(params_set) != 1:
+            raise ValueError("Stream chunks have mismatched WAV params.")
+        frames = b"".join(frames for frames, _, _, _ in decoded)
+        n_ch, sw, sr = params_set.pop()
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(n_ch)
+            wf.setsampwidth(sw)
+            wf.setframerate(sr)
+            wf.writeframes(frames)
+        return {"text": _engine().transcribe_wav(buf.getvalue())}
+    raise ValueError(f"unknown method: {method}")
+
+
+def _write(out, obj: dict) -> None:
+    out.write(json.dumps(obj) + "\n")
+    out.flush()
 
 
 def main():
     if not AUTH_TOKEN:
         raise RuntimeError("JWE_SIDECAR_TOKEN is required")
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8090
-    server = HTTPServer(("127.0.0.1", port), SttHandler)
-    print(f"[stt] Moonshine STT (transcribe.cpp) on http://127.0.0.1:{port}", flush=True)
-    server.serve_forever()
+    out = sys.stdout
+    sys.stdout = sys.stderr  # keep stdout pure frames; prints become logs
+    print("[stt] stdio sidecar ready (Moonshine, transcribe.cpp)", flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        rid = None
+        try:
+            req = json.loads(line)
+            rid = req.get("id")
+            result = _dispatch(str(req.get("method", "")), req.get("params") or {})
+            _write(out, {"id": rid, "ok": True, "result": result})
+        except Exception as e:
+            print(f"[stt] Error: {e}", flush=True)
+            _write(out, {"id": rid, "ok": False, "error": str(e)})
 
 
 if __name__ == "__main__":

@@ -464,7 +464,6 @@ impl Database {
             pinned: false,
             goal_words: None,
             deadline: None,
-            locked: false,
         };
 
         Ok(doc)
@@ -473,7 +472,7 @@ impl Database {
     pub fn get_doc(&self, id: &str) -> Result<Doc, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
              FROM docs WHERE id = ?1",
             params![id],
             |row| {
@@ -496,7 +495,6 @@ impl Database {
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             },
         ).map_err(|e| e.to_string())
@@ -505,7 +503,7 @@ impl Database {
     pub fn get_doc_by_title(&self, title: &str) -> Result<Option<Doc>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let result = conn.query_row(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
              FROM docs WHERE title = ?1 COLLATE NOCASE LIMIT 1",
             params![title],
             |row| {
@@ -528,7 +526,6 @@ impl Database {
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             },
         );
@@ -797,21 +794,12 @@ impl Database {
         Ok(())
     }
 
-    pub fn set_locked(&self, id: &str, locked: bool) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "UPDATE docs SET locked = ?1, updated_at = ?2 WHERE id = ?3",
-            params![if locked { 1 } else { 0 }, Utc::now().to_rfc3339(), id],
-        ).map_err(|e| e.to_string())?;
-        Ok(())
-    }
-
     /// Pinned docs across all workspaces (Home quick-launch). Titles only
-    /// travel here; opening content stays PIN-gated in the frontend.
+    /// travel here; opening content stays in the frontend.
     pub fn list_pinned_docs(&self) -> Result<Vec<Doc>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE pinned = 1 ORDER BY updated_at DESC"
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE pinned = 1 ORDER BY updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map([], |row| {
@@ -834,7 +822,6 @@ impl Database {
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?;
 
@@ -1003,8 +990,8 @@ impl Database {
     pub fn list_docs_by_workspace(&self, workspace: &str) -> Result<Vec<Doc>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-             FROM docs WHERE workspace = ?1 AND locked = 0 ORDER BY pinned DESC, updated_at DESC"
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
+             FROM docs WHERE workspace = ?1 ORDER BY pinned DESC, updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
         let rows = stmt.query_map(params![workspace], |row| {
@@ -1027,7 +1014,6 @@ impl Database {
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?;
 
@@ -1123,19 +1109,9 @@ impl Database {
             return Err(format!("Invalid daily-note date: {date} (expected YYYY-MM-DD)"));
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        match conn.query_row(
-            "SELECT locked FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND title = ?1",
-            params![date],
-            |row| row.get::<_, i64>(0),
-        ) {
-            Ok(1) => return Err("daily log is locked".to_string()),
-            Ok(_) => {}
-            Err(rusqlite::Error::QueryReturnedNoRows) => {}
-            Err(e) => return Err(e.to_string()),
-        }
 
         let result = conn.query_row(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
              FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND title = ?1",
             params![date],
             |row| {
@@ -1158,7 +1134,6 @@ impl Database {
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             },
         );
@@ -1183,8 +1158,8 @@ impl Database {
     pub fn log_list_entries(&self, limit: i64) -> Result<Vec<Doc>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
+FROM docs WHERE workspace = 'logs' AND kind = 'daily'
   ORDER BY title DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
 
@@ -1208,7 +1183,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?;
 
@@ -1473,14 +1447,14 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             match ws {
                 Some(w) => {
                     let mut stmt = conn.prepare(
-                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE workspace = ?1 AND locked = 0"
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE workspace = ?1"
                     ).map_err(|e| e.to_string())?;
                     let rows = stmt.query_map([w], map_row).map_err(|e| e.to_string())?;
                     rows.filter_map(|r| r.ok()).collect()
                 }
                 None => {
                     let mut stmt = conn.prepare(
-                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs WHERE locked = 0"
+                        "SELECT id, title, workspace, kind, word_count, activity_score FROM docs"
                     ).map_err(|e| e.to_string())?;
                     let rows = stmt.query_map([], map_row).map_err(|e| e.to_string())?;
                     rows.filter_map(|r| r.ok()).collect()
@@ -1683,10 +1657,10 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let query: &str = match shelf_filter {
-            Some("to-read") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE workspace = 'reader' AND status = 'to-read' ORDER BY updated_at DESC",
-            Some("reading") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE workspace = 'reader' AND status = 'reading' ORDER BY updated_at DESC",
-            Some("finished") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE workspace = 'reader' AND status = 'finished' ORDER BY updated_at DESC",
-            _ => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE workspace = 'reader' ORDER BY updated_at DESC",
+            Some("to-read") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = 'reader' AND status = 'to-read' ORDER BY updated_at DESC",
+            Some("reading") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = 'reader' AND status = 'reading' ORDER BY updated_at DESC",
+            Some("finished") => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = 'reader' AND status = 'finished' ORDER BY updated_at DESC",
+            _ => "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = 'reader' ORDER BY updated_at DESC",
         };
 
         let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
@@ -1710,7 +1684,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?;
 
@@ -1748,7 +1721,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE parent_id = ?1 ORDER BY updated_at ASC"
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE parent_id = ?1 ORDER BY updated_at ASC"
         ).map_err(|e| e.to_string())?;
 
         let docs: Vec<Doc> = stmt.query_map(params![project_id], |row| {
@@ -1771,7 +1744,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
@@ -1937,7 +1909,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn get_smart_tabs(&self, workspace: &str) -> Result<Vec<Doc>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE workspace = ?1 AND locked = 0 ORDER BY activity_score DESC, updated_at DESC LIMIT 20"
+            "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = ?1 ORDER BY activity_score DESC, updated_at DESC LIMIT 20"
         ).map_err(|e| e.to_string())?;
 
         let docs = stmt.query_map(params![workspace], |row| {
@@ -1960,7 +1932,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                 goal_words: row.get(16)?,
                 deadline: row.get(17)?,
-                locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
             })
         }).map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
@@ -2055,7 +2026,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn dashboard_recent_docs(&self, limit: i64) -> Result<Vec<(String, String, String)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, title, updated_at FROM docs WHERE locked = 0 ORDER BY updated_at DESC LIMIT ?1"
+            "SELECT id, title, updated_at FROM docs ORDER BY updated_at DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
 
         let docs = stmt.query_map(params![limit], |row| {
@@ -2070,7 +2041,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn dashboard_workspace_counts(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT workspace, COUNT(*) FROM docs WHERE locked = 0 GROUP BY workspace ORDER BY COUNT(*) DESC"
+            "SELECT workspace, COUNT(*) FROM docs GROUP BY workspace ORDER BY COUNT(*) DESC"
         ).map_err(|e| e.to_string())?;
 
         let counts = stmt.query_map([], |row| {
@@ -2085,7 +2056,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn dashboard_writing_days(&self) -> Result<Vec<String>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT DISTINCT date(u.ts) as day FROM usage_events u JOIN docs d ON d.id = u.doc_id WHERE u.event = 'write' AND d.locked = 0 ORDER BY day DESC LIMIT 90"
+            "SELECT DISTINCT date(u.ts) as day FROM usage_events u JOIN docs d ON d.id = u.doc_id WHERE u.event = 'write' ORDER BY day DESC LIMIT 90"
         ).map_err(|e| e.to_string())?;
 
         let days = stmt.query_map([], |row| row.get(0))
@@ -2101,7 +2072,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
         let peak_hour: Option<String> = conn
             .query_row(
-                "SELECT strftime('%H', u.ts) as hour FROM usage_events u JOIN docs d ON d.id = u.doc_id WHERE u.event = 'write' AND d.locked = 0 AND u.ts >= date('now', '-30 days') GROUP BY hour ORDER BY COUNT(*) DESC LIMIT 1",
+                "SELECT strftime('%H', u.ts) as hour FROM usage_events u JOIN docs d ON d.id = u.doc_id WHERE u.event = 'write' AND u.ts >= date('now', '-30 days') GROUP BY hour ORDER BY COUNT(*) DESC LIMIT 1",
                 [],
                 |r| r.get(0),
             )
@@ -2112,7 +2083,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 "SELECT workspace, \
                  SUM(CASE WHEN created_at >= date('now', '-7 days') THEN 1 ELSE 0 END) as this_week, \
                  SUM(CASE WHEN created_at >= date('now', '-14 days') AND created_at < date('now', '-7 days') THEN 1 ELSE 0 END) as last_week \
-                 FROM docs WHERE locked = 0 AND updated_at >= date('now', '-14 days') GROUP BY workspace ORDER BY this_week DESC LIMIT 1",
+                 FROM docs WHERE updated_at >= date('now', '-14 days') GROUP BY workspace ORDER BY this_week DESC LIMIT 1",
                 [],
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
             )
@@ -2120,7 +2091,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
         let this_week_words: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(word_count), 0) FROM docs WHERE locked = 0 AND updated_at >= date('now', '-7 days')",
+                "SELECT COALESCE(SUM(word_count), 0) FROM docs WHERE updated_at >= date('now', '-7 days')",
                 [],
                 |r| r.get(0),
             )
@@ -2130,7 +2101,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             .query_row(
                 "SELECT COALESCE(AVG(weekly_total), 0) FROM ( \
                  SELECT date(updated_at) as day, SUM(word_count) as weekly_total FROM docs \
-                 WHERE locked = 0 AND updated_at >= date('now', '-35 days') GROUP BY strftime('%W', updated_at) \
+                 WHERE updated_at >= date('now', '-35 days') GROUP BY strftime('%W', updated_at) \
                  )",
                 [],
                 |r| r.get(0),
@@ -2147,7 +2118,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             .query_row(
                 "SELECT COALESCE(AVG(CAST((julianday(ended_at) - julianday(started_at)) * 1440 AS REAL)), 0) FROM ( \
                  SELECT MIN(u.ts) as started_at, MAX(u.ts) as ended_at FROM usage_events u JOIN docs d ON d.id = u.doc_id \
-                  WHERE u.event = 'write' AND d.locked = 0 AND u.ts >= date('now', '-30 days') \
+                  WHERE u.event = 'write' AND u.ts >= date('now', '-30 days') \
                   GROUP BY date(u.ts) \
                  )",
                 [],
@@ -2168,7 +2139,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
         let mut stmt = conn.prepare(
             "SELECT id, title, workspace, goal_words, word_count, deadline FROM docs \
-             WHERE goal_words IS NOT NULL AND goal_words > 0 AND locked = 0 \
+             WHERE goal_words IS NOT NULL AND goal_words > 0 \
              ORDER BY deadline ASC NULLS LAST, updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
@@ -2189,11 +2160,10 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     }
 
     /// Spec 8.3: docs opened 2+ times with no write since the last open.
-    /// Locked docs are excluded (invisible to stats).
     pub fn get_reopen_never_finish(&self) -> Result<Vec<(Doc, i64, String)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked,
+            "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline,
                     u.opens, u.last_open
              FROM docs d JOIN (
                  SELECT doc_id,
@@ -2202,7 +2172,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                         MAX(CASE WHEN event IN ('write', 'edit') THEN ts END) AS last_write
                  FROM usage_events GROUP BY doc_id
              ) u ON u.doc_id = d.id
-             WHERE d.locked = 0 AND u.opens >= 2 AND (u.last_write IS NULL OR u.last_write < u.last_open)
+             WHERE u.opens >= 2 AND (u.last_write IS NULL OR u.last_write < u.last_open)
              ORDER BY u.last_open DESC"
         ).map_err(|e| e.to_string())?;
 
@@ -2227,7 +2197,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 },
                 row.get::<_, i64>(19)?,
                 row.get::<_, String>(20)?,
@@ -2237,11 +2206,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
-    /// Words per day (unlocked docs), oldest first. Powers the streak heatmap.
+    /// Words per day, oldest first. Powers the streak heatmap.
     pub fn dashboard_streak_heatmap(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT date(updated_at) as day, SUM(word_count) FROM docs WHERE locked = 0 GROUP BY day ORDER BY day"
+            "SELECT date(updated_at) as day, SUM(word_count) FROM docs GROUP BY day ORDER BY day"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -2267,11 +2236,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         Ok(buckets.into_iter().enumerate().map(|(h, c)| (h as i64, c)).collect())
     }
 
-    /// Words per day for the last 7 days (unlocked docs). Zero-filled.
+    /// Words per day for the last 7 days. Zero-filled.
     pub fn dashboard_writing_velocity(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT date(updated_at) as day, SUM(word_count) FROM docs WHERE locked = 0 AND updated_at >= date('now', '-7 days') GROUP BY day"
+            "SELECT date(updated_at) as day, SUM(word_count) FROM docs WHERE updated_at >= date('now', '-7 days') GROUP BY day"
         ).map_err(|e| e.to_string())?;
         let mut by_day = std::collections::HashMap::new();
         let rows = stmt.query_map([], |row| {
@@ -2293,13 +2262,13 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
     pub fn dashboard_productivity_score(&self) -> Result<serde_json::Value, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let total_words: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(word_count), 0) FROM docs WHERE locked = 0", [], |r| r.get(0),
+            "SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| r.get(0),
         ).map_err(|e| e.to_string())?;
         let total_docs: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM docs WHERE locked = 0", [], |r| r.get(0),
+            "SELECT COUNT(*) FROM docs", [], |r| r.get(0),
         ).map_err(|e| e.to_string())?;
         let active_days: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT date(updated_at)) FROM docs WHERE locked = 0", [], |r| r.get(0),
+            "SELECT COUNT(DISTINCT date(updated_at)) FROM docs", [], |r| r.get(0),
         ).map_err(|e| e.to_string())?;
         let avg_words = if total_docs > 0 { total_words / total_docs } else { 0 };
         let score = ((total_words as f64 / 10000.0) * 30.0 + active_days as f64 * 2.0 + total_docs as f64 * 0.5).round().min(100.0) as i64;
@@ -2525,11 +2494,12 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                 // Use process::Command to get memory via tasklist or PowerShell
                 use std::process::Command;
                 let pid = std::process::id();
-                if let Ok(output) = Command::new("powershell")
-                    .args(["-NoProfile", "-Command", &format!(
-                        "(Get-Process -Id {}).WorkingSet64 / 1MB", pid
-                    )])
-                    .output()
+                let mut probe = Command::new("powershell");
+                probe.args(["-NoProfile", "-Command", &format!(
+                    "(Get-Process -Id {}).WorkingSet64 / 1MB", pid
+                )]);
+                crate::procutil::hide_console(&mut probe);
+                if let Ok(output) = probe.output()
                 {
                     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     s.parse::<f64>().unwrap_or(0.0) as u64
@@ -2597,16 +2567,6 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut context = String::new();
 
-        // Locked docs are invisible to AI: no content, no bible, no neighbors.
-        let is_locked: bool = conn.query_row(
-            "SELECT locked FROM docs WHERE id = ?1",
-            params![doc_id],
-            |row| row.get::<_, i64>(0),
-        ).map(|v| v != 0).unwrap_or(false);
-        if is_locked {
-            return Ok(String::new());
-        }
-
         // Common: current doc summary
         if let Ok(doc) = conn.query_row(
             "SELECT title, content, word_count FROM docs WHERE id = ?1",
@@ -2654,7 +2614,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                     |row| row.get::<_, Option<String>>(0),
                 ).ok().flatten() {
                     if let Ok(prev) = conn.query_row(
-                        "SELECT title, content FROM docs WHERE parent_id = ?1 AND id != ?2 AND locked = 0 ORDER BY updated_at DESC LIMIT 1",
+                        "SELECT title, content FROM docs WHERE parent_id = ?1 AND id != ?2 ORDER BY updated_at DESC LIMIT 1",
                         params![pid, doc_id],
                         |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                     ) {
@@ -2666,7 +2626,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             "logs" => {
                 // Last 7 daily notes
                 if let Ok(mut stmt) = conn.prepare(
-                    "SELECT title, content FROM docs WHERE workspace = 'logs' AND locked = 0 ORDER BY created_at DESC LIMIT 7"
+                    "SELECT title, content FROM docs WHERE workspace = 'logs' ORDER BY created_at DESC LIMIT 7"
                 ) {
                     let notes: Vec<(String, String)> = stmt.query_map([], |row| {
                         Ok((row.get(0)?, row.get(1)?))
@@ -2710,7 +2670,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
             "map" | "projects" => {
                 // Linked docs one hop out (backlinks + outgoing)
                 if let Ok(mut stmt) = conn.prepare(
-                    "SELECT d.title, d.workspace, b.context_snippet FROM backlinks b JOIN docs d ON d.id = b.source_id WHERE b.target_id = ?1 AND d.locked = 0 LIMIT 10"
+                    "SELECT d.title, d.workspace, b.context_snippet FROM backlinks b JOIN docs d ON d.id = b.source_id WHERE b.target_id = ?1 LIMIT 10"
                 ) {
                     let linked: Vec<(String, String, String)> = stmt.query_map(params![doc_id], |row| {
                         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -2728,7 +2688,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
 
                 // Outgoing links
                 if let Ok(mut stmt) = conn.prepare(
-                    "SELECT d.title, d.workspace, b.context_snippet FROM backlinks b JOIN docs d ON d.id = b.target_id WHERE b.source_id = ?1 AND d.locked = 0 LIMIT 10"
+                    "SELECT d.title, d.workspace, b.context_snippet FROM backlinks b JOIN docs d ON d.id = b.target_id WHERE b.source_id = ?1 LIMIT 10"
                 ) {
                     let outgoing: Vec<(String, String, String)> = stmt.query_map(params![doc_id], |row| {
                         Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -2855,7 +2815,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily' AND locked = 0
                  FROM docs d
                  LEFT JOIN rag_chunks rc ON rc.doc_id = d.id AND rc.chunk_index = 0
                  LEFT JOIN rag_vec rv ON rv.chunk_id = rc.id
-                 WHERE d.locked = 0 AND d.content != ''
+                 WHERE d.content != ''
                  GROUP BY d.id
                  ORDER BY d.activity_score DESC",
             )
@@ -3105,9 +3065,6 @@ mod entity_tests {
         db.move_doc(MoveDocRequest { id: scene_two.clone(), new_parent_id: Some(project_two.clone()), new_path: None }).unwrap();
         assert_eq!(db.bible_scope_id(&scene_two).unwrap(), project_two);
         assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_two));
-        db.set_locked(&scene_one, true).unwrap();
-        assert!(!db.bible_source_allowed(&scene_one).unwrap());
-        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_one));
     }
 
     #[test]
@@ -3198,16 +3155,15 @@ mod vault_confinement_tests {
     }
 
     #[test]
-    fn rag_search_returns_content_and_honours_locked_docs() {
+    fn rag_search_returns_content() {
         // Guards the batched chunk fetch: it replaced a per-hit `query_row` loop,
-        // so this pins both that results still come back in distance order and
-        // that a locked doc's chunks are still excluded after the rewrite.
+        // so this pins that results still come back with real content in order.
         let db = test_db("rag-batch");
-        let open_id = db
+        let doc_id = db
             .create_doc(CreateDocRequest {
                 workspace: "write".into(),
                 kind: "doc".into(),
-                title: "Rag open".into(),
+                title: "Rag doc".into(),
                 parent_id: None,
                 content: Some(
                     "the compiler rewrites the borrow. borrow checking happens early. \
@@ -3218,31 +3174,15 @@ mod vault_confinement_tests {
             })
             .unwrap()
             .id;
-        let secret_id = db
-            .create_doc(CreateDocRequest {
-                workspace: "write".into(),
-                kind: "doc".into(),
-                title: "Rag secret".into(),
-                parent_id: None,
-                content: Some(
-                    "borrow borrow borrow borrow borrow borrow borrow borrow borrow."
-                        .into(),
-                ),
-                frontmatter_json: None,
-            })
-            .unwrap()
-            .id;
-        db.set_locked(&secret_id, true).unwrap();
 
         // `create_doc` does not chunk; the RAG index is built on save (and via
         // the rag_chunk_document command), so build it explicitly here.
-        db.rag_chunk_document(&open_id, 200, 50).unwrap();
-        db.rag_chunk_document(&secret_id, 200, 50).unwrap();
+        db.rag_chunk_document(&doc_id, 200, 50).unwrap();
 
         let results = db.rag_search("borrow", 10).unwrap();
         assert!(
             !results.is_empty(),
-            "rag_search returned nothing for a term present in both docs"
+            "rag_search returned nothing for a term present in the doc"
         );
         // Every returned chunk must have real content — a batching bug that lost
         // the row mapping would surface as empty text.
@@ -3250,80 +3190,10 @@ mod vault_confinement_tests {
             assert!(!chunk.content.trim().is_empty(), "empty chunk content");
             assert!(score.is_finite(), "non-finite score {score}");
         }
-        // Locked docs never surface in AI retrieval.
         assert!(
-            !results.iter().any(|(c, _)| c.doc_id == secret_id),
-            "locked doc surfaced through rag_search"
+            results.iter().any(|(c, _)| c.doc_id == doc_id),
+            "doc missing from rag_search"
         );
-        // ...and the open one still does, so the filter is not over-broad.
-        assert!(
-            results.iter().any(|(c, _)| c.doc_id == open_id),
-            "open doc missing from rag_search"
-        );
-    }
-
-    #[test]
-    fn locked_docs_are_excluded_from_lists_and_graph() {
-        // `docs.locked` filtering was implemented per-query and had been
-        // forgotten in exactly these three read paths, so the app-lock guarantee
-        // silently depended on each call site remembering. Locked docs are
-        // excluded from search/RAG/dashboards/smart-tabs; these were the gaps.
-        let db = test_db("locked-filter");
-        let make = |title: &str, locked: bool| -> String {
-            let id = db
-                .create_doc(CreateDocRequest {
-                    workspace: "write".into(),
-                    kind: "doc".into(),
-                    title: title.into(),
-                    parent_id: None,
-                    content: Some(format!("body of {title}")),
-                    frontmatter_json: None,
-                })
-                .unwrap()
-                .id;
-            db.set_locked(&id, locked).unwrap();
-            id
-        };
-        let visible = make("Visible doc", false);
-        let secret = make("Secret doc", true);
-
-        // list_docs_by_workspace
-        let listed: Vec<String> = db
-            .list_docs_by_workspace("write")
-            .unwrap()
-            .into_iter()
-            .map(|d| d.id)
-            .collect();
-        assert!(listed.contains(&visible), "visible doc must be listed");
-        assert!(!listed.contains(&secret), "locked doc leaked into list_docs_by_workspace");
-
-        // log_list_entries (daily notes)
-        let log = db.log_get_or_create("2026-03-04").unwrap();
-        db.set_locked(&log.id, true).unwrap();
-        assert!(
-            !db.log_list_entries(50).unwrap().iter().any(|e| e.id == log.id),
-            "locked daily note leaked into log_list_entries"
-        );
-        // ...and an unlocked one still shows.
-        let open_log = db.log_get_or_create("2026-03-05").unwrap();
-        assert!(
-            db.log_list_entries(50).unwrap().iter().any(|e| e.id == open_log.id),
-            "unlocked daily note must still be listed"
-        );
-
-        // graph_query, both the workspace-scoped and the unfiltered branch.
-        for ws in [Some("write"), None] {
-            let graph = db.graph_query(ws, None).unwrap();
-            let ids: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();
-            assert!(
-                !ids.contains(&secret.as_str()),
-                "locked doc leaked into graph_query(ws={ws:?})"
-            );
-            assert!(
-                ids.contains(&visible.as_str()),
-                "visible doc missing from graph_query(ws={ws:?})"
-            );
-        }
     }
 
     #[test]

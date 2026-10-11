@@ -1,9 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
-  import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightSpecialChars } from "@codemirror/view";
+  import { EditorView, keymap, highlightActiveLine, highlightSpecialChars } from "@codemirror/view";
   import WikilinkPreview from "./WikilinkPreview.svelte";
-  import { EditorState } from "@codemirror/state";
-  import { basicSetup } from "codemirror";
+  import { Compartment, EditorState } from "@codemirror/state";
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
@@ -16,7 +15,8 @@
   import { showToast } from "$lib/stores/notifications";
   import { ViewPlugin, type ViewUpdate } from "@codemirror/view";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
-  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette } from "$lib/editorTheme";
+  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette, markdownSyntaxTheme } from "$lib/editorTheme";
+  import { resolveThemeMode } from "$lib/appearance";
   import VersionHistory from "./VersionHistory.svelte";
   import TrendlineChart from "./TrendlineChart.svelte";
   import RhythmPanel from "./RhythmPanel.svelte";
@@ -26,7 +26,6 @@
   import ReadAloudButton from "./ReadAloudButton.svelte";
   import Icon from "./Icon.svelte";
   import { downloadConvertOutput, downloadFountain } from "$lib/download";
-  import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { craftStats } from "$lib/browserBackend";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
   import { markUsed } from "$lib/features";
@@ -35,6 +34,7 @@
   import StoryMemoryHoverCard from "./StoryMemoryHoverCard.svelte";
   import { expandSnippet, getSnippetsForWorkspace } from "$lib/stores/templates";
   import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
+  import { ttsFollow, positionedSections, followTtsSection, type PositionedSection } from "$lib/ttsFollow";
 import { countWords } from "$lib/text";
 
   let { companionMode = false }: { companionMode?: boolean } = $props();
@@ -70,7 +70,7 @@ import { countWords } from "$lib/text";
         focus: focusDimming,
       });
     }
-    if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+    if (editorView && editorContainer && $currentDoc) reconfigureAppearance();
   }
 
   function toggleFocusDimming() {
@@ -81,7 +81,7 @@ import { countWords } from "$lib/text";
         focus: focusDimming,
       });
     }
-    if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+    if (editorView && editorContainer && $currentDoc) reconfigureAppearance();
   }
 
   // Slash commands (A11.7)
@@ -159,6 +159,12 @@ import { countWords } from "$lib/text";
   }
 
   function handleSlashKeydown(e: KeyboardEvent) {
+    // Reading mode hides both toolbars, so the toolbar toggle is gone —
+    // Esc (and the floating pill) are the only ways back out.
+    if (e.key === "Escape" && readingMode && !slashVisible && !e.defaultPrevented) {
+      readingMode = false;
+      return;
+    }
     if (!slashVisible) return false;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -316,6 +322,19 @@ import { countWords } from "$lib/text";
     await attachFiles(editorView, files);
   }
 
+  // Read-aloud section flow (3.9): snapshot sections at read start, then
+  // highlight + scroll-follow the one being spoken.
+  let ttsSections: PositionedSection[] = [];
+
+  function ttsSplit() {
+    ttsSections = positionedSections($currentDoc?.content ?? "");
+    return ttsSections.map(({ id, title, text }) => ({ id, title, text }));
+  }
+
+  function handleTtsSection(idx: number | null) {
+    if (editorView) followTtsSection(editorView, ttsSections, idx);
+  }
+
   async function handlePaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items || !$currentDoc || !editorView) return;
@@ -350,14 +369,6 @@ import { countWords } from "$lib/text";
         maxWidth: "720px",
         margin: "0 auto",
       },
-    ".cm-gutters": {
-      backgroundColor: p.bg,
-      color: p.muted,
-      border: "none",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: p.overlay,
-    },
     ".cm-activeLine": {
       backgroundColor: p.overlay,
     },
@@ -404,7 +415,73 @@ import { countWords } from "$lib/text";
     ".cm-searchMatch-selected": {
       backgroundColor: p.matchSel,
     },
+    ".cm-tts-current": {
+      backgroundColor: p.matchSel,
+    },
   });
+  }
+
+  // Appearance/behavior compartments: theme, focus-dimming, typewriter
+  // margins, and autocorrect reconfigure IN PLACE via reconfigureAppearance().
+  // Destroying the EditorView (createEditor) resets CodeMirror's history()
+  // — so settings changes must never take the destroy path, or every
+  // font-size tweak silently wipes the session's undo/redo stack.
+  // Full destroy/recreate is reserved for DOCUMENT changes (new doc.id).
+  let themeCompartment = new Compartment();
+  let focusCompartment = new Compartment();
+  let typewriterCompartment = new Compartment();
+  let autocorrectCompartment = new Compartment();
+
+  function currentThemeExt() {
+    const mode = resolveThemeMode($settings.themeMode);
+    const palette = editorPalette($settings.theme, mode);
+    return [
+      makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, mode),
+      markdownSyntaxTheme(palette),
+    ];
+  }
+
+  function currentAutocorrectExt() {
+    return $settings.autocorrectEnabled
+      ? createAutocorrectPlugin({
+          enabled: () => $settings.autocorrectEnabled,
+          useEnglishTable: () => $settings.dictionaryLanguage !== "off",
+          getCustomWords: () => bibleWords,
+        })
+      : [];
+  }
+
+  function currentFocusExt() {
+    return focusDimming
+      ? focusDimmingPlugin({
+          isEnabled: () => focusDimming,
+          getContextLines: () => $settings.focusContextLines,
+        })
+      : [];
+  }
+
+  function currentTypewriterExt() {
+    return typewriterEnabled
+      ? EditorView.scrollMargins.of((view) => {
+          const h = view.dom.clientHeight || 600;
+          const m = Math.round(h / 3);
+          return { top: m, bottom: m };
+        })
+      : [];
+  }
+
+  /**
+   * Apply theme/font/autocorrect/focus/typewriter changes WITHOUT
+   * destroying the view — history, cursor, and scroll position survive.
+   */
+  function reconfigureAppearance() {
+    const effects = [
+      themeCompartment.reconfigure(currentThemeExt()),
+      focusCompartment.reconfigure(currentFocusExt()),
+      typewriterCompartment.reconfigure(currentTypewriterExt()),
+      autocorrectCompartment.reconfigure(currentAutocorrectExt()),
+    ];
+    if (editorView) editorView.dispatch({ effects });
   }
 
   function createEditor(doc: Doc | null) {
@@ -413,7 +490,6 @@ import { countWords } from "$lib/text";
     }
 
     const content = doc?.content ?? "";
-    const darkTheme = makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode);
 
     // Snippet expansion plugin. The expansion dispatch is deferred past
     // the update cycle (dispatch is illegal synchronously inside
@@ -464,7 +540,9 @@ import { countWords } from "$lib/text";
     const state = EditorState.create({
       doc: content,
       extensions: [
-        lineNumbers(),
+        // Soft-wrap at the content measure (720px): long lines fold instead
+        // of scrolling the pane sideways forever.
+        EditorView.lineWrapping,
         highlightActiveLine(),
         highlightSpecialChars(),
         history(),
@@ -522,25 +600,16 @@ import { countWords } from "$lib/text";
           },
         ]),
         markdown(),
-        darkTheme,
+        themeCompartment.of(currentThemeExt()),
         search({ top: true }),
         highlightSelectionMatches(),
         ...(!companionMode
           ? [createStoryMemoryExtension({ onHover: handleStoryMemoryHover })]
           : []),
-        ...(focusDimming ? [focusDimmingPlugin(() => focusDimming)] : []),
-        ...(typewriterEnabled
-          ? [EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))]
-          : []),
-        ...($settings.autocorrectEnabled
-          ? [
-              createAutocorrectPlugin({
-                enabled: () => $settings.autocorrectEnabled,
-                useEnglishTable: () => $settings.dictionaryLanguage !== "off",
-                getCustomWords: () => bibleWords,
-              }),
-            ]
-          : []),
+        focusCompartment.of(currentFocusExt()),
+        ...ttsFollow,
+        typewriterCompartment.of(currentTypewriterExt()),
+        autocorrectCompartment.of(currentAutocorrectExt()),
         snippetPlugin,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -613,7 +682,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
   }
 
   function handleContentChange(content: string) {
-    if (!$currentDoc || (companionMode && $currentDoc.locked)) return;
+    if (!$currentDoc) return;
     const editingDocId = $currentDoc.id;
     liveContent = content;
 
@@ -650,11 +719,6 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
 
   async function requestGhostSuggestion(content: string) {
     if (!$settings.ghostEnabled || !$currentDoc) return;
-    try {
-      assertAiAllowedForDoc($currentDoc);
-    } catch {
-      return;
-    }
 
     const lastSentence = lastSentenceOf(content);
     if (!lastSentence) return;
@@ -767,7 +831,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
   $effect(() => {
     void [$settings.theme, $settings.themeMode, $settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.autocorrectEnabled, $settings.dictionaryLanguage];
     untrack(() => {
-      if (editorView && editorContainer && $currentDoc) createEditor($currentDoc);
+      if (editorView && editorContainer && $currentDoc) reconfigureAppearance();
     });
   });
 
@@ -794,7 +858,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
         focusDimming = fd;
         changed = true;
       }
-      if (changed) createEditor($currentDoc);
+      if (changed) reconfigureAppearance();
     });
   });
 
@@ -945,7 +1009,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
           class="icon-btn"
           class:active={focusMode}
           onclick={() => focusMode = !focusMode}
-          title="Focus Mode (F11)"
+          title="Focus Mode (hides surrounding text)"
           aria-label="Toggle focus mode"
           aria-pressed={focusMode}
         >
@@ -1013,6 +1077,8 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
                   ? editorView.state.sliceDoc(sel.from, sel.to)
                   : '';
               }}
+              getSections={ttsSplit}
+              onSection={handleTtsSection}
             />
           {/if}
         </div>
@@ -1047,6 +1113,19 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
       </div>
     </div>
   </div>
+  {/if}
+  {#if readingMode}
+    <div class="reading-exit">
+      <button
+        class="reading-exit-btn"
+        onclick={() => (readingMode = false)}
+        title="Exit reading mode (Esc)"
+        aria-label="Exit reading mode"
+      >
+        <Icon name="book-open" size={14} />
+        <span>Exit reading</span>
+      </button>
+    </div>
   {/if}
   {#if showRhythm}
     <RhythmPanel content={liveContent} {dialogueTrend} {sentenceTrend} onJumpToLine={(line) => {
@@ -1119,6 +1198,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
     display: flex;
     flex-direction: column;
     height: 100%;
+    position: relative;
   }
 
   .editor-toolbar {
@@ -1267,11 +1347,38 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
     line-height: 1.9;
   }
 
-  .editor-pane.reading-mode :global(.cm-gutters),
-  .editor-pane.focus-mode :global(.cm-gutters),
   .editor-pane.reading-mode .editor-toolbar,
   .editor-pane.reading-mode :global(.format-toolbar) {
     display: none;
+  }
+
+  /* Reading mode hides the toolbar (and with it the exit toggle), so a
+     floating pill is the always-visible way back out. Esc does the same. */
+  .reading-exit {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    z-index: 60;
+  }
+
+  .reading-exit-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-full, 999px);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .reading-exit-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
   }
 
   .ghost-overlay {

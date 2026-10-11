@@ -25,8 +25,9 @@
     formatSlowCalls,
     type FeedbackSeverity,
   } from "$lib/support";
+  import { resolveThemeMode } from "$lib/appearance";
 
-  let makerLogo = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let makerLogo = $derived(resolveThemeMode($settings.themeMode) === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   let appVersion = $state(APP_VERSION);
   let severity = $state<FeedbackSeverity>("bug");

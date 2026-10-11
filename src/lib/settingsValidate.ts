@@ -12,9 +12,9 @@
  */
 
 /** Keys that live in the OS keychain, never in a settings file. */
-export const SECRET_KEYS = ["apiKey", "appLockPin"] as const;
-export const APP_LOCK_MIN_PIN_LENGTH = 4;
+export const SECRET_KEYS = ["apiKey"] as const;
 export const EDITOR_FONT_VALUES = [
+  "Georgia",
   "JetBrains Mono",
   "Fira Code",
   "Source Code Pro",
@@ -58,8 +58,11 @@ const INT = (min: number, max: number): Rule => ({ kind: "int", min, max });
 
 /** Every importable/sanitizable setting this version knows. */
 const SCHEMA: Record<string, Rule> = {
+  /** One-time migration marker (see index.html): v1 = paper+gold palette,
+   *  serif editor default. Must validate or the migration re-runs forever. */
+  settingsVersion: INT(0, 100000),
   theme: ENUM("default", "brutalist", "glass"),
-  themeMode: ENUM("dark", "light"),
+  themeMode: ENUM("dark", "light", "system"),
   accentOverride: HEXCOLOR,
   iconSet: ENUM("phosphor", "tabler"),
   sidebarFooterCollapsed: BOOL,
@@ -84,6 +87,8 @@ const SCHEMA: Record<string, Rule> = {
   readerTheme: ENUM("app", "light", "sepia", "dark"),
   typewriterDefault: BOOL,
   focusDimmingDefault: BOOL,
+  focusContextLines: INT(0, 10),
+  focusDimStrength: NUM(0.1, 1),
   autocorrectEnabled: BOOL,
   ghostEnabled: BOOL,
   dictionaryLanguage: ENUM("en", "off"),
@@ -101,7 +106,6 @@ const SCHEMA: Record<string, Rule> = {
   scrubSecrets: BOOL,
   aiMemoryEnabled: BOOL,
 
-  lockEnabled: BOOL,
   craftProfilingEnabled: BOOL,
 
   vaultPath: STR,
@@ -145,6 +149,7 @@ const SCHEMA: Record<string, Rule> = {
   pythonPath: STR,
   llmEnabled: BOOL,
   llmModel: STR,
+  modelRetention: ENUM("idle-5min", "session", "always"),
   rhythmHeatmapInStatusBar: BOOL,
 };
 

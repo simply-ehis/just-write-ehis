@@ -1,6 +1,6 @@
 /**
  * memorySidecar — AI memory sidecar client (vendored harness memory +
- * redaction, port 8092 — not the legacy 8080 harness). Lazy-starts the
+ * redaction over stdio JSON frames — no TCP port). Lazy-starts the
  * python server on first use, mirroring audio.ts. Every call degrades to
  * a clear error outside the desktop shell — privacy gates must fail
  * closed, never pass secrets through silently.
@@ -28,7 +28,6 @@ export async function ensureHarness(onProgress?: (elapsedSec: number) => void): 
       if (_m) onProgress?.(sec);
     },
     setProbed: () => {},
-    stop: stopHarness,
   });
 }
 

@@ -496,7 +496,7 @@
 
   .velocity-bar {
     width: 100%;
-    background: linear-gradient(180deg, var(--accent-primary), #8FC7A9);
+    background: linear-gradient(180deg, var(--accent-primary), var(--accent-hover));
     border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
   }

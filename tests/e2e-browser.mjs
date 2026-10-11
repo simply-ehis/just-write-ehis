@@ -10,7 +10,7 @@
  *
  * Run: npm run build && npm run test:e2e
  */
-import { createServer, get as httpGet, request as httpRequest } from "node:http";
+import { createServer, get as httpGet } from "node:http";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -298,7 +298,14 @@ async function noNativeDialogs() {
   const ai = await readFile(join(root, "src/lib/components/AiPanel.svelte"), "utf8");
   check("no hardcoded dev paths", !ai.includes("C:\\\\Users") && !ai.includes("small-model-harness\""));
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
-  check("editor theme follows setting", editor.includes("makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode"));
+  // themeMode can be "dark" | "light" | "system", so the editor resolves it
+  // through resolveThemeMode() before it reaches makeDarkTheme — passing the
+  // raw setting would feed the word "system" straight into the palette.
+  check(
+    "editor theme follows setting",
+    editor.includes("resolveThemeMode($settings.themeMode)") &&
+      editor.includes("makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, mode)")
+  );
   const palette = await readFile(join(root, "src/lib/editorTheme.ts"), "utf8");
   check("editor palettes per theme", ["light:", "dark:", "brutalist:", "brutalist-light", "glass:", "glass-light"].every((k) => palette.includes(k)));
 }
@@ -332,14 +339,13 @@ async function modelWiring() {
   check("running sidecars still health-check", audioStore.includes("result.value ?? await spec.health()"));
   const sidecarRust = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
   check("release prefers bundled native Python runtimes", sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') && sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "tts-server.exe")') && sidecarRust.indexOf('if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') < sidecarRust.indexOf('let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")') && sidecarRust.includes("JWE_SIDECARS_DIR"));
-  check("stale port cleanup never adopts arbitrary Python", sidecarRust.includes("fn port_owner") && !sidecarRust.includes('starts_with("python")'));
+  check("stdio transport (no TCP port reclaim in sidecar)", !sidecarRust.includes("fn port_owner") && !sidecarRust.includes("reclaim_stale_port"));
   const nativeCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("renderer cannot choose arbitrary sidecar roots", nativeCommands.includes("trusted_sidecars_dir") && nativeCommands.includes("outside the application resource root"));
   check("renderer cannot choose arbitrary Python executables", nativeCommands.includes("trusted_python_command") && nativeCommands.includes("custom Python paths are disabled"));
   const sidecarValidation = await readFile(join(root, "src/lib/sidecarValidate.ts"), "utf8");
   check("Python setting matches native allowlist", sidecarValidation.includes("python3") && sidecarValidation.includes("Use python, python3, or py from PATH"));
-  const browserBackend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
-  check("empty PIN cannot verify", nativeCommands.includes("fn verify_pin_value") && nativeCommands.includes('verify_pin_value("", "")') && browserBackend.includes("normalizedExpected.length >= 4"));
+  check("PIN verification removed from backend", !nativeCommands.includes("fn verify_pin_value") && !nativeCommands.includes("app_lock_verify"));
   const tauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.conf.json"), "utf8"));
   const windowsTauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.windows.conf.json"), "utf8"));
   const baseResources = tauriConfig.bundle?.resources ?? [];
@@ -350,9 +356,9 @@ async function modelWiring() {
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust passes model to sidecars", commands.includes("model: Option<String>"));
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");
-  check("STT honors model override", stt.includes("sys.argv[2]"));
+  check("STT honors model override (argv[1])", stt.includes("sys.argv[1]"));
   const tts = await readFile(join(root, "src-tauri/sidecars/tts_server.py"), "utf8");
-  check("TTS honors repo override", tts.includes("sys.argv[2]"));
+  check("TTS honors repo override (argv[1])", tts.includes("sys.argv[1]"));
 }
 
 async function modelsDocWiring() {
@@ -413,69 +419,77 @@ async function privacyWiring() {
 }
 
 async function memorySidecarLive() {
-  // Boots the REAL vendored memory server and exercises it over HTTP.
+  // Boots the REAL vendored memory sidecar and drives its stdio JSON-line RPC.
   const { spawn } = await import("node:child_process");
   const { mkdtempSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
-   const dir = mkdtempSync(join(tmpdir(), "jwe-mem-"));
-   const port = 18099;
-   const token = "test-memory-token";
-   const proc = spawn(
-     "python",
-     [join(root, "src-tauri/sidecars/memory_server.py"), String(port), dir],
-     { stdio: "ignore", env: { ...process.env, JWE_MEMORY_TOKEN: token } }
-   );
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  try {
-    let health = null;
-    for (let i = 0; i < 40 && !health; i++) {
-      await wait(250);
+  const dir = mkdtempSync(join(tmpdir(), "jwe-mem-"));
+  const token = "test-memory-token";
+  // argv is [data_dir] only - no port (stdio pipe transport).
+  const proc = spawn("python", [join(root, "src-tauri/sidecars/memory_server.py"), dir], {
+    stdio: ["pipe", "pipe", "ignore"],
+    env: { ...process.env, JWE_MEMORY_TOKEN: token },
+  });
+  let nextId = 1;
+  const pending = new Map();
+  let buffer = "";
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let nl;
+    while ((nl = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line) continue;
+      let msg;
       try {
-         health = await getText(port, "/health", { "X-JWE-Memory-Token": token });
+        msg = JSON.parse(line);
       } catch {
-        /* still booting */
+        continue;
       }
+      const entry = pending.get(msg.id);
+      if (!entry) continue;
+      pending.delete(msg.id);
+      if (msg.ok) entry.resolve(msg.result);
+      else entry.reject(new Error(msg.error));
     }
-    check("memory sidecar boots", !!health && health.status === 200, health?.body ?? "no response");
-     const unauthorized = await getText(port, "/health");
-     check("memory sidecar rejects unauthenticated callers", unauthorized.status === 401);
-     const memorySource = await readFile(join(root, "src-tauri/sidecars/memory_server.py"), "utf8");
-     check("memory sidecar supports launch token", memorySource.includes("JWE_MEMORY_TOKEN") && memorySource.includes("X-JWE-Memory-Token"));
-    if (!health || health.status !== 200) return;
-    const post = (path, obj) =>
-      new Promise((resolve, reject) => {
-        const body = JSON.stringify(obj);
-        const req = httpRequest(
-          {
-            host: "127.0.0.1",
-            port,
-            path,
-            method: "POST",
-            agent: false,
-             headers: {
-               "Content-Type": "application/json",
-               "Content-Length": Buffer.byteLength(body),
-               "X-JWE-Memory-Token": token,
-             },
-          },
-          (res) => {
-            let text = "";
-            res.setEncoding("utf8");
-            res.on("data", (c) => (text += c));
-            res.on("end", () => resolve({ status: res.statusCode, body: text }));
-          }
-        );
-        req.on("error", reject);
-        req.end(body);
-      });
-    const learned = JSON.parse(
-      (await post("/learn", { text: "My name is Ehis. Always use Oxford commas. Key sk-testfakekey1234567890." })).body
-    );
+  });
+  const request = (method, params) =>
+    new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, { resolve, reject });
+      proc.stdin.write(JSON.stringify({ id, method, params }) + "\n");
+    });
+  try {
+    // Missing token must be fatal (the sidecar refuses to boot).
+    const noToken = spawn("python", [join(root, "src-tauri/sidecars/memory_server.py"), dir], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env: { ...process.env, JWE_MEMORY_TOKEN: "" },
+    });
+    const bootErr = await new Promise((resolve) => {
+      let err = "";
+      noToken.stderr.setEncoding("utf8");
+      noToken.stderr.on("data", (c) => (err += c));
+      noToken.on("exit", () => resolve(err));
+    });
+    noToken.kill();
+    check("memory sidecar requires launch token", bootErr.includes("JWE_MEMORY_TOKEN is required"), bootErr.slice(0, 80));
+    const memorySource = await readFile(join(root, "src-tauri/sidecars/memory_server.py"), "utf8");
+    check("memory sidecar reads token from env", memorySource.includes("JWE_MEMORY_TOKEN") && memorySource.includes("AUTH_TOKEN"));
+    const health = await request("health", {});
+    check("memory sidecar boots over stdio", health?.status === "ok", JSON.stringify(health));
+    const learned = await request("learn", {
+      text: "My name is Ehis. Always use Oxford commas. Key sk-testfakekey1234567890.",
+    });
     check("memory learns facts (secret redacted at store)", learned.stored >= 2, `stored=${learned.stored}`);
-     const recalled = JSON.parse((await getText(port, "/recall?q=name", { "X-JWE-Memory-Token": token })).body);
+    const recalled = await request("recall", { q: "name" });
     check("memory recalls by relevance", recalled.facts.includes("Ehis"), recalled.facts.slice(0, 60));
-    const redacted = JSON.parse((await post("/redact", { text: "token=hf_abcdefghijklmnopqrstuvwx" })).body);
+    const redacted = await request("redact", { text: "token=hf_abcdefghijklmnopqrstuvwx" });
     check("memory redacts pasted keys", !redacted.text.includes("hf_abcdefghij"), redacted.text);
+    const cleared = await request("clear", {});
+    check("memory clears stored facts", cleared.facts === 0, `facts=${cleared.facts}`);
+  } catch (err) {
+    check("memory sidecar stdio RPC", false, String(err));
   } finally {
     proc.kill();
   }
@@ -588,7 +602,7 @@ async function auditBatchWiring() {
   check("palette compile select + preflight + progress", pal.includes("compileFormat") && pal.includes("preflightBulkFormat") && pal.includes("bulkOp"));
   const sidecar = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
   check("one managed sidecar core", sidecar.includes("pub struct ManagedSidecar") && sidecar.includes("impl Drop for ManagedSidecar") && !sidecar.includes("reqwest::Client::new()"));
-  check("sidecar timeouts + reap/orphan", sidecar.includes("fn http_client") && sidecar.includes("reclaim_stale_port") && sidecar.includes("child.wait()"));
+  check("sidecar reap/orphan (stdio transport)", sidecar.includes("child.wait()") && !sidecar.includes("fn http_client") && !sidecar.includes("reclaim_stale_port"));
   check("sidecar empty-content errors", sidecar.includes("LLM server returned no content") && sidecar.includes("missing facts field"));
   const audio = await readFile(join(root, "src/lib/stores/audio.ts"), "utf8");
   check("shared ensure + health poll", audio.includes("ensureSidecar") && audio.includes("pollUntilHealthy") && audio.includes("sttStarting"));
@@ -609,7 +623,7 @@ async function auditBatchWiring() {
   check("saved views + calendar", props.includes("saveCurrentView") && props.includes("calendarCells"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust streams SSE deltas", commands.includes("ai_generate_stream") && commands.includes("delta"));
-  check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("trusted_sidecars_dir") && commands.includes("app_lock_verify") && !commands.includes("harness_dir is empty"));
+  check("Rust slot/status/sidecar hardening", commands.includes("fn resolve_slot") && commands.includes("fn friendly_http_status") && commands.includes("trusted_sidecars_dir") && !commands.includes("app_lock_verify") && !commands.includes("harness_dir is empty"));
 }
 
 async function settingsAreaWiring() {
@@ -636,20 +650,17 @@ async function secretsWiring() {
   check("settings import uses allowlist", pane.includes("validateSettings(imported"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
   const schema = await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8");
-  check("import allowlist excludes secrets", schema.includes("SECRET_KEYS") && schema.includes('"apiKey", "appLockPin"'));
-  check("lock can be disabled in settings", stores.includes("lockEnabled") && pane.includes("setting-lock-enabled"));
-  const lockStore = await readFile(join(root, "src/lib/stores/lock.ts"), "utf8");
-  check("PIN storage fails closed and reset transitions are explicit", lockStore.includes("requirePinStorage") && lockStore.includes("resetPinConfiguration") && lockStore.includes("api.appLockReset"));
+  check("import allowlist excludes secrets", schema.includes("SECRET_KEYS") && schema.includes('"apiKey"') && !schema.includes("appLockPin"));
+  check("no lock toggle remains in settings", !stores.includes("lockEnabled") && !pane.includes("setting-lock-enabled"));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
-  check("lock listener is installed before access wait", app.indexOf('"app-lock-unlock-request"') < app.indexOf("await waitForAppAccess()") && !app.includes('listen<boolean>("app-lock-state"'));
-  check("invalid persisted PIN cannot open the shell", app.includes("$appLockConfigured") && app.includes("$appLockPinStatus") && !app.includes("$settings.appLockPin"));
+  check("app has no lock gate or PIN stores", !app.includes("$appLockConfigured") && !app.includes("$appLockPinStatus") && !app.includes("app-lock-unlock-request"));
   const backend = await readFile(join(root, "src/lib/browserBackend.ts"), "utf8");
   check("preview secret bucket has allowlist", backend.includes('payload.key !== "apiKey"'));
   const appLockCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   const widgetPermissions = await readFile(join(root, "src-tauri/permissions/widget.toml"), "utf8");
-  check("widget has narrow app-lock status only", appLockCommands.includes("app_lock_configured") && appLockCommands.includes("app_lock_verify") && widgetPermissions.includes("allow-app-lock-configured") && !widgetPermissions.includes("allow-app-lock-verify") && !widgetPermissions.includes("allow-secret-get"));
+  check("no app-lock commands or permissions remain", !appLockCommands.includes("app_lock_configured") && !appLockCommands.includes("app_lock_verify") && !widgetPermissions.includes("allow-app-lock-configured") && !widgetPermissions.includes("allow-app-lock-verify") && !widgetPermissions.includes("allow-secret-get"));
   const tab = await readFile(join(root, "src/lib/components/TabBar.svelte"), "utf8");
-  check("tab unlock requires session PIN", tab.includes("isUnlocked(doc.id)"));
+  check("tab has no per-doc unlock", !tab.includes("isUnlocked(doc.id)") && !tab.includes("toggleLock"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust keychain errors are static", commands.includes('"unknown secret key"') && !commands.includes("unknown secret key: {}"));
   check("Rust publish escapes + sanitizes", commands.includes("sanitize_body(&body_raw)") && commands.includes("html_escape(ws)") && commands.includes("fn sanitize_body"));
@@ -670,7 +681,7 @@ async function canvasWiring() {
 
 async function batchWiring() {
   const tab = await readFile(join(root, "src/lib/components/TabBar.svelte"), "utf8");
-  check("tabs offer Lock/Unlock", tab.includes("toggleLock") && tab.includes("Lock"));
+  check("tabs have no Lock/Unlock entry", !tab.includes("toggleLock"));
   const home = await readFile(join(root, "src/lib/components/HomePane.svelte"), "utf8");
   check("Home has pinned quick-launch", home.includes("docListPinned") && home.includes("Pinned"));
   const status = await readFile(join(root, "src/lib/components/StatusBar.svelte"), "utf8");
@@ -688,9 +699,9 @@ async function batchWiring() {
   check("lazy views are labeled", (await readFile(join(root, "src/App.svelte"), "utf8")).includes('label="Novel Studio"'));
   check("preload errors are logged", (await readFile(join(root, "src/main.ts"), "utf8")).includes("vite:preloadError"));
   const app = await readFile(join(root, "src/App.svelte"), "utf8");
-  check("app gates locked docs + restores places", app.includes("LockScreen") && app.includes("placeFor"));
+  check("app restores places but has no lock screen", !app.includes("LockScreen") && app.includes("placeFor"));
   const inbox = await readFile(join(root, "src/lib/components/InboxWorkspace.svelte"), "utf8");
-  check("inbox redacts locked previews", inbox.includes("locked-hint"));
+  check("inbox has no locked-preview redaction", !inbox.includes("locked-hint"));
 }
 
 async function bookParsing() {

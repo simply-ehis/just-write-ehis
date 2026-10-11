@@ -2,7 +2,6 @@ import { get } from "svelte/store";
 import { api, isBrowserPreview, type BibleMemoryRebuild, type Doc } from "$lib/api";
 import { ensureLlm } from "$lib/stores/audio";
 import { settings } from "$lib/stores/settings";
-import { assertAiAllowedForDoc } from "$lib/stores/lock";
 
 const SAVE_DEBOUNCE_MS = 4000;
 const RETRY_DELAYS_MS = [60000, 180000, 600000, 900000];
@@ -34,12 +33,6 @@ function retry(entry: QueueEntry, doc: Doc): void {
 async function run(entry: QueueEntry, doc: Doc): Promise<void> {
   if (queue.get(doc.id) !== entry) return;
   if (isBrowserPreview() || !get(settings).llmEnabled) return;
-  try {
-    assertAiAllowedForDoc(doc);
-  } catch {
-    queue.delete(doc.id);
-    return;
-  }
   try {
     if (!(await ensureLlm())) {
       retry(entry, doc);
@@ -74,11 +67,6 @@ export function scheduleStoryMemory(doc: Doc, content: string): void {
 
 export async function rebuildStoryMemory(project: Doc): Promise<BibleMemoryRebuild> {
   if (isBrowserPreview()) return { skipped: true, retryable: false, processed: 0, matched: 0, suggested: 0 };
-  try {
-    assertAiAllowedForDoc(project);
-  } catch {
-    return { skipped: true, retryable: false, processed: 0, matched: 0, suggested: 0 };
-  }
   if (!get(settings).llmEnabled || !(await ensureLlm())) {
     return { skipped: true, retryable: false, processed: 0, matched: 0, suggested: 0 };
   }

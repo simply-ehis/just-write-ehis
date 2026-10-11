@@ -1,5 +1,294 @@
 ﻿# Changelog
 
+## Unreleased (UX polish: trust bugs + Capture discoverability + voice, plan filed)
+
+Plan: `docs/PLANS/2026-10-09-ux-polish.md` (Phases 1–7; Phases 1–5 are
+DONE). Gates for Phases 1–3: svelte-check 0/0, vite build clean,
+onboard-flow + ws-toggles + shell-nav (desktop+mobile) + tabs-functional
++ e2e-browser + smoke + widget-invariants + acl-parity (174/174) +
+settings-validate all pass. Phase 4 gates all green; the only failure
+(test:themes) is a pre-existing esbuild "no loader for .woff/.woff2"
+unrelated to these changes. Phase 5 keeps the same suite green.
+
+### Changed
+- **Inbox is now labeled Capture** (workspace id stays `inbox` — no data
+  migration). Sidebar, palette ("Open Capture" / "Quick Capture
+  (Capture)"), mobile More menu, Home labels, PropertiesView filter,
+  HelpOverlay, Settings copy, notifications, and QuickCaptureOverlay all
+  speak "Capture"; toasts read "Saved to Capture" / "Captured to
+  Capture".
+- **Capture is a default sidebar entry** — removed from
+  `DEFAULT_HIDDEN_WORKSPACES` (Canvas is the only default-hidden
+  workspace now). It keeps its untriaged-count badge in the Capture nav
+  group alongside Logs. Onboarding default `hiddenIds` is `["canvas"]`.
+
+### Fixed
+- **Palette Quick Capture focuses the capture box** instead of creating
+  an orphan "Untitled" doc in the inbox (was silently wrong; now matches
+  the tray/status-bar behavior via `sendToCapture`).
+- **Capture saves confirm with a toast** in both the Capture and Logs
+  boxes ("Saved to Capture" / "Saved to Logs") — the box clears, so
+  silence used to read as failure.
+- **PWA-share text auto-saves** when the capture box was empty (with the
+  same confirmation toast); a half-typed draft is never clobbered —
+  shared text appends instead. Settings → Capture & Notifications and
+  USER-GUIDE document this.
+- **Capture empty state hints the shortcut** (Ctrl+Shift+F) instead of a
+  bare "Inbox is empty".
+- **Weekly triage banner is actionable** — an "Open Capture" button
+  navigates straight to the workspace and dismisses the banner
+  (`showBanner` gained an optional action; existing callers unchanged).
+- **Settings → Capture & Notifications explains itself**: intro line
+  covering Ctrl+Shift+F + status-bar/bottom-bar Capture entry, and
+  descriptions for the Weekly Triage / Streak reminder toggles.
+- **Just Write drives the real save indicator.** `queueDocSave` now calls
+  `recordSave`/`saveSettled`/`saveFailed` (epoch-scoped, same contract as
+  EditorPane), so the status bar follows the actual write and a failed
+  save holds "error" instead of silently looking clean. The session-end
+  recap reports words written THIS session (baseline at doc open), not
+  the doc's lifetime total ("10,002 words in 1 min" was a lie).
+- **Just Write no longer drops the last <500ms of typing** on workspace
+  switch / window close: ported EditorPane's atomic-save flush +
+  `pagehide` handler.
+- **AI Cancel actually cancels.** `cancelGeneration` no longer nulls the
+  AbortController before the token guard reads it (tokens kept appending
+  after Cancel); a cancelled chat reply is dropped, never persisted to
+  the conversation. Backend stream still drains (no per-request server
+  abort) but nothing is appended or saved.
+- **Composer/Structurize errors can no longer be inserted into the
+  manuscript.** Write-back/append/copy actions hide on `Error:` output
+  (same guard Chat already had); Structurize keeps Dismiss.
+- **Error toasts latch until dismissed** (was: auto-vanished in 3s);
+  the 3-toast cap evicts the oldest NON-error first so a data-loss error
+  is never silently dropped by three success toasts.
+- **Silent failures now surface:** Home dashboard load, daily-note
+  open/create, auto-backup, and Reader position save all route through
+  `domainError` (Reader toasts once per failure streak, not per scroll
+  tick).
+- **Voice dictation is honest and recoverable (Phase 3):** an empty
+  transcription toasts "Nothing heard — try again, closer to the mic.";
+  the mic button re-probes after a dead start (gated button is now a
+  Retry) with humanized errors (permission denied / no mic / busy) and
+  `role="alert"`; a starting in-flight guard prevents double-tap leaks;
+  Esc mid-recording discards the take; mic/read-aloud state clears on
+  the next attempt instead of lingering from last session.
+- **Read-aloud pause/resume with position memory:** pause suspends the
+  audio context (or browser speech) and resumes mid-section; stop keeps
+  the current section so the next play restarts there, not at the top;
+  Esc stops but keeps the section for resume.
+- **Read-aloud follows along in the editor:** the active section is
+  highlighted and scrolled into view (`.cm-tts-current`), matching the
+  Reader's section flow; works in EditorPane and Just Write.
+- **Settings → "Test TTS" actually plays a test voice** and leaves the
+  Kokoro sidecar warm on success (was: silent probe that stopped the
+  sidecar).
+- **Idle model offload is announced** — "unloaded to save RAM" toasts
+  when the STT/TTS/LLM sidecars are released (was: invisible).
+- **Voice shortcuts:** Ctrl+Shift+M toggles dictation, Ctrl+Shift+A
+  toggles read-aloud (Esc stops), Ctrl+Shift+↑/↓ adjusts speed
+  (0.25–4×); documented in the shortcuts overlay's new Voice category.
+- **Reading mode is no longer a trap (4.1):** Esc closes it (it used to
+  swallow the key with no way out), and a floating "Exit reading mode"
+  pill appears at the top-right so mouse-only users aren't stranded.
+- **Themed markdown highlighting (4.2):** headings, bold, italic, links,
+  quotes and lists now use the active palette (including glass light) in
+  both EditorPane and Just Write, instead of default CodeMirror colors
+  and literal `#` markers. Added `@codemirror/language` +
+  `@lezer/highlight` as direct deps.
+- **Typewriter scrolling is proportional and calm (4.3):** the live line
+  stays in the middle third of the viewport instead of jumping to a fixed
+  offset every keystroke, with scroll margins on both editors and
+  `prefers-reduced-motion` respected.
+- **EditorPane keeps its undo history (4.4):** theme, focus, typewriter
+  and autocorrect changes now reconfigure via `Compartment` instead of
+  rebuilding the editor, so Ctrl+Z survives every settings toggle.
+- **One source of truth for keyboard shortcuts (4.5):** new
+  `src/lib/shortcuts.ts` is imported by both the settings shortcuts panel
+  and the `?` help overlay, which had drifted apart and advertised
+  phantom bindings (Ctrl+S/N/O/H, Alt+1–9, Bold/Italic, and a
+  "Focus Mode (F11)" tooltip that F11 never triggered). Ctrl+F find,
+  Ctrl+Shift+F quick capture, Ctrl+Shift+S structurize and the voice keys
+  are listed as they actually behave; bold/italic are called out as
+  unreachable because the app-level Ctrl+B/Ctrl+I toggles win.
+- **System theme mode (4.7):** Settings → Appearance gains a System
+  option that follows the OS light/dark setting live; first paint
+  resolves it before hydration. Glass modals no longer render dark-on-dark
+  in light mode — frost is now theme-mode aware.
+- **Zen mode is honest (4.8):** F11 now hides the status bar and the
+  skill-nudge strip along with the sidebar, tab bar and breadcrumbs, so
+  it really is editor-only.
+
+### AI chat panel (Phase 5)
+- **Chat follows the stream only when you're already at the bottom.**
+  Auto-scroll used to yank you down mid-read; it now tracks a
+  `stickToBottom` flag and shows a floating "jump to latest" button when
+  you've scrolled up (5.1). Resumed conversations open at the top and
+  stay there until you send something new.
+- **The input autofocuses when the panel opens** (Ctrl+J lands you
+  ready to type) (5.2).
+- **Composer and Structurize can now be cancelled** — up to 180s
+  generations with no stop button were a trap. Both track a running
+  flag, abort mid-flight, and drop a cancelled result instead of
+  committing it (5.3).
+- **The panel shows which model will answer** ("Main model · <name>" /
+  "Light model · <name>") in a chip above the input, so the wired-up slot
+  is visible at a glance (5.4).
+- **Regenerate button on the last reply** — re-run the same prompt without
+  retyping; reuses the open conversation and swaps the stale assistant
+  turn for a fresh one (5.5).
+- **Structurize label no longer contradicts itself** — the badge said
+  `{{...}}` while the parser takes `{...}` (5.6).
+- **Escape unwinds one layer at a time** — replace-confirm, then
+  history, then the panel itself (5.7); click-outside already closed
+  the mobile overlay.
+- **Jargon removed from the AI panel**: "small slot" → "light model",
+  ":8093" dropped, "Blank mode — no context injected" → "document
+  context off", and an in-flight LLM start no longer blanks the button
+  label (5.8).
+- **"Thinking…" flips to "Generating"** once the first token lands,
+  instead of sitting on "Thinking…" for the whole stream (5.9).
+- **Chat history renders instantly** — rows show the date fallback
+  while first-message previews resolve, instead of a bare "Loading…"
+  over 30 sequential IPC calls (5.10).
+- **New `arrow-down` icon** for the scroll-to-bottom button.
+
+## Unreleased (sidecar slice 4: zero TCP ports + single-flight ensure)
+
+Continuation of the user-approved sidecar lifecycle redesign (2026-10-09).
+Verified: `cargo check` clean, `cargo test --lib` 132 passed (1 ignored),
+svelte-check 0/0, all three prebuilt exes rebuilt (`build_sidecars.py`) and
+smoke-tested over real pipes, no TCP listeners on 8090–8093.
+
+### Changed
+- **No sidecar binds a TCP port anymore.** STT/TTS/memory speak
+  newline-delimited JSON over their own stdin/stdout pipes
+  (`IpcSidecar`, `src-tauri/src/ipc.rs`): request `{"id","method","params"}`
+  → response `{"id","ok",result|error}`; a reader thread routes responses
+  to per-request oneshot channels by id, so concurrent calls are safe and
+  a dead child fails every pending call instead of hanging it. The LLM
+  (llama-server) binds an AF_UNIX `.sock` (`--host <path>.sock`); a
+  hand-rolled HTTP/1.1 client (`SockClient`) speaks over that socket
+  (non-streaming — covers /health, /completion, /v1/chat/completions,
+  /v1/models; ws2_32 FFI for AF_UNIX on Windows, TcpStream-wrapped).
+  Sentinel endpoint values (`http://127.0.0.1:8093/v1`,
+  `http://localhost:8093/v1`) — the existing `smallModelEndpoint` default —
+  now redirect server-side to the sock client in `ai_generate`,
+  `ai_generate_stream` (single chunk; SSE-over-sock deferred),
+  `ai_structurize`, and `provider_probe` (invoke signatures unchanged).
+  Python server argv contract (app+exe ship together): stt `[model?]`,
+  tts `[model_dir?]`, memory `[data_dir]`; env token contract unchanged
+  (`JWE_SIDECAR_TOKEN`/`JWE_MEMORY_TOKEN` — pipe is private, but the
+  contract keeps script/exe builds interchangeable). Deleted: port
+  reclaim/port_owner/kill_port_owner/netstat/tasklist machinery,
+  `stt_port`/`tts_port`/`llm_port` Tauri commands, and the frontend port
+  wrappers (`api.ts` `sttPort`/`ttsPort`/`llmPort`, matching
+  `browserBackend.ts` cases). Timeout constants (sidecar.rs): health 120s,
+  media 180s, control 30s. `LlmManager` computes a fresh
+  `jwe-llm-<uuid>.sock` under the temp dir, unlinked before spawn and on
+  stop. One known non-regression: the onefile `stt-server.exe` smoke
+  reports a missing transcribe engine (PyInstaller native-lib gap —
+  pre-existing; frame round-trip works, script+venv Python loads the
+  model fine).
+- **`ensureSidecar` is single-flight and never kills a slow model**
+  (slice E). Concurrent taps (mic hover + click, Ghost + Settings test)
+  now share one in-flight ensure per sidecar kind instead of racing two
+  starts; `fail()` no longer calls `spec.stop()` — a model that exceeded
+  the 15s health poll keeps loading, and the next ensure reuses the live
+  process via `isRunning()` + a fresh poll. The timeout message now says
+  the sidecar "is still starting" rather than implying it was torn down.
+- **Warm-on-intent** (slice B). Hovering the mic button for ~120ms
+  pre-warms Moonshine STT (`warmStt`); hovering the read-aloud button
+  pre-warms Kokoro TTS and does a silent first synthesis of `"."` so the
+  ONNX voice model is already loaded before the first real utterance
+  (`warmTts`, both in `audio.ts`). Wired via `onpointerenter`/`onpointerleave`
+  with a 120ms dwell timer (cancelled on `onpointerleave` and `onDestroy`)
+  in `MicButton.svelte` and `ReadAloudButton.svelte`; no-op in
+  browser-preview mode. Turning Ghost on (with `llmEnabled`) fires
+  `warmLlm()` via an `$effect` in `JustWriteWorkspace.svelte` — single-flight
+  inside `ensureLlm` prevents a double start if `ghost.ts` already kicked
+  one off. No boot pre-warm; cold boot stays silent.
+- **Idle offload** (slice D). New `modelRetention` setting (`idle-5min`
+  default / `session` = 30-min idle / `always` = never). `audio.ts` tracks
+  last-used timestamps per sidecar (marked on ensure-success and on
+  `transcribeAudio`/`synthesizeText`); a 30s interval watcher offloads
+  STT/TTS/LLM past the idle threshold — skips STT while recording or
+  transcribing, TTS while playing. `always` never offloads until the user
+  stops the sidecar or the app exits. SettingsPane select under Local LLM.
+- **"Browser voice" status badge** (slice F). In web preview (no Tauri
+  sidecars), the StatusBar now shows a warning-colored "Browser voice"
+  chip with a mic icon — voice features use the browser's Web Speech /
+  speechSynthesis APIs instead of local models. The underlying browser
+  dictation and read-aloud fallbacks in `MicButton`/`ReadAloudButton`
+  already existed; this makes the   mode visible instead of tooltip-only.
+- **No line-number gutter in writing views.** `EditorPane.svelte` and
+  `MarkdownViewer.svelte` drop their explicit `lineNumbers()` (plus
+  EditorPane's dead `basicSetup` import); `JustWriteWorkspace.svelte`
+  keeps `basicSetup` for its keymaps/history/search and hides the strip
+  via `.cm-gutters { display: none }` in the shared theme, covering main
+  and split editors. Dead gutter CSS removed (EditorPane theme rules +
+  reading/focus-mode selectors, MarkdownViewer border rule). Word count
+  stays in the StatusBar.
+
+### Fixed
+- **`stop_reaps_child` flake under parallel test load.** `terminate_child`
+  (`procutil.rs`) now treats "taskkill failed but child already exited" as
+  success — Windows taskkill races (exit 255/128) when the process dies
+  between spawn and taskkill's PID lookup. Previously this surfaced as a
+  spurious `Err` in `ManagedSidecar::stop`.
+
+### Added
+- `IpcSidecar` + `SockClient` unit tests (`ipc.rs`): request-without-start
+  errors, dechunk reassembly.
+
+### Removed
+- **PIN / app-lock subsystem (full scope, user-directed 2026-10-09).** The
+  app-launch PIN gate and per-document locking are gone. Frontend: deleted
+  `lock.ts` + `LockScreen.svelte`; dropped every lock branch from `App.svelte`,
+  `WidgetApp.svelte`, `TabBar`, `SettingsPane`, `HomePane`, `InboxWorkspace`,
+  `transclude`, `WikilinkPreview`, `SkillNudges`, `SkillsPage`, `AiPanel`,
+  `EditorPane`, `JustWriteWorkspace`, `storyMemory`, `widgetBridge`,
+  `settings.ts`, `settingsValidate.ts`, `api.ts`, `browserStore.ts`,
+  `browserBackend.ts`. Backend: removed `app_lock_configured`/`_verify`/`_reset`,
+  `verify_pin_value`, `doc_set_locked`, `widget_doc_unlocked`; `docs.locked`
+  column dropped from the fresh schema (existing DBs keep the column harmlessly
+  — no destructive migration) and from `Doc.locked`. Removed the locked-doc
+  filters across `search.rs`, `rag.rs`, `snapshots.rs`, `bible.rs`,
+  `doc_store.rs`. Orphaned generated ACL artifacts deleted
+  (`permissions/autogenerated/app_lock_*.toml`, `doc_set_locked.toml`) and the
+  stale grants stripped from `main.toml`/`widget.toml`. Orphaned keychain
+  entry `appLockPin` remains in users' keychains until manually cleared.
+  Verified: `cargo test --lib` 132 passed, `svelte-check` 0/0, e2e/memory
+  stdio block green.
+
+## Unreleased (sidecar slice 4, part G: spawn fix)
+
+First slice of the user-approved sidecar lifecycle redesign (2026-10-09):
+kill the "start every sidecar" dead end, kill console flashes. Verified
+`cargo check` clean, `cargo test --lib` 134 passed (3 new), `svelte-check` 0/0.
+
+### Fixed
+- **Every dev-side sidecar start failed closed.** The frontend resolved the
+  sidecars dir as `<resourceDir>/sidecars`, but in dev runs Tauri never
+  copies sidecars there — the path didn't exist, so `require_sidecar_paths`
+  refused ALL STT/TTS/memory/LLM starts while the same exes worked when
+  spawned by hand. New single source of truth: Rust `sidecars_dir` command
+  (`commands.rs`) tries packaged resource dir → beside the exe → source
+  checkout (`CARGO_MANIFEST_DIR/sidecars`), each candidate trust-checked
+  (`trusted_sidecars_dir`) and content-checked (`memory_server.py` or
+  `bin/memory-server.exe`), and errors list every tried path.
+  `getSidecarsDir()` (`audio.ts`) is now one invoke; browser preview keeps
+  the dev-path string. Covered by 3 unit tests
+  (`sidecars_dir_resolves_source_checkout_without_resource_dir`,
+  `_missing_resource_candidate_falls_through`,
+  `_reports_searched_paths_when_all_candidates_fail`).
+- **Console windows flashed on every helper spawn.** No `CREATE_NO_WINDOW`
+  anywhere in `src-tauri/src`: python probe, typst probe/compile, taskkill,
+  and the sidecar servers themselves each popped a console. New
+  `procutil::hide_console` (`creation_flags(0x08000000)`) applied at every
+  surviving console spawn; GUI launches (explorer/open/xdg-open) untouched.
+  netstat/tasklist port-reclaim sites left as-is — that whole path is
+  deleted by the upcoming no-port transport swap.
+
 ## Unreleased (audit pass: UTF-8 panics, vault confinement, locked-doc leak)
 
 Found by a four-lens repo audit; each critical claim re-verified against source

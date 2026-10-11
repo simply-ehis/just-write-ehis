@@ -1,14 +1,18 @@
 :root, :root[data-mode="light"] {
-  /* light mode base — paper & pine ink (under any style) */
-  --bg: #F1EFE6;
-  --surface: #FAF9F3;
-  --surface-2: #EBE7D9;
+  /* light mode base — warm paper & gold (under any style) */
+  --bg: #FAF9F6;
+  --surface: #F3F1EC;
+  --surface-2: #EBE9E3;
   --surface-elevated: #FFFFFF;
-  --ink: #2B2A25;
-  --ink-muted: #5F5C50;
-  --border: #E1DCC9;
-  --accent: #3F6656;
-  --accent-soft: #DCE7DE;
+  --ink: #2C2A26;
+  --ink-muted: #6B675F;
+  --border: #E4E0D6;
+  /* Antique gold, not the bright #C9A96E: the accent carries TEXT color
+     (nav/tab active states) on paper, and bright gold lands near 2:1.
+     This bronze keeps AA (≈4.8:1 on #FAF9F6) while staying warm gold.
+     The bright gold lives on as fills/tints (--accent-soft, selection). */
+  --accent: #8A6B2E;
+  --accent-soft: #F0E8D8;
   --accent-ink: #FFFFFF;
   --accent-on: var(--text-on-accent);
 
@@ -35,19 +39,19 @@
   --text-muted: var(--ink-muted);
   --text-on-accent: var(--accent-ink);
 
-  --border-strong: #CFC8B0;
-  --border-subtle: #E9E4D3;
+  --border-strong: #D6D0C2;
+  --border-subtle: #EEEAE0;
 
-  --accent-hover: #35594A;
+  --accent-hover: #75591F;
   --accent-primary: var(--accent);
   --accent-write: var(--accent);
-  --accent-green: var(--accent);
-  --accent-semantic-green: var(--accent);
+  --accent-green: #4E8D6E;
+  --accent-semantic-green: #4E8D6E;
   --accent-semantic-purple: #7A6F9B;
   --accent-semantic-blue: #2563EB;
   --accent-semantic-red: #B54434;
   --accent-semantic-yellow: #9A6B1A;
-  --success: var(--accent);
+  --success: #4E8D6E;
   --warning: #9A6B1A;
   --error: #B54434;
 
@@ -60,7 +64,7 @@
   --ws-script: #B54434;
   --ws-projects: #6B7280;
   --ws-reader: #4E8D6E;
-  --ws-home: #3F6656;
+  --ws-home: #8A6B2E;
   --ws-inbox: #A8622D;
   --ws-files: #6E675C;
   --ws-properties: #5F7052;
@@ -70,17 +74,17 @@
 }
 
 :root[data-mode="dark"] {
-  /* dark mode base — near-black ink well (under any style) */
-  --bg: #100E0B;
-  --surface: #171411;
-  --surface-2: #1C1815;
-  --surface-elevated: #211C17;
-  --ink: #ECE7D8;
-  --ink-muted: #9C9686;
-  --border: #2A231B;
-  --accent: #8FC7A9;
-  --accent-soft: #263229;
-  --accent-ink: #16211B;
+  /* dark mode base — warm charcoal & gold (under any style) */
+  --bg: #1A1917;
+  --surface: #22211F;
+  --surface-2: #2E2D2A;
+  --surface-elevated: #35342F;
+  --ink: #E8E4DC;
+  --ink-muted: #A39E94;
+  --border: #35332E;
+  --accent: #C9A96E;
+  --accent-soft: #3D382E;
+  --accent-ink: #1A1917;
   --accent-on: var(--text-on-accent);
 
   color-scheme: dark;
@@ -104,19 +108,19 @@
   --text-muted: var(--ink-muted);
   --text-on-accent: var(--accent-ink);
 
-  --border-strong: #3A3126;
-  --border-subtle: #1B1611;
+  --border-strong: #45423B;
+  --border-subtle: #262521;
 
-  --accent-hover: #A5D6BC;
+  --accent-hover: #D9BC85;
   --accent-primary: var(--accent);
   --accent-write: var(--accent);
-  --accent-green: var(--accent);
-  --accent-semantic-green: var(--accent);
+  --accent-green: #8FC7A9;
+  --accent-semantic-green: #8FC7A9;
   --accent-semantic-purple: #A79BC9;
   --accent-semantic-red: #E08A7A;
   --accent-semantic-yellow: #D9A441;
   --accent-semantic-blue: #8AB4F8;
-  --success: var(--accent);
+  --success: #8FC7A9;
   --warning: #D9A441;
   --error: #E08A7A;
 
@@ -128,7 +132,7 @@
   --ws-script: #E08A7A;
   --ws-projects: #9AA1AD;
   --ws-reader: #7FBF9A;
-  --ws-home: #8FC7A9;
+  --ws-home: #C9A96E;
   --ws-inbox: #D9A35A;
   --ws-files: #A39E93;
   --ws-properties: #93A985;
@@ -209,15 +213,15 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-mode]) {
     /* dark mode base (system fallback before Settings loads) */
-    --bg: #100E0B;
-    --surface: #171411;
-    --surface-2: #1C1815;
-    --ink: #ECE7D8;
-    --ink-muted: #9C9686;
-    --border: #2A231B;
-    --accent: #8FC7A9;
-    --accent-soft: #263229;
-    --accent-ink: #16211B;
+    --bg: #1A1917;
+    --surface: #22211F;
+    --surface-2: #2E2D2A;
+    --ink: #E8E4DC;
+    --ink-muted: #A39E94;
+    --border: #35332E;
+    --accent: #C9A96E;
+    --accent-soft: #3D382E;
+    --accent-ink: #1A1917;
 
     color-scheme: dark;
 
@@ -240,24 +244,24 @@
     --text-muted: var(--ink-muted);
     --text-on-accent: var(--accent-ink);
 
-    --border-strong: #4A4436;
-    --border-subtle: #29251E;
+    --border-strong: #45423B;
+    --border-subtle: #262521;
 
-    --accent-hover: #A5D6BC;
+    --accent-hover: #D9BC85;
     --accent-primary: var(--accent);
     --accent-write: var(--accent);
-    --accent-green: var(--accent);
-    --accent-semantic-green: var(--accent);
+    --accent-green: #8FC7A9;
+    --accent-semantic-green: #8FC7A9;
     --accent-semantic-purple: #A79BC9;
     --accent-semantic-red: #E08A7A;
     --accent-semantic-yellow: #D9A441;
     --accent-semantic-blue: #8AB4F8;
     --accent-on: var(--text-on-accent);
-    --success: var(--accent);
+    --success: #8FC7A9;
     --warning: #D9A441;
     --error: #E08A7A;
 
-    --surface-elevated: #2E2A22;
+    --surface-elevated: #35342F;
 
     --ws-logs: #D9A441;
     --ws-write: #9C9686;
@@ -267,7 +271,7 @@
     --ws-script: #E08A7A;
     --ws-projects: #9AA1AD;
     --ws-reader: #7FBF9A;
-    --ws-home: #8FC7A9;
+    --ws-home: #C9A96E;
     --ws-inbox: #D9A35A;
     --ws-files: #A39E93;
     --ws-properties: #93A985;
@@ -286,7 +290,7 @@
   --inspector-width: 280px;
 
   --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
-  --editor-font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --editor-font-family: Georgia, "Times New Roman", serif;
   --editor-font-size: 15px;
   --editor-line-height: 1.7;
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -710,9 +714,13 @@ input:focus, textarea:focus, select:focus {
   grid-row: 1;
 }
 
+/* Zen strips ALL chrome — sidebar, tabs, breadcrumb, status bar, and the
+   skill-nudge strip. Leaving any of them visible makes "zen" a lie. */
 .app-shell.zen .sidebar,
 .app-shell.zen .tab-bar,
-.app-shell.zen .breadcrumb-bar {
+.app-shell.zen .breadcrumb-bar,
+.app-shell.zen .status-bar,
+.app-shell.zen .skill-nudge {
   display: none !important;
 }
 
@@ -1782,12 +1790,23 @@ input:focus, textarea:focus, select:focus {
   box-shadow: var(--accent-glow);
 }
 
-/* Glass — floating dialogs frost over the workspace beneath. */
-[data-theme="glass"] .palette,
-[data-theme="glass"] .modal,
-[data-theme="glass"] .qc-panel,
-[data-theme="glass"] .version-panel {
+/* Glass — floating dialogs frost over the workspace beneath. Frost is
+   theme-mode aware: dark mode uses a dark frost, light mode a light one,
+   so contrast survives in both. */
+[data-theme="glass"][data-mode="dark"] .palette,
+[data-theme="glass"][data-mode="dark"] .modal,
+[data-theme="glass"][data-mode="dark"] .qc-panel,
+[data-theme="glass"][data-mode="dark"] .version-panel {
   background: rgba(18, 20, 18, 0.72);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="glass"][data-mode="light"] .palette,
+[data-theme="glass"][data-mode="light"] .modal,
+[data-theme="glass"][data-mode="light"] .qc-panel,
+[data-theme="glass"][data-mode="light"] .version-panel {
+  background: rgba(250, 249, 243, 0.75);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }

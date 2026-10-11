@@ -6,6 +6,7 @@ import { writable, derived } from 'svelte/store';
 import { api } from '$lib/api';
 import { get } from 'svelte/store';
 import { settings } from './settings';
+import { showToast } from './notifications';
 
 // ── STT state ───────────────────────────────────────────────────
 export const sttRunning = writable(false);
@@ -40,6 +41,12 @@ export const STT_FETCH_HINT =
   "Moonshine is unavailable. Check the bundled model and Python runtime in Settings → AI & Providers.";
 export const TTS_FETCH_HINT =
   "Kokoro is unavailable. Check the bundled voice model and Python runtime in Settings → AI & Providers.";
+
+/** Shared lock for the voice keyboard shortcuts (3.10). When two button
+ * instances are mounted at once (e.g. Quick Capture over a workspace),
+ * both listen for the same chord — the first to handle it wins and the
+ * rest no-op within the window. */
+export const voiceShortcutLock = { mic: 0, tts: 0 };
 
 /** Poll `check` until `ok` (500ms interval, 15s cap). Never throws. */
 async function within<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -94,8 +101,14 @@ export interface SidecarSpec<THealth> {
   setError: (e: string | null) => void;
   setProgress: (msg: string | null, elapsedSec: number) => void;
   setProbed: () => void;
-  stop?: () => Promise<void>;
 }
+
+/**
+ * In-flight ensure promises keyed by sidecar kind. Concurrent taps
+ * (mic hover + click, Ghost-on + Settings test) share one start/poll
+ * instead of racing two spawns against the same process (slice E).
+ */
+const inflightEnsures = new Map<string, Promise<boolean>>();
 
 /**
  * ONE ensure flow for every sidecar (STT/TTS/LLM/memory): running → true;
@@ -103,19 +116,36 @@ export interface SidecarSpec<THealth> {
  * sleeps that raced cold loads) → model flag from health. Returns false
  * with the store error set on any failure. Notably, an LLM cold load
  * (1–5s) now awaits readiness instead of letting ghost fall back.
+ *
+ * Single-flight: concurrent calls for the same `kind` share one promise.
+ * Failure NEVER stops the process — a model that outran the 15s health
+ * poll keeps loading, and the next ensure reuses the live process via
+ * `isRunning()` + a fresh poll (slice E).
  */
 export async function ensureSidecar<THealth>(spec: SidecarSpec<THealth>): Promise<boolean> {
+  const existing = inflightEnsures.get(spec.kind);
+  if (existing) return existing;
+  const run = ensureSidecarOnce(spec).finally(() => {
+    inflightEnsures.delete(spec.kind);
+  });
+  inflightEnsures.set(spec.kind, run);
+  return run;
+}
+
+async function ensureSidecarOnce<THealth>(spec: SidecarSpec<THealth>): Promise<boolean> {
   const fail = async (message: string) => {
-    try {
-      await spec.stop?.();
-    } catch {
-      /* cleanup is best effort */
-    }
+    // Never stop() here: a slow model may still be loading, and killing
+    // it wastes the work. Sync the running store with reality instead —
+    // a live-but-not-ready process stays "running" for the next ensure.
     spec.setError(message);
-    spec.setRunning(false);
     spec.setLoaded(false);
     spec.setProgress(null, 0);
     spec.setProbed();
+    try {
+      spec.setRunning(await spec.isRunning());
+    } catch {
+      spec.setRunning(false);
+    }
   };
   try {
     if (!(await spec.isRunning())) await spec.start();
@@ -129,7 +159,12 @@ export async function ensureSidecar<THealth>(spec: SidecarSpec<THealth>): Promis
     spec.setProgress(null, 0);
     spec.setProbed();
     if (!result.healthy) {
-      await fail(`${spec.kind} started but its local server never became reachable.`);
+      const stillUp = await spec.isRunning().catch(() => false);
+      if (stillUp) {
+        await fail(`${spec.kind} is still starting — try again shortly.`);
+      } else {
+        await fail(`${spec.kind} exited before it became ready.`);
+      }
       return false;
     }
     const health = result.value ?? await spec.health();
@@ -180,27 +215,20 @@ export async function resolvePythonPathProbed(): Promise<string> {
 }
 
 /**
- * Directory holding the sidecar scripts + models. In dev this is the repo
- * path; in a packaged app the scripts live under Tauri's resource dir, so
- * resolve it there (async import keeps the path plugin out of the preview
- * bundle). Preview falls back to the dev path — sidecar spawn fails closed
- * there anyway (no python), surfaced as a clear sidecar error.
- *
- * Raw portable exes (unbundled target/release binary run directly) have no
- * installer-laid resources: resourceDir may not contain sidecars. The Rust
- * side re-resolves beside the exe and reports the tried paths, so this stays
- * the primary candidate and the backend does the fallback.
+ * Directory holding the sidecar scripts + models — resolved by the ONE
+ * Rust-side command (resource dir → beside exe → source checkout), so dev
+ * runs stop failing closed on a resourceDir/sidecars that is never copied
+ * there. The backend errors list every tried path. Preview (no Tauri) keeps
+ * the dev-path string — sidecar spawn fails closed there anyway.
  */
 export async function getSidecarsDir(): Promise<string> {
-  const devPath = 'src-tauri/sidecars';
   try {
     const { isTauri } = await import('@tauri-apps/api/core');
-    if (!isTauri()) return devPath;
-    const { resourceDir, join } = await import('@tauri-apps/api/path');
-    return await join(await resourceDir(), 'sidecars');
+    if (!isTauri()) return 'src-tauri/sidecars';
   } catch {
-    return devPath;
+    return 'src-tauri/sidecars';
   }
+  return await api.sidecarsDir();
 }
 
 // ── STT actions ─────────────────────────────────────────────────
@@ -211,7 +239,7 @@ export function sttModelReady(health: { ready?: boolean; model_loaded: boolean }
 
 /** Start the Moonshine sidecar (lazy, first tap). */
 export async function ensureStt(): Promise<boolean> {
-  return ensureSidecar({
+  const ok = await ensureSidecar({
     kind: "Moonshine",
     isRunning: () => api.sttIsRunning(),
     start: async () => {
@@ -225,8 +253,9 @@ export async function ensureStt(): Promise<boolean> {
     setError: (e) => sttError.set(e),
     setProgress: (m) => sttStarting.set(m),
     setProbed: () => sttProbed.set(true),
-    stop: stopStt,
   });
+  if (ok) markUsed("stt");
+  return ok;
 }
 
 /** Stop the Moonshine sidecar (e.g. when STT is toggled off). Best-effort. */
@@ -248,6 +277,7 @@ export async function transcribeAudio(
 ): Promise<string | null> {
   sttTranscribing.set(true);
   sttError.set(null);
+  markUsed("stt");
   try {
     const text = await api.sttTranscribe(audioB64, format);
     return text;
@@ -267,7 +297,7 @@ export function ttsModelReady(health: { ready?: boolean; model_loaded: boolean }
 
 /** Start the Kokoro sidecar (lazy, first tap). */
 export async function ensureTts(): Promise<boolean> {
-  return ensureSidecar({
+  const ok = await ensureSidecar({
     kind: "Kokoro",
     isRunning: () => api.ttsIsRunning(),
     start: async () => {
@@ -281,8 +311,9 @@ export async function ensureTts(): Promise<boolean> {
     setError: (e) => ttsError.set(e),
     setProgress: (m) => ttsStarting.set(m),
     setProbed: () => ttsProbed.set(true),
-    stop: stopTts,
   });
+  if (ok) markUsed("tts");
+  return ok;
 }
 
 /** Synthesize text → returns base64 WAV audio. Uses settings for all params. */
@@ -291,6 +322,7 @@ export async function synthesizeText(
   overrides?: { voice?: string; speed?: number; langCode?: string; splitPattern?: string; chunkSize?: number }
 ): Promise<{ audio: string; sampleRate: number } | null> {
   ttsError.set(null);
+  markUsed("tts");
   const s = get(settings);
   const voice = overrides?.voice ?? s.ttsVoice;
   const speed = overrides?.speed ?? s.ttsSpeed;
@@ -343,7 +375,7 @@ export function llmModelReady(health: { status: string }): boolean {
 
 /** Start the llama.cpp server sidecar (lazy, first ghost autocomplete). */
 export async function ensureLlm(): Promise<boolean> {
-  return ensureSidecar({
+  const ok = await ensureSidecar({
     kind: "llama",
     isRunning: () => api.llmIsRunning(),
     start: async () => {
@@ -358,8 +390,9 @@ export async function ensureLlm(): Promise<boolean> {
     setError: (e) => llmError.set(e),
     setProgress: (m) => llmStarting.set(m),
     setProbed: () => llmProbed.set(true),
-    stop: stopLlm,
   });
+  if (ok) markUsed("llm");
+  return ok;
 }
 
 /** Stop the llama.cpp server sidecar (e.g. when LLM is toggled off). Best-effort. */
@@ -372,6 +405,107 @@ export async function stopLlm(): Promise<void> {
   } catch (error) {
     llmError.set(String(error));
     throw error;
+  }
+}
+
+// ── Warm-on-intent (slice 4B) ───────────────────────────────────
+// Hovering a voice control is a strong signal the user is about to use
+// it — pre-warm the matching sidecar so the first tap is instant. No
+// boot pre-warm (cold boot stays silent); 120ms dwell lives at the
+// call site so a brush-past never spawns a process. Every warm is
+// best-effort: errors and progress are swallowed (the real tap will
+// surface them via ensure*).
+
+export async function warmStt(): Promise<void> {
+  try {
+    await ensureStt();
+  } catch {
+    /* warm is best-effort */
+  }
+}
+
+/** Warm Kokoro, then silent first-synthesis: the ONNX voice model loads
+ * lazily on the first synthesize, so ensureTts alone still leaves the
+ * first real read-aloud slow. Synthesize one period and drop the audio. */
+export async function warmTts(): Promise<void> {
+  try {
+    if (!(await ensureTts())) return;
+    const s = get(settings);
+    await api.ttsSynthesize(".", s.ttsVoice, s.ttsSpeed, s.ttsLangCode, s.ttsSplitPattern, s.ttsChunkSize);
+  } catch {
+    /* warm is best-effort */
+  }
+}
+
+export async function warmLlm(): Promise<void> {
+  try {
+    await ensureLlm();
+  } catch {
+    /* warm is best-effort */
+  }
+}
+
+// ── Idle offload (slice 4D) ───────────────────────────────────────
+// Keep models warm after use; offload after idle period per modelRetention:
+//   idle-5min (default): offload 5 min after last use
+//   session:             offload 30 min after last use
+//   always:              never idle-offload (until user toggles the feature off)
+
+const lastUsedAt = new Map<string, number>();
+let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
+
+const IDLE_TIMEOUTS: Record<string, number> = {
+  "idle-5min": 5 * 60_000,
+  session: 30 * 60_000,
+  // "always" has no entry → checkIdleOffload returns early
+};
+
+function idleTimeoutMs(): number | null {
+  const retention = get(settings).modelRetention || "idle-5min";
+  return IDLE_TIMEOUTS[retention] ?? null;
+}
+
+function markUsed(kind: string): void {
+  lastUsedAt.set(kind, Date.now());
+  ensureIdleWatcher();
+}
+
+function ensureIdleWatcher(): void {
+  if (idleCheckTimer) return;
+  idleCheckTimer = setInterval(checkIdleOffload, 30_000);
+}
+
+function checkIdleOffload(): void {
+  const timeout = idleTimeoutMs();
+  if (timeout === null) return; // "always" → never idle-offload
+  const now = Date.now();
+
+  // STT — skip while recording or transcribing
+  if (get(sttRunning) && !get(sttRecording) && !get(sttTranscribing)) {
+    const last = lastUsedAt.get("stt");
+    if (last !== undefined && now - last > timeout) {
+      void stopStt().catch(() => {});
+      lastUsedAt.delete("stt");
+      showToast("Moonshine voice model unloaded to save RAM.", "info");
+    }
+  }
+  // TTS — skip while playing
+  if (get(ttsRunning) && !get(ttsPlaying)) {
+    const last = lastUsedAt.get("tts");
+    if (last !== undefined && now - last > timeout) {
+      void stopTts().catch(() => {});
+      lastUsedAt.delete("tts");
+      showToast("Kokoro voice model unloaded to save RAM.", "info");
+    }
+  }
+  // LLM
+  if (get(llmRunning)) {
+    const last = lastUsedAt.get("llm");
+    if (last !== undefined && now - last > timeout) {
+      void stopLlm().catch(() => {});
+      lastUsedAt.delete("llm");
+      showToast("Bundled LLM unloaded to save RAM.", "info");
+    }
   }
 }
 
@@ -397,6 +531,9 @@ const pendingResolves = new Set<() => void>();
  * resolve on stop so `await playWavBase64` never hangs the caller. */
 export function stopWavPlayback(): void {
   playSeq++;
+  // A paused (suspended) context would silently swallow the NEXT play —
+  // always resume before clearing so stop-from-pause leaves audio usable.
+  void _audioCtx?.resume().catch(() => {});
   try {
     currentSource?.stop();
   } catch {
@@ -410,6 +547,16 @@ export function stopWavPlayback(): void {
   currentSource = null;
   for (const resolve of [...pendingResolves]) resolve();
   pendingResolves.clear();
+}
+
+/** Pause/resume the live WAV playback via AudioContext suspend. The
+ * pending playWavBase64 promise stays alive (onended fires after resume),
+ * so a paused read-aloud keeps its place in the chunk sequence. */
+export function pauseWavPlayback(): void {
+  void _audioCtx?.suspend().catch(() => {});
+}
+export function resumeWavPlayback(): void {
+  void _audioCtx?.resume().catch(() => {});
 }
 
 /** Play base64 WAV audio. Resolves when done — or on stop (never hangs). */

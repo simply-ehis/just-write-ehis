@@ -6,7 +6,7 @@
    * then notifies the parent to refresh its list.
    */
   import { api, type Doc } from "$lib/api";
-  import { currentDoc, openTabs } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
 
@@ -45,7 +45,7 @@
     try {
       await api.docDelete(id);
       $openTabs = $openTabs.filter((t) => t.id !== id);
-      if ($currentDoc?.id === id) $currentDoc = $openTabs[0] ?? null;
+      if ($currentDoc?.id === id) $currentDoc = $openTabs.find((t) => t.workspace === $currentWorkspace) ?? null;
       onDeleted?.(id);
       showToast(`Deleted "${title}"`, "success");
     } catch (e) {

@@ -1,11 +1,14 @@
 <script lang="ts">
   /**
-   * QuickCaptureOverlay — global capture (Ctrl+Shift+F) into Inbox.
+   * QuickCaptureOverlay — global capture (Ctrl+Shift+F) into the Capture workspace.
    * Solid docked panel (no floating icons, no transparency).
    */
   import { api } from "$lib/api";
   import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
   import { showToast } from "$lib/stores/notifications";
+
+  const TARGET_LABELS: Record<string, string> = { inbox: "Capture" };
+  const targetLabel = (id: string) => TARGET_LABELS[id] ?? id;
 
   let open = $state(false);
   let text = $state("");
@@ -37,7 +40,7 @@
       $currentDoc = doc;
       $currentWorkspace = target;
       if (!$openTabs.find((t) => t.id === doc.id)) $openTabs = [doc, ...$openTabs];
-      showToast(`Captured to ${target}`, "success");
+      showToast(`Captured to ${targetLabel(target)}`, "success");
       close();
     } catch (e) {
       showToast(`Capture failed: ${e instanceof Error ? e.message : e}`, "error");
@@ -77,14 +80,14 @@
         <input
           bind:this={inputEl}
           bind:value={text}
-          placeholder="Capture to inbox… (Enter saves)"
+          placeholder="Capture… (Enter saves)"
           aria-label="Quick capture text"
           disabled={saving}
           onkeydown={(e) => { if (e.key === "Enter") save(); }}
         />
         <select bind:value={target} title="Capture target" aria-label="Capture target" disabled={saving}>
           {#each targets as t}
-            <option value={t}>{t}</option>
+            <option value={t}>{targetLabel(t)}</option>
           {/each}
         </select>
         <button class="qc-save" onclick={save} disabled={saving || !text.trim()}>

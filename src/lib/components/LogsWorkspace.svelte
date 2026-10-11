@@ -165,6 +165,7 @@
       // calendar dots + Recent Days never go stale.
       await refreshEntries();
       await loadTouchedToday();
+      showToast("Saved to Logs", "success");
     } catch (e) {
       domainError("Logs", "couldn't save capture", e);
     }

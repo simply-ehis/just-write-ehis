@@ -1,6 +1,6 @@
 [[set]]
 identifier = "widget"
-description = "Existing document, log, capture, save, and narrow app-lock verification commands used by the companion window. General secrets, sidecars, filesystem, watcher, and updater commands are deliberately absent."
+description = "Existing document, log, capture, and save commands used by the companion window. General secrets, sidecars, filesystem, watcher, and updater commands are deliberately absent."
 permissions = [
   "allow-widget-doc-get",
   "allow-doc-create",
@@ -10,6 +10,5 @@ permissions = [
   "allow-usage-record",
   "allow-widget-atomic-save",
   "allow-bible-get-facts",
-   "allow-snapshot-list",
-   "allow-app-lock-configured",
- ]
+  "allow-snapshot-list",
+]

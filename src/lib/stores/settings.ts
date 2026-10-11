@@ -1,5 +1,5 @@
 import { writable, get } from "svelte/store";
-import { APP_LOCK_MIN_PIN_LENGTH, SECRET_KEYS, validateSettings, migrateRetiredProviders } from "$lib/settingsValidate";
+import { SECRET_KEYS, validateSettings, migrateRetiredProviders } from "$lib/settingsValidate";
 
 /** Re-exported so panes strip secrets with the same single list. */
 export { SECRET_KEYS };
@@ -30,10 +30,16 @@ export interface SavedView {
 }
 
 export interface AppSettings {
+  /** One-time migration marker (v1 = paper+gold palette, serif default). */
+  settingsVersion: number;
   /** Visual style: default room, brutalist concrete, or glass frost. */
   theme: "default" | "brutalist" | "glass";
-  /** Light or dark base under any style. */
-  themeMode: "dark" | "light";
+  /** Light or dark base under any style; "system" follows the OS. */
+  themeMode: "dark" | "light" | "system";
+  /** Lines above/below the cursor left undimmed when focus dimming is on. */
+  focusContextLines: number;
+  /** Opacity of dimmed regions (0.1 barely dim … 1 = no dimming). */
+  focusDimStrength: number;
   /** Custom accent override (#rrggbb) — empty means the style's accent. */
   accentOverride: string;
   iconSet: "phosphor" | "tabler";
@@ -86,10 +92,6 @@ export interface AppSettings {
   /** Learn cross-session facts + inject recall into chat context. */
   aiMemoryEnabled: boolean;
 
-  appLockPin: string;
-  /** Master switch for per-doc PIN locking. Off = no LockScreen,
-   * no lock menus, no AI exclusion; locked flags stay stored. */
-  lockEnabled: boolean;
   craftProfilingEnabled: boolean;
 
   vaultPath: string;
@@ -118,7 +120,7 @@ export interface AppSettings {
   onboardSkipped: boolean;
   // Top-bar pins (desktop sidebar header + mobile BottomBar main row) and
   // sidebar hides chosen during onboarding. [] = not customized (current
-  // behavior); null hiddenIds = default hides (inbox/canvas/files).
+  // behavior); null hiddenIds = default hides (canvas).
   topBarIds: string[];
   hiddenIds: string[] | null;
   // Landing workspace on fresh boot with nothing to restore.
@@ -151,14 +153,20 @@ export interface AppSettings {
   llmEnabled: boolean;
   /** Paste-to-swap LLM model: local .gguf path or models/ filename; empty = bundled default. */
   llmModel: string;
+  /** How long to keep STT/TTS/LLM loaded after last use.
+   *  idle-5min = offload 5 min after last use (default);
+   *  session  = offload 30 min after last use (long writing session);
+   *  always   = never idle-offload (until user toggles the feature off). */
+  modelRetention: "idle-5min" | "session" | "always";
 
   /** Show paragraph density heatmap in the status bar. */
   rhythmHeatmapInStatusBar: boolean;
 }
 
 const defaultSettings: AppSettings = {
+  settingsVersion: 1,
   theme: "default",
-  themeMode: "dark",
+  themeMode: "light",
   accentOverride: "",
   iconSet: "phosphor",
   sidebarFooterCollapsed: false,
@@ -166,7 +174,7 @@ const defaultSettings: AppSettings = {
 
   fontSize: 15,
   lineHeight: 1.7,
-  fontFamily: "JetBrains Mono",
+  fontFamily: "Georgia",
   // Reader prose controls (per-Reader, persisted). Size 16 reproduces the
   // pre-controls look exactly; reset returns to base fontSize. Theme "app"
   // follows the app theme; light/sepia/dark are fixed reading papers.
@@ -176,6 +184,10 @@ const defaultSettings: AppSettings = {
   readerTheme: "app",
   typewriterDefault: true,
   focusDimmingDefault: true,
+  /** Lines above/below the cursor left undimmed when focus dimming is on. */
+  focusContextLines: 2,
+  /** Opacity of dimmed regions (0.1 barely dim … 1 = no dimming). */
+  focusDimStrength: 0.35,
   autocorrectEnabled: false,
   ghostEnabled: false,
   dictionaryLanguage: "en",
@@ -194,8 +206,6 @@ const defaultSettings: AppSettings = {
   scrubSecrets: false,
   aiMemoryEnabled: true,
 
-  appLockPin: "",
-  lockEnabled: false,
   // Off until the user opts in: no craft metrics are recorded, so Craft
   // charts and the filter-word nudge stay empty rather than half-fed.
   craftProfilingEnabled: false,
@@ -264,6 +274,7 @@ const defaultSettings: AppSettings = {
   pythonPath: "python",
   llmEnabled: true,
   llmModel: "",
+  modelRetention: "idle-5min",
   rhythmHeatmapInStatusBar: false,
 };
 
@@ -286,10 +297,7 @@ export const IMPORTABLE_SETTINGS_KEYS: ReadonlySet<string> = new Set(
 /** Current onboarding flow version. Bump when the steps change enough to re-prompt. */
 export const ONBOARD_VERSION = 2;
 /** Sidebar default hides (null hiddenIds): power-user surfaces reachable via palette. */
-export const DEFAULT_HIDDEN_WORKSPACES: readonly string[] = ["inbox", "canvas"];
-export type AppLockPinStatus = "loading" | "ready" | "error";
-export const appLockPinStatus = writable<AppLockPinStatus>("loading");
-export const appLockConfigured = writable(false);
+export const DEFAULT_HIDDEN_WORKSPACES: readonly string[] = ["canvas"];
 
 /** Resolves once keychain hydration + legacy migration finished. */
 let resolveSecretsReady!: () => void;
@@ -299,7 +307,7 @@ export const secretsReady = new Promise<void>((resolve) => {
 
 let secretsMigrated = false;
 let preserveLegacySecrets = false;
-let lastSynced: Record<SecretKey, string> = { apiKey: "", appLockPin: "" };
+let lastSynced: Record<SecretKey, string> = { apiKey: "" };
 let secretSyncTimer: ReturnType<typeof setTimeout> | null = null;
 /** Deferred to avoid a settings ↔ api.ts circular-import TDZ at module init. */
 let apiPromise: Promise<typeof import("$lib/api")> | null = null;
@@ -322,7 +330,8 @@ function isWidgetRoute(): boolean {
 }
 
 function routeSecretKeys(): readonly SecretKey[] {
-  return isWidgetRoute() ? ["appLockPin"] : SECRET_KEYS;
+  // The widget window never touches the OS keychain (no secrets of its own).
+  return isWidgetRoute() ? [] : SECRET_KEYS;
 }
 
 function loadSettings(): AppSettings {
@@ -342,7 +351,7 @@ function loadSettings(): AppSettings {
         // Style×mode migration (2026-09): legacy single `theme` values map
         // onto the split fields before validation drops them as unknown.
         if (raw.theme === "dark" || raw.theme === "light" || raw.theme === "brutalist" || raw.theme === "glass") {
-          if (raw.themeMode !== "dark" && raw.themeMode !== "light") {
+          if (raw.themeMode !== "dark" && raw.themeMode !== "light" && raw.themeMode !== "system") {
             raw.themeMode = raw.theme === "light" ? "light" : "dark";
           }
           raw.theme = raw.theme === "brutalist" ? "brutalist" : raw.theme === "glass" ? "glass" : "default";
@@ -353,12 +362,11 @@ function loadSettings(): AppSettings {
           console.warn(`Settings migrated off retired providers: ${migrated.join(", ")}`);
         }
         const legacyApiKey = typeof raw.apiKey === "string" ? raw.apiKey : "";
-        const legacyPin = typeof raw.appLockPin === "string" ? raw.appLockPin : "";
-        if (!isWidgetRoute() && (legacyApiKey || legacyPin)) preserveLegacySecrets = true;
+        if (!isWidgetRoute() && legacyApiKey) preserveLegacySecrets = true;
         return {
           ...defaultSettings,
           ...patch,
-          ...(isWidgetRoute() ? {} : { apiKey: legacyApiKey, appLockPin: legacyPin }),
+          ...(isWidgetRoute() ? {} : { apiKey: legacyApiKey }),
         };
       }
     }
@@ -375,14 +383,11 @@ function saveSettings(s: AppSettings) {
       try {
         const existing = JSON.parse(localStorage.getItem("writing-app-settings") || "{}") as Record<string, unknown>;
         payload.apiKey = typeof existing.apiKey === "string" ? existing.apiKey : "";
-        payload.appLockPin = typeof existing.appLockPin === "string" ? existing.appLockPin : "";
       } catch {
         payload.apiKey = "";
-        payload.appLockPin = "";
       }
     } else if (!preserveLegacySecrets || secretsMigrated) {
       payload.apiKey = "";
-      payload.appLockPin = "";
     }
     localStorage.setItem("writing-app-settings", JSON.stringify(payload));
   } catch (e) {
@@ -419,7 +424,6 @@ function stripPersistedSecrets(): boolean {
     localStorage.setItem("writing-app-settings", JSON.stringify({
       ...get(settings),
       apiKey: "",
-      appLockPin: "",
     }));
     return true;
   } catch (e) {
@@ -429,45 +433,27 @@ function stripPersistedSecrets(): boolean {
 }
 
 async function initSecrets(): Promise<void> {
-  const keys = SECRET_KEYS;
-  let lockPinReady = false;
   let migrationFailed = false;
   try {
-    const { api } = await withTimeout(apiLazy(), "secret backend");
     if (isWidgetRoute()) {
-      // "Configured" means exactly one thing: the backend holds a usable
-      // PIN. It must NEVER default from the master switch — that locked the
-      // widget behind a PIN nobody set (phantom lock with no escape).
-      let configured = false;
-      let reachable = false;
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        try {
-          configured = await withTimeout(api.appLockConfigured(), "app lock status");
-          reachable = true;
-          break;
-        } catch (error) {
-          console.warn(`app lock status probe failed (attempt ${attempt + 1}):`, error);
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
-      }
-      appLockConfigured.set(configured);
-      appLockPinStatus.set(reachable ? "ready" : "error");
+      // The companion widget holds no secrets of its own; skip the
+      // keychain entirely so a slow/keychain-less backend never blocks it.
       secretsMigrated = true;
       preserveLegacySecrets = false;
       return;
     }
 
+    const { api } = await withTimeout(apiLazy(), "secret backend");
+
     const readSecret = async (key: SecretKey): Promise<void> => {
       const before = get(settings)[key];
       try {
         const value = await withTimeout(api.secretGet(key), `keychain read for ${key}`);
-        if (key === "appLockPin") lockPinReady = true;
         if (value != null && value !== "") {
           lastSynced[key] = value;
           settings.update((state) => (state[key] === before ? { ...state, [key]: value } : state));
         }
       } catch (error) {
-        if (key === "appLockPin") lockPinReady = false;
         console.warn(`keychain read failed for ${key}:`, error);
       }
     };
@@ -478,44 +464,25 @@ async function initSecrets(): Promise<void> {
       try {
         await withTimeout(api.secretSet(key, value), `keychain write for ${key}`);
         lastSynced[key] = value;
-        if (key === "appLockPin") lockPinReady = true;
       } catch (error) {
         migrationFailed = true;
-        if (key === "appLockPin") lockPinReady = false;
         console.warn(`keychain write failed for ${key}:`, error);
       }
     };
 
     // Reads are independent: run together so one slow keychain doesn't
-    // serialize behind the other. Writes stay after reads (a write must
-    // see the migrated value first) but are independent of each other.
-    await Promise.all(keys.map((key) => readSecret(key)));
-    await Promise.all(keys.map((key) => writeSecret(key)));
-    // Authoritative answer first: does the backend hold a usable PIN? The
-    // master switch must never imply a PIN — that produced lock gates for a
-    // PIN nobody set. No PIN configured is a healthy state, never an error.
-    let lockConfigured = get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH;
-    try {
-      lockConfigured = await withTimeout(api.appLockConfigured(), "app lock status");
-    } catch (error) {
-      console.warn("app lock status probe failed; falling back to the migrated local PIN:", error);
-    }
-    appLockConfigured.set(lockConfigured);
+    // serialize. Writes stay after reads (a write must see the migrated
+    // value first) but are independent of each other.
+    await Promise.all(SECRET_KEYS.map((key) => readSecret(key)));
+    await Promise.all(SECRET_KEYS.map((key) => writeSecret(key)));
     stripPersistedSecrets();
     preserveLegacySecrets = false;
-    appLockPinStatus.set("ready");
-
     secretsMigrated = true;
-    preserveLegacySecrets = false;
     if (migrationFailed) scheduleSecretSync(get(settings));
   } catch (error) {
-    // Total hydration failure: backend state is genuinely unknown. Fail
-    // closed ONLY when a PIN might exist (local usable PIN) — a bare
-    // master switch with no PIN is not a lockout, and must never block the
-    // shell. Both error screens carry Retry/Reset escapes.
-    const localUsable = get(settings).appLockPin.trim().length >= APP_LOCK_MIN_PIN_LENGTH;
-    appLockConfigured.set(localUsable);
-    appLockPinStatus.set(localUsable ? "error" : "ready");
+    // Hydration failed (backend unreachable). Scrub legacy plaintext so a
+    // later successful boot doesn't resurrect it, then continue unblocked —
+    // with no lock feature, a missing keychain can no longer lock anyone out.
     preserveLegacySecrets = false;
     secretsMigrated = true;
     const stripped = stripPersistedSecrets();
@@ -597,7 +564,5 @@ export function resetSettings(): void {
   settings.set({
     ...(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings),
     apiKey: current.apiKey,
-    appLockPin: current.appLockPin,
-    lockEnabled: current.lockEnabled,
   });
 }

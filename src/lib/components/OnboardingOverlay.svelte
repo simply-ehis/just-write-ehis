@@ -6,6 +6,7 @@
   import { domainError } from "$lib/errors";
   import { isWindowsRuntime } from "$lib/widgetAutostart";
   import Icon from "$lib/components/Icon.svelte";
+  import { resolveThemeMode } from "$lib/appearance";
 
   let { onComplete }: { onComplete: () => void } = $props();
 
@@ -48,7 +49,7 @@
   // Snapshot for change detection: the store value above may predate the
   // OS-keychain hydration, so only write back when the user edited the field.
   const initialApiKey = $settings.apiKey;
-  let logoSrc = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let logoSrc = $derived(resolveThemeMode($settings.themeMode) === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   function pickUseCase(id: UseCase) {
     useCase = id;

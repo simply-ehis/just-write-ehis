@@ -12,11 +12,6 @@ import { markdownToHtmlFragment } from "$lib/markdown";
 import { testProvider } from "$lib/providerTest";
 
 const browserSecrets = new Map<string, string>();
-let browserPinFailures = 0;
-let browserPinLockoutUntil = 0;
-const browserPinBaseBackoffMs = 2000;
-const browserPinMaxBackoffMs = 60000;
-const browserPinMaxFailedAttempts = 5;
 
 function frontmatter(doc: BrowserDoc): Record<string, unknown> {
   if (!doc.frontmatter_json) return {};
@@ -34,7 +29,6 @@ function docShape(d: BrowserDoc): BrowserDoc {
 function widgetDocShape(store: ReturnType<typeof getBrowserStore>, id: string): BrowserDoc {
   const doc = store.get(id);
   if (!doc) throw new Error("document not found");
-  if (doc.locked) throw new Error("document is locked and unavailable to the companion window");
   return docShape(doc);
 }
 
@@ -224,7 +218,7 @@ function toBase64(bytes: Uint8Array): string {
  * Preview mirror of convert.rs::inline_embeds.
  *
  * Replaces every `![[target]]` with the referenced note's body, or a visible
- * `> [embed missing: …]` marker when it cannot be resolved (locked or absent).
+ * `> [embed missing: …]` marker when it cannot be resolved (missing).
  *
  * This step was MISSING entirely, so the preview silently dropped every
  * `![[embed]]` from an export while the desktop inlined it — the doc comment
@@ -258,14 +252,14 @@ function previewInlineEmbeds(md: string): string {
 
 /**
  * Preview mirror of the Rust export preprocess (convert.rs): embeds
- * inlined via the local store (locked/missing → note), wikilinks
+ * inlined via the local store (missing → note), wikilinks
  * resolved to display text, frontmatter injected as a YAML block.
  * Same contract, browser data source. Built-in conversions only
  * (md/txt/html) — the Rust writers and the bundled Typst need the desktop app.
  */
 function previewLookup(title: string): string | null {
   const hit = getBrowserStore().docs.find((d) => d.title.toLowerCase() === title.trim().toLowerCase());
-  if (!hit || hit.locked) return null;
+  if (!hit) return null;
   return hit.content;
 }
 
@@ -372,26 +366,6 @@ export function craftStats(content: string): { dialogue: number; avgSentence: nu
 }
 
 /** Every Tauri command the frontend can invoke, implemented for the browser. */
-function browserVerifyPin(expected: string, candidate: string): { verified: boolean; retry_after_ms: number } {
-  const normalizedExpected = expected.trim();
-  const normalizedCandidate = candidate.trim();
-  // No PIN configured: nothing to verify against — fail without burning
-  // lockout attempts against a nonexistent secret.
-  if (normalizedExpected.length < 4) return { verified: false, retry_after_ms: 0 };
-  const remaining = Math.max(0, browserPinLockoutUntil - Date.now());
-  if (remaining > 0) return { verified: false, retry_after_ms: remaining };
-  if (normalizedExpected.length >= 4 && normalizedExpected === normalizedCandidate) {
-    browserPinFailures = 0;
-    browserPinLockoutUntil = 0;
-    return { verified: true, retry_after_ms: 0 };
-  }
-  browserPinFailures += 1;
-  if (browserPinFailures < browserPinMaxFailedAttempts) return { verified: false, retry_after_ms: 0 };
-  const delay = Math.min(browserPinMaxBackoffMs, browserPinBaseBackoffMs * 2 ** (browserPinFailures - browserPinMaxFailedAttempts));
-  browserPinLockoutUntil = Date.now() + delay;
-  return { verified: false, retry_after_ms: delay };
-}
-
 export async function browserInvoke<T>(cmd: string, payload: Record<string, unknown>): Promise<T> {
   const store = getBrowserStore();
   const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -543,10 +517,6 @@ case "app_boot_ready":
       store.recordUsage(String(payload.docId), String(payload.event ?? "open"));
       return undefined as T;
 
-    case "doc_set_locked":
-      store.setLocked(String(payload.id), Boolean(payload.locked));
-      return undefined as T;
-
     case "doc_list_pinned":
       return store.listPinned() as T;
 
@@ -606,7 +576,6 @@ case "app_boot_ready":
     case "log_get_or_create": {
       const date = String(payload.date);
       const existing = store.docs.find((d) => d.workspace === "logs" && d.title === date);
-      if (existing?.locked) throw new Error("daily log is locked");
       if (existing) return docShape(existing) as T;
       return docShape(store.create("logs", "log", date, undefined, `# ${date}\n\n`)) as T;
     }
@@ -726,7 +695,7 @@ case "app_boot_ready":
 
     case "bible_upsert_fact": {
       const docId = String(payload.docId);
-      if (store.get(docId).kind !== "project" || !store.bibleSourceAllowed(docId)) throw new Error("Story Bible facts require an unlocked project scope");
+      if (store.get(docId).kind !== "project" || !store.bibleSourceAllowed(docId)) throw new Error("Story Bible facts require a valid project scope");
       const key = String(payload.key);
       const kind = String(payload.kind);
       const existing = store.bible.find((b) => b.doc_id === docId && b.key === key);
@@ -934,11 +903,11 @@ case "app_boot_ready":
     }
 
     case "dashboard_productivity_score": {
-      const docs = store.docs.filter(d => !d.locked);
+      const docs = store.docs;
       const totalWords = docs.reduce((sum, d) => sum + d.word_count, 0);
       const totalDocs = docs.length;
       const avgWords = totalDocs > 0 ? totalWords / totalDocs : 0;
-      const activeDays = new Set(store.docs.filter(d => !d.locked).map(d => d.updated_at.slice(0, 10))).size;
+      const activeDays = new Set(store.docs.map(d => d.updated_at.slice(0, 10))).size;
       const score = Math.min(100, Math.round((totalWords / 10000) * 30 + activeDays * 2 + (totalDocs * 0.5)));
       return { score: Math.min(100, score), totalWords, totalDocs, activeDays, avgWords: Math.round(avgWords) } as T;
     }
@@ -951,7 +920,6 @@ case "app_boot_ready":
       }).reverse();
       const dailyWords = new Map<string, number>();
       for (const d of store.docs) {
-        if (d.locked) continue;
         const day = d.updated_at.slice(0, 10);
         dailyWords.set(day, (dailyWords.get(day) || 0) + d.word_count);
       }
@@ -1065,7 +1033,6 @@ case "app_boot_ready":
     case "get_reopen_never_finish": {
       const reopenData = store.docs
         .filter((d) => {
-          if (d.locked) return false;
           const o = store.opens[d.id];
           return !!o && o.count > 1 && (!o.lastWrite || o.lastWrite < o.lastOpened);
         })
@@ -1081,7 +1048,6 @@ case "app_boot_ready":
     case "dashboard_streak_heatmap": {
       const heatmap: { date: string; words: number }[] = [];
       for (const d of store.docs) {
-        if (d.locked) continue;
         const day = d.updated_at.slice(0, 10);
         const existing = heatmap.find(h => h.date === day);
         if (existing) existing.words += d.word_count;
@@ -1094,7 +1060,6 @@ case "app_boot_ready":
       const patterns: { hour: number; count: number }[] = [];
       for (let h = 0; h < 24; h++) patterns.push({ hour: h, count: 0 });
       for (const d of store.docs) {
-        if (d.locked) continue;
         const hour = new Date(d.updated_at).getHours();
         const p = patterns.find(p => p.hour === hour);
         if (p) p.count++;
@@ -1104,7 +1069,6 @@ case "app_boot_ready":
 
     case "memory_smart_tabs":
       return store.listByWorkspace(String(payload.workspace))
-        .filter((d) => !d.locked)
         .sort((a, b) => (b.activity_score ?? 0) - (a.activity_score ?? 0))
         .slice(0, 10) as T;
 
@@ -1128,7 +1092,6 @@ case "app_boot_ready":
 
     case "dashboard_recent_docs":
       return [...store.docs]
-        .filter((d) => !d.locked)
         .sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))
         .slice(0, num(payload.limit) ?? 8)
         .map((d) => [d.id, d.title, d.updated_at]) as T;
@@ -1136,7 +1099,6 @@ case "app_boot_ready":
     case "dashboard_workspace_counts": {
       const counts = new Map<string, number>();
       for (const d of store.docs) {
-        if (d.locked) continue;
         counts.set(d.workspace, (counts.get(d.workspace) ?? 0) + 1);
       }
       return [...counts.entries()] as T;
@@ -1145,7 +1107,6 @@ case "app_boot_ready":
     case "dashboard_writing_days": {
       const days = new Set<string>();
       for (const d of store.docs) {
-        if (d.locked) continue;
         days.add(d.updated_at.slice(0, 10));
       }
       return [...days].sort().slice(-90) as T;
@@ -1154,18 +1115,16 @@ case "app_boot_ready":
     case "dashboard_patterns": {
       const hours = new Array(24).fill(0) as number[];
       for (const d of store.docs) {
-        if (d.locked) continue;
         hours[new Date(d.updated_at).getHours()]++;
       }
       const peak = hours.indexOf(Math.max(...hours));
       const counts = new Map<string, number>();
       for (const d of store.docs) {
-        if (d.locked) continue;
         counts.set(d.workspace, (counts.get(d.workspace) ?? 0) + 1);
       }
       const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
       const weekWords = store.docs
-        .filter((d) => !d.locked && Date.now() - +new Date(d.updated_at) < 7 * 864e5)
+        .filter((d) => Date.now() - +new Date(d.updated_at) < 7 * 864e5)
         .reduce((n, d) => n + d.word_count, 0);
       return {
         peak_hour: `${peak}:00`,
@@ -1178,7 +1137,7 @@ case "app_boot_ready":
 
     case "dashboard_goals": {
       return store.docs
-        .filter((d) => !d.locked && d.goal_words && d.goal_words > 0)
+        .filter((d) => d.goal_words && d.goal_words > 0)
         .map((d) => ({
           id: d.id,
           title: d.title,
@@ -1342,7 +1301,6 @@ case "app_boot_ready":
       const limit = num(payload.limit) ?? 10;
       const scored: [{ id: string; doc_id: string; chunk_index: number; content: string; start_word: number; end_word: number }, number][] = [];
       for (const d of store.docs) {
-        if (d.locked) continue;
         const words = d.content.split(/\s+/).filter(Boolean);
         for (let i = 0; i < words.length; i += 200) {
           const slice = words.slice(i, i + 200).join(" ");
@@ -1360,8 +1318,7 @@ case "app_boot_ready":
       const q = String(payload.query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
       const max = num(payload.maxChunks) ?? 3;
       const doc = store.docs.find((d) => d.id === String(payload.docId));
-      if (doc?.locked) return "" as T;
-      const pool = (doc ? [doc] : store.docs).filter((d) => !d.locked);
+      const pool = doc ? [doc] : store.docs;
       const scored: [string, number][] = [];
       for (const d of pool) {
         for (const para of d.content.split(/\n{2,}/)) {
@@ -1428,14 +1385,11 @@ case "app_boot_ready":
 
     case "get_workspace_context": {
       const doc = store.get(String(payload.docId));
-      // Locked docs are invisible to AI: no content, no neighbors.
-      if (doc.locked) return "" as T;
       const links = store.backlinksFor(doc.id).slice(0, 5);
       const parts = [`# ${doc.title}\n\n${doc.content.slice(0, 2000)}`];
       for (const l of links) {
         try {
           const src = store.get(l.source_id);
-          if (src.locked) continue;
           parts.push(`\n\n## Linked: ${src.title}\n\n${src.content.slice(0, 800)}`);
         } catch {
           /* linked doc deleted since */
@@ -1449,6 +1403,10 @@ case "app_boot_ready":
 
     case "sidecar_python_probe":
       throw new Error("Python probe needs the desktop app — browsers can't spawn interpreters.");
+
+    case "sidecars_dir":
+      // Dev-path mirror; browsers never spawn, callers gate on isTauri.
+      return "src-tauri/sidecars" as T;
 
     case "stt_start":
     case "stt_stop":
@@ -1466,9 +1424,6 @@ case "app_boot_ready":
     case "llm_health":
       return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
 
-    case "llm_port":
-      return 0 as T;
-
     case "llm_completion":
       throw new Error("LLM completion needs the desktop app's llama.cpp server. Connect an HTTP model in Settings → AI & Providers.");
 
@@ -1480,9 +1435,6 @@ case "app_boot_ready":
 
     case "stt_health":
       return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
-
-    case "stt_port":
-      return 0 as T;
 
     case "stt_transcribe":
     case "stt_stream_stop":
@@ -1498,9 +1450,6 @@ case "app_boot_ready":
 
     case "tts_health":
       return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
-
-    case "tts_port":
-      return 0 as T;
 
     case "tts_synthesize":
       throw new Error("Read-aloud voices need the desktop app's Kokoro sidecar. Your browser can still read via its built-in speech if enabled.");
@@ -1556,7 +1505,7 @@ case "app_boot_ready":
     // Atlas (star-sky memory) — browser preview stub
     case "atlas_get_stars":
       return store.docs
-        .filter((d) => !d.locked && d.content)
+        .filter((d) => d.content)
         .map((d) => ({
           id: d.id,
           title: d.title,
@@ -1572,34 +1521,20 @@ case "app_boot_ready":
     // forgets them instead of leaving plaintext in localStorage. Same
     // allowlist as Rust keychain_entry: no arbitrary bucket writes.
     case "secret_set": {
-      if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
+      if (payload.key !== "apiKey") {
         throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
       }
       const v = String(payload.value ?? "");
-      if (payload.key === "appLockPin" && v.trim() && v.trim().length < 4) {
-        throw new Error("app PIN must be at least 4 characters");
-      }
       if (v) browserSecrets.set(String(payload.key), v);
       else browserSecrets.delete(String(payload.key));
       return undefined as T;
     }
     case "secret_get": {
-      if (payload.key !== "apiKey" && payload.key !== "appLockPin") {
+      if (payload.key !== "apiKey") {
         throw new Error(`Unknown secret key in browser preview: ${String(payload.key)}`);
       }
       return (browserSecrets.get(String(payload.key)) ?? null) as T;
     }
-    case "app_lock_configured":
-      return (String(browserSecrets.get("appLockPin") ?? "").trim().length >= 4) as T;
-    case "app_lock_verify": {
-      const expected = String(browserSecrets.get("appLockPin") ?? "");
-      const candidate = String(payload.pin ?? "");
-      return browserVerifyPin(expected, candidate) as T;
-    }
-    case "app_lock_reset":
-      browserPinFailures = 0;
-      browserPinLockoutUntil = 0;
-      return undefined as T;
 
     case "search_docs_fts":
       return store.search(String(payload.query ?? ""), str(payload.workspace)) as T;
@@ -1627,8 +1562,7 @@ case "app_boot_ready":
     case "search_by_tag": {
       const tag = String(payload.tag ?? "").trim().toLowerCase();
       const out: unknown[] = [];
-      // Scan localStorage tag keys (preview-scale vaults only). Locked
-      // docs are excluded like the Rust backend (`WHERE d.locked = 0`).
+      // Scan localStorage tag keys (preview-scale vaults only).
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i) ?? "";
         if (!k.startsWith("jwe-tags:")) continue;
@@ -1642,7 +1576,7 @@ case "app_boot_ready":
           const docId = k.slice("jwe-tags:".length);
           try {
             const doc = store.get(docId);
-            if (!doc.locked) out.push(doc);
+            out.push(doc);
           } catch {
             continue;
           }

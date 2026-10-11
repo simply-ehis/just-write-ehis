@@ -3,7 +3,8 @@
   import { EditorView, keymap } from "@codemirror/view";
   import { Compartment, EditorState } from "@codemirror/state";
   import { ghostField, ghostInlinePlugin, setGhostEffect } from "$lib/ghostWidget";
-  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette } from "$lib/editorTheme";
+  import { AUTOCORRECT_WAVY, editorFontStack, editorPalette, markdownSyntaxTheme } from "$lib/editorTheme";
+  import { resolveThemeMode } from "$lib/appearance";
   import { basicSetup } from "codemirror";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
@@ -12,8 +13,9 @@
   import { settings } from "$lib/stores/settings";
   import { api, type Doc } from "$lib/api";
   import { createAutocorrectPlugin, loadBibleWords } from "$lib/autocorrectPlugin";
-  import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { lastSentenceOf, requestGhostContinuation } from "$lib/ghost";
+import { warmLlm } from "$lib/stores/audio";
+import { isBrowserPreview } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
 import MicButton from "./MicButton.svelte";
 import ReadAloudButton from "./ReadAloudButton.svelte";
@@ -23,6 +25,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   import Icon from "./Icon.svelte";
   import { craftStats } from "$lib/browserBackend";
   import { centerCursorIn, focusDimmingPlugin, loadFocusPrefs, saveFocusPrefs } from "$lib/editorFocus";
+  import { ttsFollow, positionedSections, followTtsSection, type PositionedSection } from "$lib/ttsFollow";
   import { applyWriteBackEvent, writeBack } from "$lib/stores/writeBack";
   import { splitTarget } from "$lib/stores/split";
   import { markUsed } from "$lib/features";
@@ -30,6 +33,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   import { createStoryMemoryExtension, setStoryMemoryData, type StoryMemoryData, type StoryMemoryView } from "$lib/storyMemoryEditor";
   import StoryMemoryHoverCard from "./StoryMemoryHoverCard.svelte";
  import { countWords } from "$lib/text";
+  import { recordSave, saveSettled, saveFailed } from "$lib/stores/saveState";
 
   let editorContainer = $state<HTMLDivElement>();
   // $state.raw: the CodeMirror view is an opaque handle (never deep-read by
@@ -37,10 +41,16 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   // graph on every assignment — a busy-loop that starves timers.
   let editorView = $state.raw<EditorView | null>(null);
   let saveTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
+  // Last known editor content, for the destroy/pagehide flush (never in template).
+  let liveContent = "";
+  let flushTimeout: ReturnType<typeof setTimeout> | null = null;
   let typewriterEnabled = $state($settings.typewriterDefault);
   let focusDimming = $state($settings.focusDimmingDefault);
   let sessionStartTime = $state(Date.now());
   let sessionWords = $state(0);
+  // Word count at doc open — the recap toast reports the SESSION delta,
+  // not the doc total ("10,002 words in 1 min" was a lie).
+  let sessionBaselineWords = 0;
   let elapsed = $state("00:00:00");
   let timerInterval: ReturnType<typeof setInterval> | null = null;
   let lastMetricAt = 0;
@@ -63,6 +73,15 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   let ghostSuggestion = $state("");
   let ghostVisible = $state(false);
   let ghostDebounce: ReturnType<typeof setTimeout> | null = null;
+  // Warm-on-intent (slice 4B): turning Ghost on is a signal the user wants
+  // the LLM — pre-warm it so the first suggestion doesn't pay the spawn cost.
+  // No-op in browser mode; single-flight inside ensureLlm prevents a second
+  // start if ghost.ts already kicked one off.
+  $effect(() => {
+    if ($settings.ghostEnabled && $settings.llmEnabled && !isBrowserPreview()) {
+      void warmLlm();
+    }
+  });
   let storyMemoryVisible = $state(false);
   let storyMemoryPosition = $state({ x: 0, y: 0 });
   let storyMemoryEntity = $state<StoryMemoryView | null>(null);
@@ -143,11 +162,6 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
 
   async function requestGhostSuggestion(content: string) {
     if (!$settings.ghostEnabled || !$currentDoc) return;
-    try {
-      assertAiAllowedForDoc($currentDoc);
-    } catch {
-      return;
-    }
     const lastSentence = lastSentenceOf(content);
     if (!lastSentence) return;
     // Provider routing is fixed inside ghost.ts (local :8093 if enabled,
@@ -254,13 +268,10 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
         maxWidth: "720px",
         margin: "0 auto",
       },
+    // Writing space, not a coding space: basicSetup ships lineNumbers +
+    // foldGutter, so hide the whole strip (word count lives in StatusBar).
     ".cm-gutters": {
-      backgroundColor: p.bg,
-      color: p.muted,
-      border: "none",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: p.overlay,
+      display: "none",
     },
     ".cm-activeLine": {
       backgroundColor: p.overlay,
@@ -308,11 +319,19 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
     ".cm-searchMatch-selected": {
       backgroundColor: p.matchSel,
     },
+    ".cm-tts-current": {
+      backgroundColor: p.matchSel,
+    },
   });
   }
 
   function currentThemeExt() {
-    return makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, $settings.themeMode);
+    const mode = resolveThemeMode($settings.themeMode);
+    const palette = editorPalette($settings.theme, mode);
+    return [
+      makeDarkTheme($settings.fontFamily, $settings.fontSize, $settings.lineHeight, $settings.theme, mode),
+      markdownSyntaxTheme(palette),
+    ];
   }
 
   function currentAutocorrectExt() {
@@ -326,12 +345,21 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
   }
 
   function currentFocusExt() {
-    return focusDimming ? focusDimmingPlugin(() => focusDimming) : [];
+    return focusDimming
+      ? focusDimmingPlugin({
+          isEnabled: () => focusDimming,
+          getContextLines: () => $settings.focusContextLines,
+        })
+      : [];
   }
 
   function currentTypewriterExt() {
     return typewriterEnabled
-      ? EditorView.scrollMargins.of(() => ({ top: 200, bottom: 200 }))
+      ? EditorView.scrollMargins.of((view) => {
+          const h = view.dom.clientHeight || 600;
+          const m = Math.round(h / 3);
+          return { top: m, bottom: m };
+        })
       : [];
   }
 
@@ -359,6 +387,9 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
     const extensions = [
       basicSetup,
       markdown(),
+      // Soft-wrap at the content measure (720px): long lines fold instead
+      // of scrolling the pane sideways forever.
+      EditorView.lineWrapping,
       themeCompartment.of(currentThemeExt()),
        search({ top: true }),
        highlightSelectionMatches(),
@@ -451,6 +482,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
     );
 
     extensions.push(autocorrectCompartment.of(currentAutocorrectExt()));
+    extensions.push(...ttsFollow);
 
     const state = EditorState.create({
       doc: content,
@@ -469,7 +501,20 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
 
   let saveQueue: Promise<void> = Promise.resolve();
 
-  function queueDocSave(editingDocId: string, content: string) {
+  // Read-aloud section flow (3.9): snapshot sections at read start, then
+  // highlight + scroll-follow the one being spoken.
+  let ttsSections: PositionedSection[] = [];
+
+  function ttsSplit() {
+    ttsSections = positionedSections($currentDoc?.content ?? "");
+    return ttsSections.map(({ id, title, text }) => ({ id, title, text }));
+  }
+
+  function handleTtsSection(idx: number | null) {
+    if (editorView) followTtsSection(editorView, ttsSections, idx);
+  }
+
+  function queueDocSave(editingDocId: string, content: string, saveEpoch: number) {
     saveQueue = saveQueue.then(async () => {
       try {
         const updated = await api.docSave(editingDocId, undefined, content);
@@ -489,17 +534,39 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
       } catch (e) {
         // Data-loss risk: the user must see this, not just the console.
         domainError("Write", "couldn't save document", e);
+        // The indicator must NOT decay to "Saved" after a failed write.
+        saveFailed(saveEpoch, e);
+        return;
       }
+      saveSettled(saveEpoch);
     });
   }
 
   function handleContentChange(content: string) {
     if (!$currentDoc) return;
     const editingDocId = $currentDoc.id;
+    liveContent = content;
     const words = countWords(content);
     sessionWords = words;
+    // Epoch-scoped: the indicator follows the actual write, so a save that
+    // is superseded (or fails) can never report the wrong phase.
+    const saveEpoch = recordSave();
     if (saveTimeout) clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => queueDocSave(editingDocId, content), 500);
+    saveTimeout = setTimeout(() => queueDocSave(editingDocId, content, saveEpoch), 500);
+    // Periodic atomic flush: keeps the last keystrokes durable without
+    // waiting for the 500ms docSave debounce to fire on every pause.
+    if (flushTimeout) clearTimeout(flushTimeout);
+    flushTimeout = setTimeout(() => {
+      saveQueue = saveQueue.then(async () => {
+        try {
+          await api.atomicSave(editingDocId, content);
+          saveSettled(saveEpoch);
+        } catch (e) {
+          domainError("Write", "couldn't flush document to disk", e);
+          saveFailed(saveEpoch, e);
+        }
+      });
+    }, 5000);
     if (typewriterEnabled) {
       requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
     }
@@ -581,6 +648,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
       extensions: [
         basicSetup,
         markdown(),
+        EditorView.lineWrapping,
         themeCompartment.of(currentThemeExt()),
         search({ top: true }),
         highlightSelectionMatches(),
@@ -717,8 +785,9 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
            dismissGhost();
            refreshBibleWords(doc);
            refreshStoryMemory(doc);
-           sessionStartTime = Date.now();
+            sessionStartTime = Date.now();
           sessionWords = doc.word_count;
+          sessionBaselineWords = doc.word_count;
         }
       });
     } else {
@@ -877,20 +946,61 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
 
   onMount(() => {
     timerInterval = setInterval(updateElapsed, 1000);
+    window.addEventListener("pagehide", onPageHide);
   });
 
+  /**
+   * Persist anything still debounced before the component goes away.
+   *
+   * `onDestroy` fires on workspace switch, doc deselect and window close, so
+   * clearing the timers without writing first threw away the last <500ms of
+   * typing — while the status bar already said "Saved". Fire-and-forget by
+   * necessity (the webview is going away), but the write is *initiated* here
+   * rather than discarded.
+   */
+  function flushPendingSave() {
+    if (!saveTimeout && !flushTimeout) return;
+    if (saveTimeout) clearTimeout(saveTimeout);
+    if (flushTimeout) clearTimeout(flushTimeout);
+    saveTimeout = null;
+    flushTimeout = null;
+    const id = $currentDoc?.id;
+    if (!id || !liveContent) return;
+    const epoch = recordSave();
+    saveQueue = saveQueue.then(async () => {
+      try {
+        await api.atomicSave(id, liveContent);
+        saveSettled(epoch);
+      } catch (e) {
+        // Nowhere left to show an error at this point; log rather than
+        // pretend it worked.
+        console.error("Final flush failed", e);
+        saveFailed(epoch, e);
+      }
+    });
+  }
+
+  // `pagehide` covers the browser-level teardown paths (window close,
+  // navigation, webview reload) that `onDestroy` may not see in time.
+  function onPageHide() {
+    flushPendingSave();
+  }
+
   onDestroy(() => {
-    // Session-end recap (A7.5): show once when closing Just Write session
-    if (elapsed !== "00:00:00" && sessionWords > 0) {
+    window.removeEventListener("pagehide", onPageHide);
+    flushPendingSave();
+    // Session-end recap (A7.5): show once when closing Just Write session.
+    // Reports the words WRITTEN this session, not the doc's lifetime total.
+    const wrote = Math.max(0, sessionWords - sessionBaselineWords);
+    if (elapsed !== "00:00:00" && wrote > 0) {
       const diff = Date.now() - sessionStartTime;
       const mins = Math.floor(diff / 60000);
       const timeStr = mins > 0 ? `${mins} min` : `${Math.floor(diff / 1000)} sec`;
-      showToast(`${sessionWords.toLocaleString()} words in ${timeStr}`, "info");
+      showToast(`Wrote ${wrote.toLocaleString()} words in ${timeStr}`, "info");
     }
     if (editorView) editorView.destroy();
     if (splitView) splitView.destroy();
     splitTarget.set(null);
-    if (saveTimeout) clearTimeout(saveTimeout);
     if (splitSaveTimeout) clearTimeout(splitSaveTimeout);
     if (timerInterval) clearInterval(timerInterval);
     if (ghostDebounce) clearTimeout(ghostDebounce);
@@ -919,7 +1029,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
           if (splitDocId) {
             closeSplit();
           } else {
-            const candidate = $openTabs.find((t) => t.id !== $currentDoc?.id);
+            const candidate = $openTabs.find((t) => t.workspace === $currentWorkspace && t.id !== $currentDoc?.id);
             if (candidate) openSplit(candidate.id);
             else showToast("Open another tab first, then split", "info");
           }
@@ -938,7 +1048,7 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
           title="Split document"
           aria-label="Split document"
         >
-          {#each $openTabs.filter((t) => t.id !== $currentDoc?.id) as t}
+          {#each $openTabs.filter((t) => t.workspace === $currentWorkspace && t.id !== $currentDoc?.id) as t}
             <option value={t.id}>{t.title}</option>
           {/each}
         </select>
@@ -963,6 +1073,8 @@ import ReadAloudButton from "./ReadAloudButton.svelte";
               ? editorView.state.sliceDoc(sel.from, sel.to)
               : '';
           }}
+          getSections={ttsSplit}
+          onSection={handleTtsSection}
         />
       {/if}
     </div>

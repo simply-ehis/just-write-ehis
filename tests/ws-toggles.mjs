@@ -120,7 +120,7 @@ if (!only || only === "defaults") {
   const qa = (s) => [...dom.window.document.querySelectorAll(s)];
   const navLabels = qa(".workspace-nav .nav-item").map((b) => (b.getAttribute("aria-label") || "").trim());
   check("defaults keep Novel visible", navLabels.includes("Novel"));
-  check("defaults hide Inbox/Canvas, never Files-route", !navLabels.includes("Inbox") && !navLabels.includes("Canvas") && !navLabels.some((l) => l === "Files"), navLabels.join(","));
+  check("defaults hide Canvas, show Capture, never Files-route", navLabels.some((l) => l.startsWith("Capture")) && !navLabels.includes("Canvas") && !navLabels.some((l) => l === "Files"), navLabels.join(","));
   console.error = (..._) => {};
 }
 

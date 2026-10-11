@@ -1,28 +1,26 @@
 use std::process::{Child, Command};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::ipc::{IpcSidecar, SockClient};
+use crate::procutil::{hide_console, terminate_child};
 
 // ── Shared process management ──────────────────────────────────────
 //
 // LAZY-START POLICY (one place): nothing spawns at boot or import time.
 // Every sidecar starts on first user tap (ensure_*), stops on toggle-off.
-// ManagedSidecar is the ONE child-process owner for the STT, TTS, memory,
-// and LLM managers:
-// dead handles are reaped and respawned (never early-Ok on a corpse),
-// stop() is kill()+wait() (reaped, no zombies), Drop kills best-effort
-// so children die with the app, and every HTTP client carries a timeout
-// (30s default, 180s for media generation) so no hang is indefinite.
-
-/// HTTP client with a real timeout — replaces bare Client::new() (which
-/// waits forever) everywhere in this module.
-fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))
-}
+//
+// TRANSPORT (slice 4): no sidecar binds a TCP port.
+// - STT / TTS / memory: private stdio JSON-line pipes (IpcSidecar) —
+//   frames on the child's own stdin/stdout, logs on stderr.
+// - LLM: llama-server binds an AF_UNIX socket (`--host <path>.sock`);
+//   SockClient speaks HTTP/1.1 over that socket. No loopback listener,
+//   so nothing else on the machine (or in a browser) can reach it.
+// Per-launch tokens are still passed as env at spawn: the servers
+// refuse to start without one, which keeps old/new builds
+// interchangeable and documents the private-pipe contract.
 
 /// Resolve a sidecar script, tolerating raw portable exes run without the
 /// installer layout. The frontend passes resourceDir/sidecars; when that
@@ -92,100 +90,21 @@ fn sidecar_root_from_executable(executable: &std::path::Path) -> std::path::Path
         .to_path_buf()
 }
 
-fn terminate_child(child: &mut Child) -> Result<(), String> {
-    if matches!(child.try_wait(), Ok(Some(_))) {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    {
-        let pid = child.id().to_string();
-        let mut killer = Command::new(system_tool("taskkill"))
-            .args(["/PID", pid.as_str(), "/T", "/F"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| format!("failed to terminate sidecar process tree: {}", e))?;
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let status = loop {
-            match killer.try_wait() {
-                Ok(Some(status)) => break Some(status),
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-                Ok(None) => break None,
-                Err(error) => return Err(format!("failed to terminate sidecar process tree: {}", error)),
-            }
-        };
-        let Some(status) = status else {
-            let _ = killer.kill();
-            let _ = killer.wait();
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("sidecar process-tree termination timed out".to_string());
-        };
-        if !status.success() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("taskkill failed for sidecar process tree: {}", status));
-        }
-    }
-    #[cfg(not(windows))]
-    child.kill().map_err(|e| format!("failed to terminate sidecar: {}", e))?;
-    child.wait().map_err(|e| format!("failed to reap sidecar: {}", e))?;
-    Ok(())
-}
-
-async fn ensure_http_ok(response: reqwest::Response, label: &str) -> Result<reqwest::Response, String> {
-    if response.status().is_success() {
-        return Ok(response);
-    }
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    let snippet: String = body.trim().chars().take(300).collect();
-    if snippet.is_empty() {
-        Err(format!("{} HTTP {}", label, status))
-    } else {
-        Err(format!("{} HTTP {}: {}", label, status, snippet))
-    }
-}
-
-/// ONE managed child process shared by all sidecar managers.
+/// ONE managed child process — used by the LLM (llama-server over
+/// AF_UNIX). The stdio sidecars use IpcSidecar instead, which owns its
+/// own pipes. No port: nothing here reclaims or inspects one.
 pub struct ManagedSidecar {
     process: Mutex<Option<Child>>,
-    port: u16,
-    /// Short log name, e.g. "stt".
+    /// Short log name, e.g. "llm".
     name: &'static str,
 }
 
-#[derive(Debug, Clone)]
-struct PortOwner {
-    pid: String,
-    image: String,
-}
-
-#[cfg(windows)]
-fn system_tool(name: &str) -> std::path::PathBuf {
-    std::env::var_os("WINDIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows"))
-        .join("System32")
-        .join(name)
-}
-
-#[cfg(not(windows))]
-fn system_tool(name: &str) -> std::path::PathBuf {
-    std::path::PathBuf::from(name)
-}
-
 impl ManagedSidecar {
-    pub fn new(port: u16, name: &'static str) -> Self {
+    pub fn new(name: &'static str) -> Self {
         Self {
             process: Mutex::new(None),
-            port,
             name,
         }
-    }
-
-    pub fn port(&self) -> u16 {
-        self.port
     }
 
     /// True only when a live child exists (reaps corpses as a side effect).
@@ -206,8 +125,7 @@ impl ManagedSidecar {
     }
 
     /// Spawn `program`+`args` in `cwd`. A dead handle is reaped first and
-    /// respawned (never early-Ok on a corpse). If our port is held by a
-    /// stale holder, it is reclaimed (orphan restart) before spawning.
+    /// respawned (never early-Ok on a corpse).
     pub fn start(&self, program: &str, args: &[String], cwd: &str, start_label: &str) -> Result<(), String> {
         self.start_with_env(program, args, cwd, start_label, &[])
     }
@@ -231,8 +149,6 @@ impl ManagedSidecar {
             }
         }
 
-        self.reclaim_stale_port()?;
-
         let mut command = Command::new(program);
         command.args(args).current_dir(cwd);
         command.env_remove("PYTHONHOME");
@@ -241,6 +157,7 @@ impl ManagedSidecar {
         for (key, value) in envs {
             command.env(key, value);
         }
+        hide_console(&mut command);
         let child = command
             .spawn()
             .map_err(|e| format!("Failed to start {} sidecar ({}): {}", start_label, program, e))?;
@@ -256,125 +173,6 @@ impl ManagedSidecar {
         }
         Ok(())
     }
-
-    fn reclaim_stale_port(&self) -> Result<(), String> {
-        use std::net::{SocketAddr, TcpStream};
-        let addr: SocketAddr = format!("127.0.0.1:{}", self.port)
-            .parse()
-            .map_err(|e| format!("bad sidecar port: {}", e))?;
-        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_err() {
-            return Ok(());
-        }
-        let Some(owner) = Self::port_owner(self.port) else {
-            return Err(format!(
-                "port {} is already in use by an unknown process — stop it and retry",
-                self.port
-            ));
-        };
-        let image = owner.image.to_ascii_lowercase();
-        let ours = matches!(
-            image.as_str(),
-            "stt-server.exe"
-                | "stt-server"
-                | "tts-server.exe"
-                | "tts-server"
-                | "memory-server.exe"
-                | "memory-server"
-                | "llama-server.exe"
-                | "llama-server"
-        );
-        if !ours {
-            return Err(format!(
-                "port {} is held by {} (pid {}, not a verified sidecar) — stop it and retry",
-                self.port, owner.image, owner.pid
-            ));
-        }
-        eprintln!(
-            "[{}] port {} held by verified orphan process ({}) — killed and restarted",
-            self.name, self.port, owner.image
-        );
-        Self::kill_port_owner(&owner)?;
-        std::thread::sleep(Duration::from_millis(500));
-        Ok(())
-    }
-
-    fn port_owner(port: u16) -> Option<PortOwner> {
-        #[cfg(windows)]
-        {
-            Self::port_owner_windows(port)
-        }
-        #[cfg(not(windows))]
-        {
-            Self::port_owner_unix(port)
-        }
-    }
-
-    #[cfg(windows)]
-    fn port_owner_windows(port: u16) -> Option<PortOwner> {
-        let netstat = Command::new(system_tool("netstat")).args(["-ano", "-p", "TCP"]).output().ok()?;
-        let out = String::from_utf8_lossy(&netstat.stdout);
-        let needle = format!("127.0.0.1:{}", port);
-        let pid = out.lines().find_map(|line| {
-            let cols: Vec<&str> = line.split_whitespace().collect();
-            (cols.len() >= 5 && cols[0] == "TCP" && cols[1] == needle && cols[3] == "LISTENING")
-                .then(|| cols[4].to_string())
-        })?;
-        let tasklist = Command::new(system_tool("tasklist"))
-            .args(["/FI", &format!("PID eq {}", pid), "/FO", "CSV", "/NH"])
-            .output()
-            .ok()?;
-        let row = String::from_utf8_lossy(&tasklist.stdout);
-        let image = row.split(',').next()?.trim_matches('"').to_string();
-        (!image.is_empty()).then_some(PortOwner { pid, image })
-    }
-
-    /// Absolute tool path first (PATH hijack resistance), bare name as
-    /// a portability fallback (Nix/Homebrew layouts).
-    #[cfg(not(windows))]
-    fn unix_tool(name: &str) -> std::path::PathBuf {
-        for candidate in [
-            format!("/usr/sbin/{name}"),
-            format!("/usr/bin/{name}"),
-            format!("/bin/{name}"),
-            format!("/sbin/{name}"),
-        ] {
-            let path = std::path::PathBuf::from(&candidate);
-            if path.is_file() {
-                return path;
-            }
-        }
-        std::path::PathBuf::from(name)
-    }
-
-    #[cfg(not(windows))]
-    fn port_owner_unix(port: u16) -> Option<PortOwner> {
-        let output = Command::new(Self::unix_tool("lsof")).args(["-ti", &format!("tcp:{}", port)]).output().ok()?;
-        let pid = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_string();
-        if pid.is_empty() {
-            return None;
-        }
-        let ps = Command::new(Self::unix_tool("ps")).args(["-p", &pid, "-o", "comm="]).output().ok()?;
-        let image = String::from_utf8_lossy(&ps.stdout).trim().to_string();
-        (!image.is_empty()).then_some(PortOwner { pid, image })
-    }
-
-    fn kill_port_owner(owner: &PortOwner) -> Result<(), String> {
-        #[cfg(windows)]
-        let status = Command::new(system_tool("taskkill"))
-            .args(["/F", "/T", "/PID", owner.pid.as_str()])
-            .status()
-            .map_err(|e| e.to_string())?;
-        #[cfg(not(windows))]
-        let status = Command::new(Self::unix_tool("kill"))
-            .args(["-9", owner.pid.as_str()])
-            .status()
-            .map_err(|e| e.to_string())?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("could not kill verified orphan process {}", owner.pid))
-        }
-    }
 }
 
 impl Drop for ManagedSidecar {
@@ -388,23 +186,24 @@ impl Drop for ManagedSidecar {
     }
 }
 
-// ── Moonshine Voice STT sidecar ──────────────────────────────────
-
-pub struct SttManager {
-    proc: ManagedSidecar,
-    /// Per-launch bearer token, minted in `new` and required by every request.
-    ///
-    /// Loopback is not a trust boundary: any process running as any local
-    /// account — and any website in any browser, because a POST with no body is
-    /// a CORS-simple request that needs no preflight — could otherwise drive
-    /// transcription, synthesis and local inference against this machine. This
-    /// mirrors `MemoryManager`, which already required one; STT/TTS/LLM did not.
-    auth_token: String,
+/// Model override travels as child-process argv: keep it a bare name so a
+/// crafted value can't redirect the sidecar's model resolution elsewhere.
+fn check_model_name(model: &str) -> Result<(), String> {
+    if model.contains('/') || model.contains('\\') || model.contains("..") {
+        return Err("Invalid model name.".into());
+    }
+    Ok(())
 }
 
-/// Header carrying the per-launch token. One name for all four sidecars so the
-/// Python servers share a single enforcement helper.
-const TOKEN_HEADER: &str = "X-JWE-Sidecar-Token";
+// ── Moonshine Voice STT sidecar (stdio) ───────────────────────────
+
+pub struct SttManager {
+    proc: IpcSidecar,
+    /// Per-launch token, minted in `new` and required by the server at
+    /// startup (env JWE_SIDECAR_TOKEN). The pipe itself is private; the
+    /// token keeps the startup contract stable across builds.
+    auth_token: String,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SttHealth {
@@ -415,31 +214,21 @@ pub struct SttHealth {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SttTranscribeResponse {
-    pub text: Option<String>,
-    pub error: Option<String>,
-}
-
-/// Model override travels as child-process argv: keep it a bare name so a
-/// crafted value can't redirect the sidecar's model resolution elsewhere.
-fn check_model_name(model: &str) -> Result<(), String> {
-    if model.contains('/') || model.contains('\\') || model.contains("..") {
-        return Err("Invalid model name.".into());
-    }
-    Ok(())
-}
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
+const MEDIA_TIMEOUT: Duration = Duration::from_secs(180);
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl SttManager {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         Self {
-            proc: ManagedSidecar::new(port, "stt"),
+            proc: IpcSidecar::new("stt"),
             auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
+    /// argv is now [model?] — the server no longer takes a port.
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
-        let mut args = vec![self.proc.port().to_string()];
+        let mut args = Vec::new();
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             check_model_name(m)?;
             args.push(m.to_string());
@@ -452,7 +241,6 @@ impl SttManager {
                 &executable.to_string_lossy(),
                 &args,
                 &working_dir_text,
-                "STT",
                 &[("JWE_SIDECARS_DIR", &working_dir_text), token],
             );
         }
@@ -461,7 +249,7 @@ impl SttManager {
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
         let working_dir_text = working_dir.to_string_lossy().to_string();
-        self.proc.start_with_env(python_path, &python_args, &working_dir_text, "STT", &[token])
+        self.proc.start_with_env(python_path, &python_args, &working_dir_text, &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -472,72 +260,59 @@ impl SttManager {
         self.proc.is_running()
     }
 
-    pub fn port(&self) -> u16 { self.proc.port() }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.proc.port())
-    }
-
     pub async fn health(&self) -> Result<SttHealth, String> {
-        let client = http_client(30)?;
-        let resp = client.get(format!("{}/health", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        resp.json().await.map_err(|e| e.to_string())
+        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
     pub async fn transcribe(&self, audio_b64: &str, format: &str) -> Result<String, String> {
-        let client = http_client(180)?;
-        let body = serde_json::json!({
-            "audio": audio_b64,
-            "format": format,
-        });
-        let resp = client.post(format!("{}/transcribe", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
-        result.text.ok_or_else(|| result.error.unwrap_or_else(|| "transcription failed".into()))
+        let value = self
+            .proc
+            .request(
+                "transcribe",
+                json!({ "audio": audio_b64, "format": format }),
+                MEDIA_TIMEOUT,
+            )
+            .await?;
+        value
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "transcription failed".to_string())
     }
 
     pub async fn stream_start(&self) -> Result<(), String> {
-        let client = http_client(30)?;
-        let resp = client.post(format!("{}/stream/start", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(resp, "sidecar").await?;
+        self.proc
+            .request("stream_start", json!({}), CONTROL_TIMEOUT)
+            .await?;
         Ok(())
     }
 
     pub async fn stream_chunk(&self, audio_b64: &str, format: &str) -> Result<(), String> {
-        let client = http_client(30)?;
-        let body = serde_json::json!({ "audio": audio_b64, "format": format });
-        let resp = client.post(format!("{}/stream/chunk", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(resp, "sidecar").await?;
+        self.proc
+            .request(
+                "stream_chunk",
+                json!({ "audio": audio_b64, "format": format }),
+                CONTROL_TIMEOUT,
+            )
+            .await?;
         Ok(())
     }
 
     pub async fn stream_stop(&self) -> Result<String, String> {
-        let client = http_client(30)?;
-        let resp = client.post(format!("{}/stream/stop", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        let result: SttTranscribeResponse = resp.json().await.map_err(|e| e.to_string())?;
-        result.text.ok_or_else(|| result.error.unwrap_or_else(|| "stream transcription failed".into()))
+        let value = self.proc.request("stream_stop", json!({}), MEDIA_TIMEOUT).await?;
+        value
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "stream transcription failed".to_string())
     }
 }
 
-// ── Kokoro TTS sidecar ───────────────────────────────────────────
+// ── Kokoro TTS sidecar (stdio) ────────────────────────────────────
 
 pub struct TtsManager {
-    proc: ManagedSidecar,
-    /// Per-launch bearer token; see `SttManager::auth_token`.
+    proc: IpcSidecar,
     auth_token: String,
 }
 
@@ -549,23 +324,17 @@ pub struct TtsHealth {
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct TtsSynthResponse {
-    pub audio: Option<String>,  // base64 WAV
-    pub sample_rate: Option<u32>,
-    pub format: Option<String>,
-    pub error: Option<String>,
-}
 impl TtsManager {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         Self {
-            proc: ManagedSidecar::new(port, "tts"),
+            proc: IpcSidecar::new("tts"),
             auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
+    /// argv is now [model_dir?] — no port.
     pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
-        let mut args = vec![self.proc.port().to_string()];
+        let mut args = Vec::new();
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             check_model_name(m)?;
             args.push(m.to_string());
@@ -578,7 +347,6 @@ impl TtsManager {
                 &executable.to_string_lossy(),
                 &args,
                 &working_dir_text,
-                "TTS",
                 &[("JWE_SIDECARS_DIR", &working_dir_text), token],
             );
         }
@@ -587,7 +355,7 @@ impl TtsManager {
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
         let working_dir_text = working_dir.to_string_lossy().to_string();
-        self.proc.start_with_env(python_path, &python_args, &working_dir_text, "TTS", &[token])
+        self.proc.start_with_env(python_path, &python_args, &working_dir_text, &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -598,55 +366,56 @@ impl TtsManager {
         self.proc.is_running()
     }
 
-    pub fn port(&self) -> u16 { self.proc.port() }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.proc.port())
-    }
-
     pub async fn health(&self) -> Result<TtsHealth, String> {
-        let client = http_client(30)?;
-        let resp = client.get(format!("{}/health", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        resp.json().await.map_err(|e| e.to_string())
+        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
-    pub async fn synthesize(&self, text: &str, voice: &str, speed: f64,
-                            lang_code: &str, split_pattern: &str, chunk_size: u32) -> Result<(String, u32), String> {
-        let client = http_client(180)?;
-        let body = serde_json::json!({
-            "text": text,
-            "voice": voice,
-            "speed": speed,
-            "lang_code": lang_code,
-            "split_pattern": split_pattern,
-            "chunk_size": chunk_size,
-        });
-        let resp = client.post(format!("{}/synthesize", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        let result: TtsSynthResponse = resp.json().await.map_err(|e| e.to_string())?;
-        match (result.audio, result.sample_rate) {
-            (Some(audio), Some(sr)) => Ok((audio, sr)),
-            _ => Err(result.error.unwrap_or_else(|| "synthesis failed".into())),
-        }
+    pub async fn synthesize(
+        &self,
+        text: &str,
+        voice: &str,
+        speed: f64,
+        lang_code: &str,
+        split_pattern: &str,
+        chunk_size: u32,
+    ) -> Result<(String, u32), String> {
+        let value = self
+            .proc
+            .request(
+                "synthesize",
+                json!({
+                    "text": text,
+                    "voice": voice,
+                    "speed": speed,
+                    "lang_code": lang_code,
+                    "split_pattern": split_pattern,
+                    "chunk_size": chunk_size,
+                }),
+                MEDIA_TIMEOUT,
+            )
+            .await?;
+        let audio = value
+            .get("audio")
+            .and_then(|a| a.as_str())
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| "synthesis failed".to_string())?;
+        let sample_rate = value
+            .get("sample_rate")
+            .and_then(|s| s.as_u64())
+            .ok_or_else(|| "synthesis failed: missing sample rate".to_string())? as u32;
+        Ok((audio.to_string(), sample_rate))
     }
 
     pub async fn stop_playback(&self) -> Result<(), String> {
-        let client = http_client(30)?;
-        let resp = client.post(format!("{}/stop", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        ensure_http_ok(resp, "sidecar").await?;
+        self.proc
+            .request("stop", json!({}), CONTROL_TIMEOUT)
+            .await?;
         Ok(())
     }
 }
 
-// ── AI memory sidecar (vendored harness memory + redaction) ──────
+// ── AI memory sidecar (vendored harness memory + redaction, stdio) ─
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MemoryHealth {
@@ -655,22 +424,23 @@ pub struct MemoryHealth {
 }
 
 pub struct MemoryManager {
-    proc: ManagedSidecar,
+    proc: IpcSidecar,
     data_dir: String,
     auth_token: String,
 }
 
 impl MemoryManager {
-    pub fn new(port: u16, data_dir: String) -> Self {
+    pub fn new(data_dir: String) -> Self {
         Self {
-            proc: ManagedSidecar::new(port, "memory"),
+            proc: IpcSidecar::new("memory"),
             data_dir,
             auth_token: uuid::Uuid::new_v4().to_string(),
         }
     }
 
+    /// argv is now [data_dir] only — no port.
     pub fn start(&self, python_path: &str, sidecars_dir: &str) -> Result<(), String> {
-        let args = vec![self.proc.port().to_string(), self.data_dir.clone()];
+        let args = vec![self.data_dir.clone()];
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "memory-server.exe") {
             let working_dir = sidecar_root_from_executable(&executable);
             let working_dir_text = working_dir.to_string_lossy();
@@ -678,7 +448,6 @@ impl MemoryManager {
                 &executable.to_string_lossy(),
                 &args,
                 &working_dir_text,
-                "memory",
                 &[
                     ("JWE_SIDECARS_DIR", working_dir_text.as_ref()),
                     ("JWE_MEMORY_TOKEN", self.auth_token.as_str()),
@@ -694,7 +463,6 @@ impl MemoryManager {
             python_path,
             &python_args,
             &working_dir_text,
-            "memory",
             &[("JWE_MEMORY_TOKEN", self.auth_token.as_str())],
         )
     }
@@ -707,59 +475,55 @@ impl MemoryManager {
         self.proc.is_running()
     }
 
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.proc.port())
-    }
-
-    async fn post_json(&self, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
-        let client = http_client(30)?;
-        let resp = client.post(format!("{}{}", self.base_url(), path))
-            .header("X-JWE-Memory-Token", &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        resp.json().await.map_err(|e| e.to_string())
-    }
-
     pub async fn health(&self) -> Result<MemoryHealth, String> {
-        let client = http_client(30)?;
-        let resp = client.get(format!("{}/health", self.base_url()))
-            .header("X-JWE-Memory-Token", &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "sidecar").await?;
-        resp.json().await.map_err(|e| e.to_string())
+        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
     pub async fn learn(&self, text: &str) -> Result<i64, String> {
-        let data = self.post_json("/learn", serde_json::json!({ "text": text })).await?;
-        data["stored"].as_i64().ok_or_else(|| "bad /learn response".to_string())
+        let value = self
+            .proc
+            .request("learn", json!({ "text": text }), CONTROL_TIMEOUT)
+            .await?;
+        value
+            .get("stored")
+            .and_then(|s| s.as_i64())
+            .ok_or_else(|| "bad learn response".to_string())
     }
 
     pub async fn recall(&self, query: &str) -> Result<String, String> {
-        let client = http_client(30)?;
-        let resp = client.get(format!("{}/recall", self.base_url()))
-            .header("X-JWE-Memory-Token", &self.auth_token)
-            .query(&[("q", query)])
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "memory recall").await?;
-        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        data["facts"].as_str().map(String::from)
-            .ok_or_else(|| "bad /recall response: missing facts field".to_string())
+        let value = self
+            .proc
+            .request("recall", json!({ "q": query }), CONTROL_TIMEOUT)
+            .await?;
+        value
+            .get("facts")
+            .and_then(|f| f.as_str())
+            .map(String::from)
+            .ok_or_else(|| "bad recall response: missing facts field".to_string())
     }
 
     pub async fn redact(&self, text: &str) -> Result<String, String> {
-        let data = self.post_json("/redact", serde_json::json!({ "text": text })).await?;
-        data["text"].as_str().map(String::from)
-            .ok_or_else(|| "bad /redact response".to_string())
+        let value = self
+            .proc
+            .request("redact", json!({ "text": text }), CONTROL_TIMEOUT)
+            .await?;
+        value
+            .get("text")
+            .and_then(|t| t.as_str())
+            .map(String::from)
+            .ok_or_else(|| "bad redact response".to_string())
     }
 
     pub async fn clear(&self) -> Result<(), String> {
-        self.post_json("/clear", serde_json::json!({})).await?;
+        self.proc
+            .request("clear", json!({}), CONTROL_TIMEOUT)
+            .await?;
         Ok(())
     }
 }
 
-// ── LLM sidecar (llama.cpp server) ─────────────────────────────────
+// ── LLM sidecar (llama.cpp server over AF_UNIX) ───────────────────
 
 fn resolve_llm_model_path(
     path: Option<&str>,
@@ -823,8 +587,13 @@ fn resolve_llm_model_path(
 
 pub struct LlmManager {
     proc: ManagedSidecar,
-    /// Per-launch bearer token; see `SttManager::auth_token`.
+    /// Per-launch bearer token; also passed as --api-key so llama-server
+    /// refuses anyone else even if they somehow reached the socket.
     auth_token: String,
+    /// Per-launch AF_UNIX socket path (under the OS temp dir). Unlinked
+    /// before each spawn so a stale file from a crashed run can't block
+    /// the bind.
+    sock_path: std::path::PathBuf,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -835,11 +604,16 @@ pub struct LlmHealth {
 }
 
 impl LlmManager {
-    pub fn new(port: u16) -> Self {
+    pub fn new() -> Self {
         Self {
-            proc: ManagedSidecar::new(port, "llm"),
+            proc: ManagedSidecar::new("llm"),
             auth_token: uuid::Uuid::new_v4().to_string(),
+            sock_path: std::env::temp_dir().join(format!("jwe-llm-{}.sock", uuid::Uuid::new_v4())),
         }
+    }
+
+    fn sock_client(&self) -> SockClient {
+        SockClient::new(self.sock_path.clone(), self.auth_token.clone())
     }
 
     pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>, ctx_size: Option<u32>) -> Result<(), String> {
@@ -880,22 +654,22 @@ impl LlmManager {
             format!("{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).", error)
         })?;
 
-        // NOTE (b11047+): --no-mmap/--mlock were removed upstream; the
-        // 350M default model pages fine without them.
-        //
-        // `--api-key` is load-bearing, not decoration: llama.cpp's HTTP server
-        // defaults to permissive CORS, so without it any site the user visits
-        // could POST prompts to this server and READ the completions back
-        // cross-origin — a free persistent inference channel and an exfiltration
-        // sink. `--host 127.0.0.1` limits reach to this machine; the key limits
-        // it to this app.
+        // Unlink a stale socket file from a previous crashed run: llama-
+        // server fails to bind if the path already exists.
+        let _ = std::fs::remove_file(&self.sock_path);
+
+        // `--api-key` is load-bearing, not decoration: even on a private
+        // AF_UNIX socket the key keeps the startup contract explicit and
+        // stops any local process that somehow obtained the socket path
+        // (e.g. via a world-readable temp listing) from driving inference.
+        // `--host <path>.sock` binds AF_UNIX instead of TCP — nothing
+        // listens on a port, so no loopback (or browser) request can
+        // reach this server at all.
         let args = vec![
             "-m".to_string(),
             model_file.to_string_lossy().to_string(),
-            "--port".to_string(),
-            self.proc.port().to_string(),
             "--host".to_string(),
-            "127.0.0.1".to_string(),
+            self.sock_path.to_string_lossy().to_string(),
             "--api-key".to_string(),
             self.auth_token.clone(),
             "--ctx-size".to_string(),
@@ -918,62 +692,80 @@ impl LlmManager {
     }
 
     pub fn stop(&self) -> Result<(), String> {
-        self.proc.stop()
+        let result = self.proc.stop();
+        // Best-effort socket cleanup so the next start binds clean.
+        let _ = std::fs::remove_file(&self.sock_path);
+        result
     }
 
     pub fn is_running(&self) -> bool {
         self.proc.is_running()
     }
 
-    pub fn port(&self) -> u16 { self.proc.port() }
-
-    fn base_url(&self) -> String {
-        format!("http://127.0.0.1:{}", self.proc.port())
-    }
-
     pub async fn health(&self) -> Result<LlmHealth, String> {
-        let client = http_client(30)?;
-        let resp = client.get(format!("{}/health", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "LLM health").await?;
-        resp.json().await.map_err(|e| e.to_string())
+        let value = self.sock_client().get_json("/health", HEALTH_TIMEOUT).await?;
+        serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
     pub async fn completion(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
-        let client = http_client(180)?;
-        let body = serde_json::json!({
-            "prompt": prompt,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": false,
-        });
-        let resp = client.post(format!("{}/completion", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "LLM completion").await?;
-        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        data["content"].as_str().map(|s| s.to_string())
+        let value = self
+            .sock_client()
+            .post_json(
+                "/completion",
+                &json!({
+                    "prompt": prompt,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "stream": false,
+                }),
+                MEDIA_TIMEOUT,
+            )
+            .await?;
+        value
+            .get("content")
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string())
             .ok_or_else(|| "LLM server returned no content".to_string())
     }
 
-    pub async fn chat_completion(&self, messages: Vec<serde_json::Value>, max_tokens: u32, temperature: f32) -> Result<String, String> {
-        let client = http_client(180)?;
-        let body = serde_json::json!({
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": false,
-        });
-        let resp = client.post(format!("{}/v1/chat/completions", self.base_url()))
-            .header(TOKEN_HEADER, &self.auth_token)
-            .json(&body)
-            .send().await.map_err(|e| e.to_string())?;
-        let resp = ensure_http_ok(resp, "LLM chat completion").await?;
-        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-        data["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
+    pub async fn chat_completion(
+        &self,
+        messages: Vec<serde_json::Value>,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<String, String> {
+        let value = self
+            .sock_client()
+            .post_json(
+                "/v1/chat/completions",
+                &json!({
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "stream": false,
+                }),
+                MEDIA_TIMEOUT,
+            )
+            .await?;
+        value["choices"][0]["message"]["content"]
+            .as_str()
+            .map(|s| s.to_string())
             .ok_or_else(|| "LLM server returned no content".to_string())
+    }
+
+    /// OpenAI-compatible /v1/models over the socket (Settings Test
+    /// buttons route the sentinel endpoint here).
+    pub async fn list_models(&self) -> Result<Vec<String>, String> {
+        let value = self.sock_client().get_json("/v1/models", CONTROL_TIMEOUT).await?;
+        Ok(value
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("id")?.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 }
 
@@ -983,31 +775,11 @@ mod managed_tests {
 
     #[test]
     fn start_invalid_program_errors_and_stays_down() {
-        let m = ManagedSidecar::new(0, "test");
+        let m = ManagedSidecar::new("test");
         let dir = std::env::temp_dir().to_string_lossy().to_string();
         let r = m.start("definitely-not-a-real-binary-xyz", &[], &dir, "TEST");
         assert!(r.is_err());
         assert!(!m.is_running());
-    }
-
-    /// Port held by a foreign (non-sidecar) listener must fail closed with
-    /// a typed error — never silently adopt or kill it.
-    #[test]
-    fn stale_foreign_port_fails_closed() {
-        use std::net::TcpListener;
-        let listener = TcpListener::bind("127.0.0.1:0").expect("ephemeral port");
-        let port = listener.local_addr().expect("addr").port();
-        let m = ManagedSidecar::new(port, "test");
-        let dir = std::env::temp_dir().to_string_lossy().to_string();
-        let r = m.start("definitely-not-a-real-binary-xyz", &[], &dir, "TEST");
-        assert!(r.is_err(), "expected a typed stale-port error");
-        let msg = r.unwrap_err();
-        assert!(
-            msg.contains("already in use") || msg.contains("held by"),
-            "unexpected message: {}",
-            msg
-        );
-        drop(listener);
     }
 
     #[cfg(windows)]
@@ -1049,7 +821,7 @@ mod managed_tests {
     /// A dead handle is reaped and respawned — never early-Ok on a corpse.
     #[test]
     fn dead_handle_respawns() {
-        let m = ManagedSidecar::new(0, "test");
+        let m = ManagedSidecar::new("test");
         let dir = std::env::temp_dir().to_string_lossy().to_string();
         let (prog, args) = short_lived();
         m.start(&prog, &args, &dir, "TEST").expect("first spawn");
@@ -1065,7 +837,7 @@ mod managed_tests {
     /// stop() is kill()+wait(): no zombie left behind.
     #[test]
     fn stop_reaps_child() {
-        let m = ManagedSidecar::new(0, "test");
+        let m = ManagedSidecar::new("test");
         let dir = std::env::temp_dir().to_string_lossy().to_string();
         let (prog, args) = long_lived();
         m.start(&prog, &args, &dir, "TEST").expect("spawn");

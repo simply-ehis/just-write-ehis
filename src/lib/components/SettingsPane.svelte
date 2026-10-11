@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-  import { appLockConfigured, settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
+  import { settings, settingsCategory, DEFAULT_HIDDEN_WORKSPACES, SECRET_KEYS, resetSettings, type SettingsCategory } from "$lib/stores/settings";
   import { validateSettings, clampNumber } from "$lib/settingsValidate";
   import { workspaces } from "$lib/stores/app";
   import { api, isBrowserPreview, getSlowCalls, SLOW_CALL_MS, type ConvertStatus } from "$lib/api";
@@ -20,6 +20,7 @@
     ensureTts,
     llmError,
     llmStarting,
+    playWavBase64,
     sttError,
     stopLlm,
     stopStt,
@@ -31,16 +32,12 @@
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
   import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
-  import {
-    MIN_PIN_LENGTH,
-    configurePin,
-    hasPin,
-    lockAppNow,
-    removePin,
-  } from "$lib/stores/lock";
   import { domainError, warnOnce } from "$lib/errors";
-  import { defaultAccentFor, ACCENT_PRESETS } from "$lib/appearance";
+  import { defaultAccentFor, ACCENT_PRESETS, resolveThemeMode } from "$lib/appearance";
   import { EDITOR_FONTS } from "$lib/editorTheme";
+
+  // Resolved base mode for logos/color math — "system" tracks the OS live.
+  let baseMode = $derived(resolveThemeMode($settings.themeMode));
 
   // Export setup probe (Settings → About): surfaces Typst presence so
   // menus, errors, and docs agree (see docs/EXPORT.md). md/txt/html/docx/
@@ -71,11 +68,6 @@
   let pythonProbeToken = 0;
   let localModelTesting = $state<"stt" | "tts" | "llm" | null>(null);
   let localModelStatus = $state("");
-  let pinDraft = $state("");
-  let pinConfirmation = $state("");
-  let pinSetupError = $state("");
-  let pinSaving = $state(false);
-  let showPinSetup = $state(false);
 
   async function probePythonPath() {
     pythonError = validatePythonPath($settings.pythonPath);
@@ -89,63 +81,6 @@
       if (token === pythonProbeToken) {
         pythonError = e instanceof Error ? e.message : String(e);
       }
-    }
-  }
-
-  async function onLockToggle(event: Event) {
-    pinSetupError = "";
-    const enabled = (event.currentTarget as HTMLInputElement).checked;
-    if (!enabled) {
-      settings.update((current) => ({ ...current, lockEnabled: false }));
-      return;
-    }
-    try {
-      if (await hasPin()) {
-        lockAppNow();
-        settings.update((current) => ({ ...current, lockEnabled: true }));
-        return;
-      }
-    } catch (error) {
-      pinSetupError = error instanceof Error ? error.message : String(error);
-    }
-    settings.update((current) => ({ ...current, lockEnabled: false }));
-    showPinSetup = true;
-    if (!pinSetupError) showToast("Create the app PIN before enabling locking", "warning");
-  }
-
-  async function savePin() {
-    if (pinSaving) return;
-    pinSetupError = "";
-    if (pinDraft.trim() !== pinConfirmation.trim()) {
-      pinSetupError = "PINs do not match.";
-      return;
-    }
-    pinSaving = true;
-    try {
-      await configurePin(pinDraft, pinConfirmation);
-      pinDraft = "";
-      pinConfirmation = "";
-      showPinSetup = false;
-      showToast("App PIN saved and locking enabled", "success");
-    } catch (error) {
-      pinSetupError = error instanceof Error ? error.message : String(error);
-    } finally {
-      pinSaving = false;
-    }
-  }
-
-  async function removeConfiguredPin() {
-    if (pinSaving) return;
-    pinSaving = true;
-    pinSetupError = "";
-    try {
-      await removePin();
-      showPinSetup = false;
-      showToast("App PIN removed; locking is off", "info");
-    } catch (error) {
-      pinSetupError = error instanceof Error ? error.message : String(error);
-    } finally {
-      pinSaving = false;
     }
   }
 
@@ -177,13 +112,30 @@
         return;
       }
       const result = await synthesizeText("Your local voice is ready.");
-      localModelStatus = result ? "TTS generated a test waveform" : $ttsError || "TTS generated no audio";
+      if (!result) {
+        localModelStatus = $ttsError || "TTS generated no audio";
+        return;
+      }
+      // Actually PLAY the waveform — a test that stays silent proves nothing.
+      try {
+        await playWavBase64(result.audio);
+        localModelStatus = "You should have heard a test voice.";
+      } catch (e) {
+        localModelStatus = `TTS audio failed to play: ${e instanceof Error ? e.message : e}`;
+      }
+      // Success: leave Kokoro warm — stopping it here unloaded the model
+      // the user had just paid the cold-start cost for (and any hover-warm).
+      return;
     } catch (error) {
       localModelStatus = error instanceof Error ? error.message : String(error);
     } finally {
-      if (!wasRunning) await stopTts().catch((error) => {
-        localModelStatus = localModelStatus || `TTS cleanup failed: ${error instanceof Error ? error.message : error}`;
-      });
+      // Only clean up a FAILED start that this test itself spawned; a
+      // successful test keeps the sidecar warm for real use.
+      if (!wasRunning && localModelStatus !== "You should have heard a test voice.") {
+        await stopTts().catch((error) => {
+          localModelStatus = localModelStatus || `TTS cleanup failed: ${error instanceof Error ? error.message : error}`;
+        });
+      }
       localModelTesting = null;
     }
   }
@@ -256,7 +208,7 @@
   }
 
   let activeCategory = $derived($settingsCategory);
-  let aboutLogo = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let aboutLogo = $derived(baseMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   /** Workspace tabs on/off (sidebar + top bar). Null = defaults. */
   function workspaceHidden(id: string): boolean {
@@ -361,7 +313,6 @@
         const report = validateSettings(imported as Record<string, unknown>);
         if (Object.keys(report.valid).length > 0) {
           const next = { ...$settings, ...report.valid };
-          if (!next.appLockPin.trim()) next.lockEnabled = false;
           settings.set(next);
         }
         // Loud report: secrets rejected, unknown/bad keys dropped, clamps.
@@ -639,15 +590,6 @@
       const log = await api.logGetOrCreate(new Date().toISOString().slice(0, 10));
       return log.title;
     });
-    await check("Lock excludes from search + AI", async () => {
-      await api.docSetLocked(docId, true);
-      const hits = await api.docSearchFull(`self-test ${stamp}`);
-      if (hits.some((h) => h.doc.id === docId)) throw new Error("locked doc visible in search");
-      const ctx = await api.getWorkspaceContext(docId, "write");
-      if (ctx.trim()) throw new Error("locked doc leaked into AI context");
-      await api.docSetLocked(docId, false);
-      return "excluded ok";
-    });
     await check("Pinned list + metrics + rhythm", async () => {
       await api.docTogglePin(docId);
       const pinned = await api.docListPinned();
@@ -787,6 +729,12 @@
               aria-checked={$settings.themeMode === "light"}
               onclick={() => ($settings = { ...$settings, themeMode: "light" })}
             >Light</button>
+            <button
+              class:active={$settings.themeMode === "system"}
+              role="radio"
+              aria-checked={$settings.themeMode === "system"}
+              onclick={() => ($settings = { ...$settings, themeMode: "system" })}
+            >System</button>
           </div>
         </div>
         <div class="setting-row accent-row-block">
@@ -813,7 +761,7 @@
                 <input
                   id="setting-accent"
                   type="color"
-                  value={$settings.accentOverride || defaultAccentFor($settings.theme, $settings.themeMode)}
+                  value={$settings.accentOverride || defaultAccentFor($settings.theme, baseMode)}
                   oninput={(e) => {
                     const v = (e.target as HTMLInputElement).value;
                     if (/^#[0-9a-fA-F]{6}$/.test(v)) $settings = { ...$settings, accentOverride: v.toLowerCase() };
@@ -943,6 +891,14 @@
         <div class="setting-row">
           <label for="setting-focus-dimming-default">Focus Dimming (default)</label>
           <input id="setting-focus-dimming-default" type="checkbox" bind:checked={$settings.focusDimmingDefault} />
+        </div>
+        <div class="setting-row">
+          <label for="setting-focus-context-lines">Focus context lines</label>
+          <input id="setting-focus-context-lines" type="number" min="0" max="10" bind:value={$settings.focusContextLines} onblur={() => clampSettingKey("focusContextLines")} />
+        </div>
+        <div class="setting-row">
+          <label for="setting-focus-dim-strength">Focus dim strength</label>
+          <input id="setting-focus-dim-strength" type="range" min="0.1" max="1" step="0.05" bind:value={$settings.focusDimStrength} />
         </div>
         <div class="setting-row">
           <label for="setting-autocorrect-enabled">Autocorrect</label>
@@ -1222,6 +1178,16 @@
           <p class="setting-desc">No bundled model on the web — point the small/main slots at reachable HTTP endpoints instead.</p>
         {/if}
 
+        <div class="setting-row">
+          <label for="setting-model-retention">Model retention</label>
+          <select id="setting-model-retention" bind:value={$settings.modelRetention}>
+            <option value="idle-5min">Idle 5 min</option>
+            <option value="session">Session (30 min idle)</option>
+            <option value="always">Always (never idle-offload)</option>
+          </select>
+          <p class="setting-desc">How long STT/TTS/LLM stay loaded after last use. Idle-offload frees RAM; offloaded models reload on next use.</p>
+        </div>
+
         <h4>System</h4>
         {#if !isBrowserPreview()}
           <div class="setting-row">
@@ -1258,60 +1224,6 @@
     {:else if activeCategory === "privacy"}
       <div class="settings-section">
         <h3>Privacy & Security</h3>
-        <div class="setting-row">
-          <label for="setting-lock-enabled">Per-document locking</label>
-          <input
-            id="setting-lock-enabled"
-            type="checkbox"
-            checked={$settings.lockEnabled}
-            onchange={onLockToggle}
-          />
-        </div>
-        <p class="setting-desc">Controls locked-document gates and exclusions. The configured app PIN separately gates the whole shell.</p>
-        {#if $settings.appLockPin}
-          <div class="setting-row">
-            <span class="setting-label">App PIN</span>
-            <span class="value">Configured</span>
-          </div>
-          <div class="setting-row">
-            <button class="secondary-btn" onclick={() => (showPinSetup = !showPinSetup)}>Change PIN</button>
-            <button class="secondary-btn" disabled={!$appLockConfigured || pinSaving} onclick={() => lockAppNow()}>Lock app now</button>
-            <button id="remove-app-lock-pin" class="clear-btn" disabled={pinSaving} onclick={removeConfiguredPin}>Remove PIN</button>
-          </div>
-        {:else}
-          <p class="setting-desc">No PIN is configured. Enabling locking will open a required create-and-confirm step.</p>
-          <div class="setting-row">
-            <button id="setup-app-lock-pin" class="secondary-btn" onclick={() => (showPinSetup = true)}>Set up PIN</button>
-          </div>
-        {/if}
-        {#if showPinSetup}
-          <div class="setting-row">
-            <label for="setting-app-lock-pin">New PIN</label>
-            <input id="setting-app-lock-pin" type="password" bind:value={pinDraft} disabled={pinSaving} />
-          </div>
-          <div class="setting-row">
-            <label for="setting-app-lock-pin-confirm">Confirm PIN</label>
-            <input id="setting-app-lock-pin-confirm" type="password" bind:value={pinConfirmation} disabled={pinSaving} />
-          </div>
-          {#if pinSetupError}
-            <p class="update-error" role="alert">{pinSetupError}</p>
-          {/if}
-          <div class="setting-row">
-            <button id="save-app-lock-pin" class="secondary-btn" disabled={pinSaving} onclick={savePin}>
-              {pinSaving ? "Saving…" : "Save PIN & enable"}
-            </button>
-            <button class="clear-btn" disabled={pinSaving} onclick={() => (showPinSetup = false)}>Cancel</button>
-          </div>
-          <p class="setting-desc">
-            At least {MIN_PIN_LENGTH} characters.
-            {#if isBrowserPreview()}
-              Browser preview keeps the PIN only for this tab session.
-            {:else}
-              The PIN is stored in the OS keychain, not localStorage.
-            {/if}
-            This is a session lock, not encryption.
-          </p>
-        {/if}
         <div class="setting-row">
           <label for="setting-craft-profiling-enabled">Craft analytics recording</label>
           <input id="setting-craft-profiling-enabled" type="checkbox" bind:checked={$settings.craftProfilingEnabled} />
@@ -1377,7 +1289,7 @@
         {/if}
         {#each ["logs", "write", "novel", "script", "projects", "reader", "map", "inbox"] as ws}
           <div class="setting-row">
-            <label for="setting-ws-privacy-{ws}">{ws.charAt(0).toUpperCase() + ws.slice(1)}</label>
+            <label for="setting-ws-privacy-{ws}">{ws === "inbox" ? "Capture" : ws.charAt(0).toUpperCase() + ws.slice(1)}</label>
             <input
               id="setting-ws-privacy-{ws}"
               type="checkbox"
@@ -1419,6 +1331,7 @@
     {:else if activeCategory === "capture"}
       <div class="settings-section">
         <h3>Capture & Notifications</h3>
+        <p class="setting-desc">Press Ctrl+Shift+F anywhere for the Quick Capture overlay, or use the Capture button in the status bar / mobile bottom bar. Quick Capture targets the Capture workspace by default but can send to any workspace.</p>
         <div class="setting-row">
           <label for="setting-android-capture-method">Android Capture Method</label>
           <select id="setting-android-capture-method" bind:value={$settings.androidCaptureMethod}>
@@ -1437,9 +1350,9 @@
           {#if notifStatus}
             <p class="setting-desc">{notifStatus}</p>
           {/if}
-          <p class="setting-desc">Tapping it opens the Inbox capture box. Needs the installed PWA (or the Android app); a home-screen widget needs the native shell and isn't available in the browser.</p>
+          <p class="setting-desc">Tapping it opens the Capture box. Needs the installed PWA (or the Android app); a home-screen widget needs the native shell and isn't available in the browser.</p>
         {:else if $settings.androidCaptureMethod === "share-target"}
-          <p class="setting-desc">Share Target is live: with the PWA installed, Android's share sheet sends text and links straight into the Inbox capture box.</p>
+          <p class="setting-desc">Share Target is live: with the PWA installed, Android's share sheet sends text and links straight into the Capture box — shared text saves automatically.</p>
         {:else}
           <p class="setting-desc">Widgets need the native Android shell (Tauri mobile) — not available in the browser preview. Use Notification or Share Target for now.</p>
         {/if}
@@ -1447,10 +1360,12 @@
           <label for="setting-weekly-triage-reminder">Weekly Triage Reminder</label>
           <input id="setting-weekly-triage-reminder" type="checkbox" bind:checked={$settings.weeklyTriageReminder} />
         </div>
+        <p class="setting-desc">Once a week, a banner surfaces captures older than 7 days with a one-click Open Capture action.</p>
         <div class="setting-row">
           <label for="setting-streak-reminder">Streak Reminder</label>
           <input id="setting-streak-reminder" type="checkbox" bind:checked={$settings.streakReminder} />
         </div>
+        <p class="setting-desc">Once a day, a gentle nudge if your writing streak has nothing logged yet today.</p>
         <div class="setting-row">
           <label for="setting-logs-stamp-place">Stamp location & weather on new daily notes</label>
           <input id="setting-logs-stamp-place" type="checkbox" bind:checked={$settings.logsStampPlace} />

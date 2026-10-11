@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-sidecars-dir"
+description = "Enables the sidecars_dir command without any pre-configured scope."
+commands.allow = ["sidecars_dir"]
+
+[[permission]]
+identifier = "deny-sidecars-dir"
+description = "Denies the sidecars_dir command without any pre-configured scope."
+commands.deny = ["sidecars_dir"]

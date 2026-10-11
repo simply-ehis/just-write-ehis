@@ -4,16 +4,11 @@ import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { api } from "$lib/api";
 import { currentDoc, currentWorkspace, openTabs, showSettings, workspaces, type WorkspaceId } from "$lib/stores/app";
-import { appLockConfigured, settings } from "$lib/stores/settings";
-import { appUnlocked } from "$lib/stores/lock";
+import { settings } from "$lib/stores/settings";
 import { showToast } from "$lib/stores/notifications";
 
 function isWidgetWorkspace(value: string): value is WorkspaceId {
   return workspaces.some((workspace) => workspace.id === value);
-}
-
-function mainShellUnlocked(): boolean {
-  return (!get(appLockConfigured) && !get(settings).lockEnabled) || get(appUnlocked);
 }
 
 let openRequest = 0;
@@ -33,10 +28,6 @@ async function focusMain(mainWindow: Window) {
 }
 
 async function openWidgetDoc(id: string, mainWindow: Window) {
-  if (!mainShellUnlocked()) {
-    await notifyWidgetFailure("Unlock the main app before opening a document");
-    return;
-  }
   if (typeof id !== "string" || !id || id.length > 128) {
     await notifyWidgetFailure("That document request is invalid");
     return;
@@ -46,7 +37,7 @@ async function openWidgetDoc(id: string, mainWindow: Window) {
   try {
     const doc = await api.widgetDocGet(id);
     if (request !== openRequest) return;
-    if (doc.locked || !isWidgetWorkspace(doc.workspace)) {
+    if (!isWidgetWorkspace(doc.workspace)) {
       throw new Error("document is not available to the companion");
     }
     showSettings.set(false);
@@ -73,10 +64,6 @@ async function openWidgetDoc(id: string, mainWindow: Window) {
 }
 
 async function openWidgetWorkspace(id: string, mainWindow: Window) {
-  if (!mainShellUnlocked()) {
-    await notifyWidgetFailure("Unlock the main app before opening a workspace");
-    return;
-  }
   if (!isWidgetWorkspace(id)) throw new Error("workspace is not available to the companion");
   showSettings.set(false);
   currentDoc.set(null);

@@ -106,17 +106,10 @@
             rows.filter_map(|r| r.ok()).collect()
         };
 
-        // Locked docs never surface in AI retrieval.
-        let locked_ids: std::collections::HashSet<String> = {
-            let mut s = conn.prepare("SELECT id FROM docs WHERE locked = 1").map_err(|e| e.to_string())?;
-            let rows = s.query_map([], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
-
         // Fall back to keyword search if no semantic results
         if semantic_results.is_empty() {
             let mut stmt = conn.prepare(
-                "SELECT c.id, c.doc_id, c.chunk_index, c.content, c.start_word, c.end_word FROM rag_chunks c JOIN docs d ON d.id = c.doc_id WHERE d.locked = 0 AND c.content LIKE '%' || ?1 || '%' LIMIT ?2"
+                "SELECT c.id, c.doc_id, c.chunk_index, c.content, c.start_word, c.end_word FROM rag_chunks c JOIN docs d ON d.id = c.doc_id WHERE c.content LIKE '%' || ?1 || '%' LIMIT ?2"
             ).map_err(|e| e.to_string())?;
 
             let query_lower = query.to_lowercase();
@@ -185,12 +178,8 @@
         let mut results = Vec::new();
         for (chunk_id, distance) in semantic_results {
             // A chunk can vanish between the vec scan and this read (a
-            // concurrent delete); skip it rather than failing the whole search,
-            // matching the previous `continue`-on-locked behaviour.
+            // concurrent delete); skip it rather than failing the whole search.
             let Some(chunk) = by_id.get(&chunk_id) else { continue };
-            if locked_ids.contains(&chunk.doc_id) {
-                continue;
-            }
             // Convert distance to similarity score (lower distance = more similar)
             let score = 1.0 / (1.0 + distance);
             results.push((chunk.clone(), score));

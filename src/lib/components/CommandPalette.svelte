@@ -12,6 +12,7 @@
   import { ALL_EXPORT_FORMATS, BINARY_FORMATS } from '$lib/exportFormats';
   import { untrack } from 'svelte';
   import { domainError } from '$lib/errors';
+  import { sendToCapture } from '$lib/stores/capture';
 
   let open = $state(false);
   let query = $state('');
@@ -33,14 +34,14 @@
     { id: 'projects', label: 'Go to Projects', icon: 'folder', action: () => { $currentWorkspace = 'projects'; close(); } },
     { id: 'reader', label: 'Go to Reader', icon: 'book-open', action: () => { $currentWorkspace = 'reader'; close(); } },
     { id: 'files', label: 'Go to Files', icon: 'files', action: () => { $currentWorkspace = 'properties'; window.dispatchEvent(new CustomEvent('open-library-files')); close(); } },
-    { id: 'inbox', label: 'Open Inbox', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
+    { id: 'inbox', label: 'Open Capture', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
     { id: 'craft', label: 'Open Craft Analytics (Settings)', icon: 'chart', action: () => { openSettingsAt('craft'); $showSettings = true; close(); } },
     { id: 'stats', label: 'Open Usage Stats (Settings)', icon: 'calendar', action: () => { openSettingsAt('stats'); $showSettings = true; close(); } },
     { id: 'skills', label: 'Open Tips (Settings)', icon: 'sparkle', action: () => { openSettingsAt('skills'); $showSettings = true; close(); } },
     { id: 'support', label: 'Open Support (Settings)', icon: 'send', action: () => { openSettingsAt('support'); $showSettings = true; close(); } },
     { id: 'properties', label: 'All Documents (Table/Board)', icon: 'table', action: () => { $currentWorkspace = 'properties'; close(); } },
     { id: 'daily-note', label: 'Open Today\'s Daily Note', icon: 'calendar', action: () => { void openDailyNotePalette(); } },
-    { id: 'quick-capture', label: 'Quick Capture (Inbox)', icon: 'inbox', action: () => { quickCapture(); close(); } },
+    { id: 'quick-capture', label: 'Quick Capture (Capture)', icon: 'inbox', action: () => { quickCapture(); close(); } },
     { id: 'templates', label: 'New from Template…', icon: 'file', action: () => { showTemplatePicker = true; close(); } },
     { id: 'save-template', label: 'Save Current as Template', icon: 'download', action: () => { saveAsTemplate(); close(); } },
     { id: 'new-doc', label: 'New Document', icon: 'plus', action: async () => { await createNewDoc(); close(); } },
@@ -173,7 +174,7 @@
 
   function quickCapture() {
     $currentWorkspace = 'inbox';
-    createNewDoc();
+    sendToCapture("");
   }
 
   async function createNewDoc() {
@@ -198,7 +199,7 @@
   function closeCurrentTab() {
     if (!$currentDoc) return;
     $openTabs = $openTabs.filter(t => t.id !== $currentDoc?.id);
-    $currentDoc = $openTabs[0] ?? null;
+    $currentDoc = $openTabs.find((t) => t.workspace === $currentWorkspace) ?? null;
   }
 
   function saveAsTemplate() {

@@ -4,13 +4,11 @@ use crate::models::*;
 use crate::sidecar;
 use std::io::Read;
 use std::time::{Duration, Instant};
-use std::sync::Mutex;
 use std::collections::HashSet;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::process::Command;
-use serde::Serialize;
 use uuid::Uuid;
 use crate::windows::PendingLaunchFile;
 use crate::windows::AutostartLaunch;
@@ -152,17 +150,9 @@ pub fn doc_get(db: State<'_, Database>, id: String) -> Result<Doc, String> {
     db.get_doc(&id)
 }
 
-fn widget_doc_unlocked(db: &Database, id: &str) -> Result<Doc, String> {
-    let doc = db.get_doc(id)?;
-    if doc.locked {
-        return Err("document is locked and unavailable to the companion window".to_string());
-    }
-    Ok(doc)
-}
-
 #[tauri::command]
 pub fn widget_doc_get(db: State<'_, Database>, id: String) -> Result<Doc, String> {
-    widget_doc_unlocked(&db, &id)
+    db.get_doc(&id)
 }
 
 #[tauri::command]
@@ -175,7 +165,6 @@ pub fn widget_doc_save(
     frontmatter_json: Option<String>,
     parent_id: Option<Option<String>>,
 ) -> Result<Doc, String> {
-    widget_doc_unlocked(&db, &id)?;
     db.save_doc(SaveDocRequest {
         id,
         title,
@@ -219,11 +208,6 @@ pub fn doc_toggle_pin(db: State<'_, Database>, id: String) -> Result<bool, Strin
 #[tauri::command]
 pub fn doc_set_goal(db: State<'_, Database>, id: String, goal_words: Option<i64>, deadline: Option<String>) -> Result<(), String> {
     db.set_goal(&id, goal_words, deadline)
-}
-
-#[tauri::command]
-pub fn doc_set_locked(db: State<'_, Database>, id: String, locked: bool) -> Result<(), String> {
-    db.set_locked(&id, locked)
 }
 
 #[tauri::command]
@@ -588,6 +572,15 @@ fn resolve_slot(provider: Option<String>, model: Option<String>) -> (String, Str
     (endpoint, model)
 }
 
+/// True when `endpoint` is the bundled local LLM sentinel (the default
+/// small-model slot). That server no longer binds TCP — it lives on a
+/// private AF_UNIX socket owned by `LlmManager` — so callers must route
+/// sentinel requests through the manager's sock client instead of HTTP.
+fn is_local_llm_sentinel(endpoint: &str) -> bool {
+    let trimmed = endpoint.trim().trim_end_matches('/');
+    trimmed == "http://127.0.0.1:8093/v1" || trimmed == "http://localhost:8093/v1"
+}
+
 /// Friendly HTTP-status map shared by every chat-completions call.
 fn friendly_http_status(status: u16) -> String {
     match status {
@@ -670,7 +663,10 @@ async fn post_chat_completions(
 }
 
 #[tauri::command]
-pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateResponse, String> {
+pub async fn ai_generate(
+    llm: State<'_, sidecar::LlmManager>,
+    request: AiGenerateRequest,
+) -> Result<AiGenerateResponse, String> {
     let (endpoint, model) = resolve_slot(request.provider, request.model);
 
     let mut messages = Vec::new();
@@ -678,6 +674,13 @@ pub async fn ai_generate(request: AiGenerateRequest) -> Result<AiGenerateRespons
         messages.push(serde_json::json!({"role": "system", "content": sys}));
     }
     messages.push(serde_json::json!({"role": "user", "content": request.prompt}));
+
+    if is_local_llm_sentinel(&endpoint) {
+        let content = llm
+            .chat_completion(messages, request.max_tokens.unwrap_or(2048), 0.7)
+            .await?;
+        return Ok(AiGenerateResponse { content, tokens_used: None });
+    }
 
     let (content, tokens) = post_chat_completions(
         &endpoint,
@@ -798,7 +801,11 @@ fn may_send_key(url: &reqwest::Url) -> bool {
 /// hosts are still probed, just unauthenticated, which keeps self-hosted and
 /// LAN providers working.
 #[tauri::command]
-pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result<ProviderProbeResponse, String> {
+pub async fn provider_probe(
+    llm: State<'_, sidecar::LlmManager>,
+    endpoint: String,
+    api_key: Option<String>,
+) -> Result<ProviderProbeResponse, String> {
     let base = endpoint.trim_end_matches('/');
     if base.is_empty() {
         return Err("Provider endpoint is empty.".to_string());
@@ -807,6 +814,12 @@ pub async fn provider_probe(endpoint: String, api_key: Option<String>) -> Result
     // and other exotic schemes are rejected before any request is built.
     if !(base.starts_with("http://") || base.starts_with("https://")) {
         return Err("Provider endpoint must be an http(s) URL.".to_string());
+    }
+    // The bundled local LLM no longer binds TCP — its /models lives on the
+    // private AF_UNIX socket owned by LlmManager. Route the sentinel here.
+    if is_local_llm_sentinel(base) {
+        let models = llm.list_models().await?;
+        return Ok(ProviderProbeResponse { models });
     }
     let parsed = reqwest::Url::parse(base)
         .map_err(|_| "Provider endpoint is not a valid URL.".to_string())?;
@@ -981,6 +994,7 @@ mod sanitize_tests {
 /// as they arrive; the caller assembles and persists the full text.
 #[tauri::command]
 pub async fn ai_generate_stream(
+    llm: State<'_, sidecar::LlmManager>,
     request: AiGenerateRequest,
     on_event: tauri::ipc::Channel<String>,
 ) -> Result<(), String> {
@@ -991,6 +1005,20 @@ pub async fn ai_generate_stream(
         messages.push(serde_json::json!({"role": "system", "content": sys}));
     }
     messages.push(serde_json::json!({"role": "user", "content": request.prompt}));
+
+    // The bundled local LLM lives on a private AF_UNIX socket and this
+    // sock client is non-streaming (SSE over a hand-rolled HTTP client is
+    // deferred). The 350M model completes in one shot fast enough that a
+    // single emitted chunk preserves the UX contract.
+    if is_local_llm_sentinel(&endpoint) {
+        let text = llm
+            .chat_completion(messages, request.max_tokens.unwrap_or(2048), 0.7)
+            .await?;
+        if !text.is_empty() {
+            on_event.send(text).map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
 
     let body = serde_json::json!({
         "model": model,
@@ -1048,7 +1076,10 @@ pub async fn ai_generate_stream(
 }
 
 #[tauri::command]
-pub async fn ai_structurize(request: StructurizeRequest) -> Result<StructurizeResponse, String> {
+pub async fn ai_structurize(
+    llm: State<'_, sidecar::LlmManager>,
+    request: StructurizeRequest,
+) -> Result<StructurizeResponse, String> {
     let (endpoint, model) = resolve_slot(request.provider, request.model);
 
     let target_format = match request.workspace.as_str() {
@@ -1086,6 +1117,11 @@ Output the final transformed document. Use markdown where appropriate."#
         serde_json::json!({"role": "system", "content": system_prompt}),
         serde_json::json!({"role": "user", "content": request.text}),
     ];
+
+    if is_local_llm_sentinel(&endpoint) {
+        let result = llm.chat_completion(messages, 4096, 0.7).await?;
+        return Ok(StructurizeResponse { result, tokens_used: None });
+    }
 
     let (result, tokens) = post_chat_completions(
         &endpoint,
@@ -1269,7 +1305,7 @@ async fn extract_bible_memory(
     expected_content: &str,
 ) -> Result<BibleMemoryUpdate, String> {
     let doc = db.get_doc(doc_id)?;
-    if !db.bible_source_allowed(doc_id)? || !matches!(doc.kind.as_str(), "scene" | "chapter") {
+    if !matches!(doc.kind.as_str(), "scene" | "chapter") {
         return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
     }
     if doc.content != expected_content {
@@ -1533,7 +1569,6 @@ pub fn atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Res
 
 #[tauri::command]
 pub fn widget_atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Result<(), String> {
-    widget_doc_unlocked(&db, &doc_id)?;
     db.atomic_save(&doc_id, &body)
 }
 
@@ -1658,8 +1693,6 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
         if !include_drafts {
             docs.retain(|d| d.status != "draft");
         }
-        // Locked docs never publish: titles stay out of the bundle.
-        docs.retain(|d| !d.locked);
         all_docs.extend(docs);
     }
 
@@ -1742,7 +1775,6 @@ fn resolve_transclusion(target: &str, db: &crate::database::Database) -> Option<
     };
 
     let doc = doc?;
-    if doc.locked { return None; }
 
     let mut text = doc.content;
     if !heading.is_empty() {
@@ -2356,6 +2388,65 @@ fn require_sidecar_paths(sidecars_dir: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve the sidecars directory — the ONE source of truth (replaces the
+/// frontend guessing resourceDir/sidecars). In dev runs the resource dir
+/// never gets sidecars copied into it, so the old frontend path failed
+/// closed for EVERY sidecar start while the same exes worked when spawned
+/// by hand. Candidates, in order: packaged resource dir → beside the exe
+/// (portable) → source checkout (CARGO_MANIFEST_DIR/sidecars). Every hit
+/// must pass the same trust check the start commands apply, so a resolved
+/// dir can never fail the require check later.
+/// A dir only counts if it actually carries what we spawn — trust alone
+/// would happily resolve a stray empty `target/debug/sidecars` over the
+/// real checkout and every start would fail one step later.
+fn looks_like_sidecars_dir(dir: &std::path::Path) -> bool {
+    dir.join("memory_server.py").is_file() || dir.join("bin").join("memory-server.exe").is_file()
+}
+
+fn resolve_sidecars_dir_in(
+    resource_dir: Option<std::path::PathBuf>,
+    exe_dir: Option<std::path::PathBuf>,
+    manifest_sidecars: std::path::PathBuf,
+) -> Result<String, String> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(resource) = resource_dir {
+        candidates.push(resource.join("sidecars"));
+    }
+    if let Some(dir) = exe_dir {
+        candidates.push(dir.join("sidecars"));
+        candidates.push(dir.join("resources").join("sidecars"));
+    }
+    candidates.push(manifest_sidecars);
+    let mut tried: Vec<String> = Vec::new();
+    for candidate in candidates {
+        let text = candidate.to_string_lossy().into_owned();
+        tried.push(text.clone());
+        if candidate.is_dir() && trusted_sidecars_dir(&text) && looks_like_sidecars_dir(&candidate) {
+            return Ok(text);
+        }
+    }
+    Err(format!(
+        "sidecars directory not found (searched: {}). Reinstall the app, or run from a source checkout with sidecars fetched.",
+        tried.join("; ")
+    ))
+}
+
+fn resolve_sidecars_dir(resource_dir: Option<std::path::PathBuf>) -> Result<String, String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()));
+    resolve_sidecars_dir_in(
+        resource_dir,
+        exe_dir,
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecars"),
+    )
+}
+
+#[tauri::command]
+pub fn sidecars_dir(app: tauri::AppHandle) -> Result<String, String> {
+    resolve_sidecars_dir(app.path().resource_dir().ok())
+}
+
 fn trusted_python_command(requested: &str) -> Result<String, String> {
     let command = requested.trim();
     let command = if command.is_empty() { "python" } else { command };
@@ -2410,11 +2501,6 @@ pub async fn stt_health(stt: State<'_, sidecar::SttManager>) -> Result<sidecar::
 }
 
 #[tauri::command]
-pub fn stt_port(stt: State<'_, sidecar::SttManager>) -> u16 {
-    stt.port()
-}
-
-#[tauri::command]
 pub async fn stt_transcribe(
     stt: State<'_, sidecar::SttManager>,
     audio: String,
@@ -2460,10 +2546,13 @@ pub fn tts_start(
 /// voice section on blur so a missing/broken python shows an inline
 /// error instead of failing later at sidecar start.
 fn run_python_probe(python: &str) -> Result<String, String> {
-    let mut child = std::process::Command::new(python)
+    let mut probe = std::process::Command::new(python);
+    probe
         .arg("--version")
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    crate::procutil::hide_console(&mut probe);
+    let mut child = probe
         .spawn()
         .map_err(|e| format!("Python not found — STT/TTS/memory need it ({}); app features besides sidecars still work.", e))?;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -2526,11 +2615,6 @@ pub async fn tts_health(tts: State<'_, sidecar::TtsManager>) -> Result<sidecar::
 }
 
 #[tauri::command]
-pub fn tts_port(tts: State<'_, sidecar::TtsManager>) -> u16 {
-    tts.port()
-}
-
-#[tauri::command]
 pub async fn tts_synthesize(
     tts: State<'_, sidecar::TtsManager>,
     text: String,
@@ -2577,11 +2661,6 @@ pub async fn llm_health(llm: State<'_, sidecar::LlmManager>) -> Result<sidecar::
 }
 
 #[tauri::command]
-pub fn llm_port(llm: State<'_, sidecar::LlmManager>) -> u16 {
-    llm.port()
-}
-
-#[tauri::command]
 pub async fn llm_completion(
     llm: State<'_, sidecar::LlmManager>,
     prompt: String,
@@ -2602,14 +2681,11 @@ pub async fn llm_chat_completion(
 }
 
 /// Title → raw markdown lookup for export preprocessing (embeds and
-/// wikilink targets). Locked/missing docs resolve to None so the
-/// preprocessors emit notes instead of leaking or failing.
+/// wikilink targets). Missing docs resolve to None so the preprocessor
+/// emits a note instead of failing.
 fn export_lookup<'a>(db: &'a State<'a, Database>) -> impl Fn(&str) -> Option<String> + 'a {
     move |title: &str| {
         let doc = db.get_doc_by_title(title).ok().flatten()?;
-        if doc.locked {
-            return None;
-        }
         Some(doc.content.clone())
     }
 }
@@ -2825,65 +2901,13 @@ pub fn atlas_get_stars(db: State<'_, Database>) -> Result<Vec<AtlasStar>, String
     db.atlas_get_stars()
 }
 
-// ── OS keychain secrets (apiKey, appLockPin) ────────────────────
+// ── OS keychain secrets (apiKey) ────────────────────────────────
 
 const KEYCHAIN_SERVICE: &str = "com.just-write-ehis.app";
-const APP_LOCK_MIN_PIN_LENGTH: usize = 4;
-
-const PIN_BASE_BACKOFF_MS: u64 = 2_000;
-const PIN_MAX_BACKOFF_MS: u64 = 60_000;
-const PIN_MAX_FAILED_ATTEMPTS: u32 = 5;
-
-#[derive(Default)]
-struct PinLockoutState {
-    failures: u32,
-    until: Option<Instant>,
-}
-
-#[derive(Default)]
-pub struct PinLockout {
-    state: Mutex<PinLockoutState>,
-}
-
-#[derive(Serialize)]
-pub struct PinVerification {
-    pub verified: bool,
-    pub retry_after_ms: u64,
-}
-
-impl PinLockout {
-    fn retry_after_ms(&self) -> u64 {
-        let Ok(state) = self.state.lock() else { return 0 };
-        state.until
-            .and_then(|until| until.checked_duration_since(Instant::now()))
-            .map(|remaining| remaining.as_millis() as u64)
-            .unwrap_or(0)
-    }
-
-    fn record_failure(&self) -> u64 {
-        let Ok(mut state) = self.state.lock() else { return PIN_MAX_BACKOFF_MS };
-        state.failures = state.failures.saturating_add(1);
-        if state.failures < PIN_MAX_FAILED_ATTEMPTS {
-            return 0;
-        }
-        let exponent = state.failures - PIN_MAX_FAILED_ATTEMPTS;
-        let delay = PIN_BASE_BACKOFF_MS.saturating_mul(2u64.saturating_pow(exponent.min(31)));
-        let delay = delay.min(PIN_MAX_BACKOFF_MS);
-        state.until = Some(Instant::now() + Duration::from_millis(delay));
-        delay
-    }
-
-    fn reset(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.failures = 0;
-            state.until = None;
-        }
-    }
-}
 
 fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
     // Static error: never echo the caller-supplied key (log/forgery surface).
-    if key != "apiKey" && key != "appLockPin" {
+    if key != "apiKey" {
         return Err("unknown secret key".to_string());
     }
     // Static error: keyring internals (paths, backends) stay out of the UI.
@@ -2893,9 +2917,6 @@ fn keychain_entry(key: &str) -> Result<keyring::Entry, String> {
 #[tauri::command]
 pub fn secret_set(key: String, value: String) -> Result<(), String> {
     let entry = keychain_entry(&key)?;
-    if key == "appLockPin" && !value.trim().is_empty() && value.trim().len() < APP_LOCK_MIN_PIN_LENGTH {
-        return Err("app PIN must be at least 4 characters".to_string());
-    }
     if value.is_empty() {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -2904,45 +2925,6 @@ pub fn secret_set(key: String, value: String) -> Result<(), String> {
     } else {
         entry.set_password(&value).map_err(|_| "keychain write failed".to_string())
     }
-}
-
-fn constant_time_eq(left: &str, right: &str) -> bool {
-    let left = left.as_bytes();
-    let right = right.as_bytes();
-    if left.len() != right.len() {
-        return false;
-    }
-    left.iter().zip(right).fold(0u8, |difference, (a, b)| difference | (a ^ b)) == 0
-}
-
-#[tauri::command]
-pub fn app_lock_configured() -> Result<bool, String> {
-    Ok(secret_get("appLockPin".to_string())?.is_some_and(|pin| pin.trim().len() >= APP_LOCK_MIN_PIN_LENGTH))
-}
-
-fn verify_pin_value(expected: &str, candidate: &str) -> bool {
-    let expected = expected.trim();
-    expected.len() >= APP_LOCK_MIN_PIN_LENGTH && constant_time_eq(expected, candidate.trim())
-}
-
-#[tauri::command]
-pub fn app_lock_verify(lockout: State<'_, PinLockout>, pin: String) -> Result<PinVerification, String> {
-    let retry_after_ms = lockout.retry_after_ms();
-    if retry_after_ms > 0 {
-        return Ok(PinVerification { verified: false, retry_after_ms });
-    }
-    let expected = secret_get("appLockPin".to_string())?.unwrap_or_default();
-    if verify_pin_value(&expected, &pin) {
-        lockout.reset();
-        return Ok(PinVerification { verified: true, retry_after_ms: 0 });
-    }
-    let retry_after_ms = lockout.record_failure();
-    Ok(PinVerification { verified: false, retry_after_ms })
-}
-
-#[tauri::command]
-pub fn app_lock_reset(lockout: State<'_, PinLockout>) {
-    lockout.reset();
 }
 
 #[tauri::command]
@@ -2960,32 +2942,39 @@ mod ai_slot_tests {
     use super::*;
 
     #[test]
-    fn pin_lockout_tracks_retry_window() {
-        let lockout = PinLockout::default();
-        for _ in 0..5 {
-            lockout.record_failure();
-        }
-        assert!(lockout.retry_after_ms() > 0);
-        lockout.reset();
-        assert_eq!(lockout.retry_after_ms(), 0);
-    }
-
-    #[test]
-    fn pin_verification_rejects_empty_values() {
-        assert!(!verify_pin_value("", ""));
-        assert!(!verify_pin_value("   ", "   "));
-        assert!(!verify_pin_value("123", "123"));
-        assert!(verify_pin_value("2468", " 2468 "));
-        assert!(!verify_pin_value("2468", "2467"));
-    }
-
-    #[test]
     fn python_command_allowlist_rejects_paths() {
         assert_eq!(trusted_python_command("python").unwrap(), "python");
         assert_eq!(trusted_python_command("py.exe").unwrap(), "py.exe");
         assert!(trusted_python_command("C:/Python312/python.exe").is_err());
         assert!(trusted_python_command("a/python").is_err());
         assert!(trusted_python_command("python -c").is_err());
+    }
+
+    #[test]
+    fn sidecars_dir_resolves_source_checkout_without_resource_dir() {
+        // The dev fail-closed bug: resourceDir/sidecars never exists in dev,
+        // so resolution must fall through to CARGO_MANIFEST_DIR/sidecars.
+        let dir = resolve_sidecars_dir(None).expect("source checkout must resolve");
+        assert!(std::path::Path::new(&dir).join("memory_server.py").is_file());
+        assert!(trusted_sidecars_dir(&dir));
+    }
+
+    #[test]
+    fn sidecars_dir_missing_resource_candidate_falls_through() {
+        let missing = std::path::PathBuf::from("no-such-resource-dir-for-tests");
+        assert!(resolve_sidecars_dir(Some(missing)).is_ok());
+    }
+
+    #[test]
+    fn sidecars_dir_reports_searched_paths_when_all_candidates_fail() {
+        let bogus_resource = std::path::PathBuf::from("no-such-resource-for-tests");
+        let bogus_exe = std::path::PathBuf::from("no-such-exe-dir-for-tests");
+        let bogus_manifest = std::path::PathBuf::from("no-such-manifest-for-tests").join("sidecars");
+        let err = resolve_sidecars_dir_in(Some(bogus_resource), Some(bogus_exe), bogus_manifest)
+            .expect_err("all candidates bogus must error");
+        assert!(err.contains("searched:"), "error lists tried paths: {err}");
+        assert!(err.contains("no-such-resource-for-tests"), "{err}");
+        assert!(err.contains("no-such-manifest-for-tests"), "{err}");
     }
 
     #[test]
@@ -3103,7 +3092,7 @@ pub fn remove_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> R
 pub fn search_by_tag(db: State<'_, Database>, tag: String) -> Result<Vec<Doc>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked FROM docs d INNER JOIN doc_tags dt ON dt.doc_id = d.id WHERE dt.tag = ?1 AND d.locked = 0 ORDER BY d.updated_at DESC"
+        "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline FROM docs d INNER JOIN doc_tags dt ON dt.doc_id = d.id WHERE dt.tag = ?1 ORDER BY d.updated_at DESC"
     ).map_err(|e| e.to_string())?;
     let tag_lc = tag.trim().to_lowercase();
     let rows = stmt.query_map([&tag_lc], |row| {
@@ -3126,7 +3115,6 @@ pub fn search_by_tag(db: State<'_, Database>, tag: String) -> Result<Vec<Doc>, S
             pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
             goal_words: row.get(16)?,
             deadline: row.get(17)?,
-            locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
         })
     }).map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())

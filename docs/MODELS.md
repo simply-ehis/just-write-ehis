@@ -29,9 +29,10 @@ LLM. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
 desktop build; that script creates `sidecars/bin/{stt,tts,memory}-server.exe`
 with PyInstaller. The Rust sidecar managers prefer those executables and pass
 `JWE_SIDECARS_DIR` so the packaged servers resolve the external model files
-without embedding hundreds of megabytes inside each executable. If a fixed
-port is held by an unverified process, startup fails closed instead of killing
-it.
+without embedding hundreds of megabytes inside each executable. STT, TTS, and
+memory communicate over stdio JSON frames (no TCP ports); the LLM binds an
+AF_UNIX socket at a per-session path. If a sidecar fails to start, startup
+fails closed instead of killing unrelated processes.
 
 The Python-script fallback remains for source/development runs only. It
 requires `python`, `python3`, or `py` on PATH plus `requirements.txt`; custom
@@ -54,7 +55,10 @@ title/tag suggestions, craft-metric notes. All want instruction-following
 Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
 1. **Bundled local endpoint** — default, keep. The small-model sidecar
-   serves it at `http://127.0.0.1:8093/v1` with zero config and no key.
+   serves it over a per-session AF_UNIX socket (zero config, no key);
+   the frontend's `is_local_llm_sentinel` matches the legacy
+   `http://127.0.0.1:8093/v1` / `http://localhost:8093/v1` values and
+   routes those to the socket transparently.
 2. **OpenAI** — same account/key as the main slot, smaller model id.
 3. **Google (Gemini)** — via Google's OpenAI-compatibility base URL.
 4. **Anthropic** — via an OpenAI-compatible gateway (the slot only speaks

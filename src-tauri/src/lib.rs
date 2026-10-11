@@ -9,6 +9,8 @@ mod epub;
 mod pdf;
 mod sidecar;
 mod windows;
+mod procutil;
+mod ipc;
 
 /// True when the schema is in a state where writes are unsafe (e.g. a failed
 /// migration). Commands that mutate state must check this and refuse with a
@@ -141,14 +143,13 @@ pub fn run() {
                     }
                 }
             }
-            app.manage(commands::PinLockout::default());
-            app.manage(sidecar::SttManager::new(8090));
-            app.manage(sidecar::TtsManager::new(8091));
-            app.manage(sidecar::LlmManager::new(8093));
+            app.manage(sidecar::SttManager::new());
+            app.manage(sidecar::TtsManager::new());
+            app.manage(sidecar::LlmManager::new());
             let memory_dir = app_dir.join("ai-memory");
             std::fs::create_dir_all(&memory_dir)
                 .map_err(|e| format!("Failed to create AI memory directory {:?}: {}", memory_dir, e))?;
-            app.manage(sidecar::MemoryManager::new(8092, memory_dir.to_string_lossy().to_string()));
+            app.manage(sidecar::MemoryManager::new(memory_dir.to_string_lossy().to_string()));
 
             // System-tray quick capture (§4.8): works app-closed on desktop.
             // Mobile has no tray — Android uses notification/widget/share
@@ -337,14 +338,14 @@ pub fn run() {
             commands::clear_snapshots,
             commands::clear_usage_events,
             commands::clear_tab_states,
-             commands::sidecar_python_probe,
+            commands::sidecar_python_probe,
+            commands::sidecars_dir,
             commands::get_workspace_context,
             commands::get_vault_path,
             commands::stt_start,
             commands::stt_stop,
             commands::stt_is_running,
             commands::stt_health,
-            commands::stt_port,
             commands::stt_transcribe,
             commands::stt_stream_start,
             commands::stt_stream_chunk,
@@ -353,21 +354,18 @@ pub fn run() {
             commands::tts_stop,
             commands::tts_is_running,
             commands::tts_health,
-            commands::tts_port,
             commands::tts_synthesize,
             commands::tts_stop_playback,
             commands::llm_start,
             commands::llm_stop,
             commands::llm_is_running,
             commands::llm_health,
-            commands::llm_port,
             commands::llm_completion,
             commands::llm_chat_completion,
             commands::app_update_status,
             commands::convert_run,
             commands::compile_run,
             commands::convert_status,
-            commands::doc_set_locked,
             commands::doc_list_pinned,
             commands::dashboard_today_rhythm,
             commands::memory_sidecar_start,
@@ -391,9 +389,6 @@ pub fn run() {
             commands::atlas_get_stars,
              commands::secret_set,
              commands::secret_get,
-             commands::app_lock_configured,
-             commands::app_lock_verify,
-             commands::app_lock_reset,
              commands::get_doc_tags,
              commands::add_doc_tag,
              commands::remove_doc_tag,

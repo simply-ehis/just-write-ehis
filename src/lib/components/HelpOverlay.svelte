@@ -4,29 +4,11 @@
    * Shows shortcuts + short feature blurbs. Dismissable with ? or Esc.
    */
   import { settings } from "$lib/stores/settings";
-  import { isBrowserPreview } from "$lib/api";
+  import { SHORTCUT_FLAT } from "$lib/shortcuts";
 
   let visible = $state(false);
 
-  const shortcuts = [
-    { keys: "Ctrl+K", desc: "Command palette — fuzzy search docs, actions, AI ops" },
-    { keys: "Ctrl+F", desc: "Find & replace in the open editor" },
-    { keys: "Ctrl+Shift+F", desc: "Quick capture to Inbox from anywhere" },
-    { keys: "Ctrl+J", desc: "Toggle AI panel" },
-    { keys: "Ctrl+B", desc: "Toggle sidebar" },
-    { keys: "Ctrl+I", desc: "Toggle outline & links" },
-    { keys: "F11", desc: "Zen mode — editor only" },
-    { keys: "Ctrl+N", desc: "New document" },
-    { keys: "Ctrl+W", desc: "Close tab" },
-    { keys: "Ctrl+Tab", desc: "Next tab" },
-    { keys: "Ctrl+Shift+Tab", desc: "Previous tab" },
-    { keys: "Ctrl+S", desc: isBrowserPreview() ? "Force save to browser storage" : "Force save to disk" },
-    { keys: "Ctrl+Z", desc: "Undo" },
-    { keys: "Ctrl+Shift+Z", desc: "Redo" },
-    { keys: "M", desc: "Open Node Map" },
-    { keys: "?", desc: "Toggle this help overlay" },
-    { keys: "Esc", desc: "Close panel / modal / zen mode" },
-  ];
+  const shortcuts = SHORTCUT_FLAT;
 
   const features = [
     { name: "Logs", desc: "Daily journal entries, one per day, auto-created." },
@@ -36,7 +18,7 @@
     { name: "Script", desc: "Fountain screenplay format with scene navigator." },
     { name: "Projects", desc: "Task boards, kanban, table views with custom properties." },
     { name: "Reader", desc: "Reading mode for books and markdown files." },
-    { name: "Inbox", desc: "Quick capture from any source — picks, thoughts, clips." },
+    { name: "Capture", desc: "Quick capture from any source — picks, thoughts, clips." },
     { name: "Canvas", desc: "Freeform board: cards, links, and doc-links, pan and zoom." },
     { name: "Library", desc: "Every document as table, board, or calendar, with saved views." },
     { name: "Files", desc: "Browse vault folder structure, open any file." },

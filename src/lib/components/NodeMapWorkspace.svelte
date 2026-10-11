@@ -7,6 +7,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import { domainError, warnOnce } from "$lib/errors";
   import WorkspaceError from "./WorkspaceError.svelte";
+  import { resolveThemeMode } from "$lib/appearance";
 
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -100,26 +101,27 @@
   };
 
   // Canvas can't use var(); track style + mode instead (cheap $derived,
-  // read per draw).
-  let isDark = $derived($settings.themeMode !== "light");
+  // read per draw). mode resolves "system" against the OS once per update.
+  let mode = $derived(resolveThemeMode($settings.themeMode));
+  let isDark = $derived(mode !== "light");
   // Selection/hub rings follow the style accent + warning so they read
   // on paper, ink, hazard-amber, and glow-mint alike.
   let ringSelected = $derived(
     $settings.theme === "brutalist" ? "#FFB000"
-    : $settings.theme === "glass" ? ($settings.themeMode === "light" ? "#1F7A52" : "#A9E8C6")
-    : $settings.themeMode === "light" ? "#3F6656"
-    : "#8FC7A9"
+    : $settings.theme === "glass" ? (mode === "light" ? "#1F7A52" : "#A9E8C6")
+    : mode === "light" ? "#8A6B2E"
+    : "#C9A96E"
   );
   let ringHub = $derived(
     $settings.theme === "brutalist" ? "#FFB000"
-    : $settings.themeMode === "light" ? "#9A6B1A"
+    : mode === "light" ? "#9A6B1A"
     : "#D9A441"
   );
 
   function mapPaletteKey(): string {
     const style = $settings.theme;
-    if (style === "default") return $settings.themeMode === "light" ? "light" : "dark";
-    return $settings.themeMode === "light" ? `${style}-light` : style;
+    if (style === "default") return mode === "light" ? "light" : "dark";
+    return mode === "light" ? `${style}-light` : style;
   }
 
   function getNodeColor(ws: string): string {

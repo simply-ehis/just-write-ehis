@@ -47,8 +47,8 @@ documented there — never in app code.
 
 `tests/tabs-functional.mjs` boots the built app once in jsdom and drives
 all 12 tabs past mounting: Write empty-state → New Document → editor,
-Home greeting, Logs today view, Inbox capture → item (via palette, since
-inbox hides from the sidebar by default), Novel studio, Script create →
+Home greeting, Logs today view, Capture box → item (Capture is a default
+sidebar entry; id stays `inbox`), Novel studio, Script create →
 open, Map canvas mount, Reader shelf, Projects create, Library views,
 Canvas board (via palette), Settings style select + light/dark mode +
 custom accent (all three persist). Theme sweep covers all six style×mode

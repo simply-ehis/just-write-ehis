@@ -60,10 +60,6 @@ export async function loadTransclusion(target: string): Promise<{ content: strin
       doc = match.doc;
     }
 
-    if (doc.locked) {
-      return { content: "", docId: null, error: "Locked document — cannot transclude" };
-    }
-
     let text = doc.content || "";
     setCache(target, text, doc.id, null);
 

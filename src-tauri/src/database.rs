@@ -103,8 +103,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                 embedding_ref TEXT,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 goal_words INTEGER,
-                deadline TEXT,
-                locked INTEGER NOT NULL DEFAULT 0
+                deadline TEXT
             );
 
             CREATE TABLE IF NOT EXISTS backlinks (
@@ -246,7 +245,6 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
             CREATE INDEX IF NOT EXISTS idx_bible_suggestions_scope ON bible_suggestions(bible_doc_id);
             CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);
             CREATE INDEX IF NOT EXISTS idx_docs_updated_at ON docs(updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_docs_locked ON docs(locked);
             CREATE INDEX IF NOT EXISTS idx_docs_pinned ON docs(pinned);
             CREATE INDEX IF NOT EXISTS idx_docs_activity_score ON docs(activity_score DESC);
             CREATE INDEX IF NOT EXISTS idx_docs_title ON docs(title COLLATE NOCASE);
@@ -323,15 +321,6 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                 "ALTER TABLE docs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE docs ADD COLUMN goal_words INTEGER;
                  ALTER TABLE docs ADD COLUMN deadline TEXT;"
-            )?;
-        }
-
-        let has_locked: bool = conn.prepare(
-            "SELECT locked FROM docs LIMIT 1"
-        ).is_ok();
-        if !has_locked {
-            conn.execute_batch(
-                "ALTER TABLE docs ADD COLUMN locked INTEGER NOT NULL DEFAULT 0;"
             )?;
         }
 

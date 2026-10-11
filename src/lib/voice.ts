@@ -197,3 +197,21 @@ export function stopBrowserSpeech(): void {
     /* already stopped */
   }
 }
+
+/** Pause browser read-aloud (holds position; resume continues). */
+export function pauseBrowserSpeech(): void {
+  try {
+    window.speechSynthesis?.pause();
+  } catch {
+    /* not speaking */
+  }
+}
+
+/** Resume a paused browser utterance. */
+export function resumeBrowserSpeech(): void {
+  try {
+    window.speechSynthesis?.resume();
+  } catch {
+    /* not paused */
+  }
+}

@@ -13,7 +13,32 @@
 import { editorFontStack, ensureBrutalistFonts, ensureEditorFont } from "./editorTheme";
 
 export type ThemeStyle = "default" | "brutalist" | "glass";
-export type ThemeMode = "dark" | "light";
+export type ThemeMode = "dark" | "light" | "system";
+
+/** Resolve "system" (or anything unknown) against the OS preference. */
+export function resolveThemeMode(mode: string): "dark" | "light" {
+  if (mode === "light" || mode === "dark") return mode;
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+/** Re-run `apply` when the OS color scheme flips (only meaningful in system mode). */
+export function watchSystemTheme(apply: () => void): () => void {
+  const mq = window.matchMedia?.("(prefers-color-scheme: light)");
+  if (!mq) return () => {};
+  const fn = () => apply();
+  mq.addEventListener("change", fn);
+  return () => mq.removeEventListener("change", fn);
+}
+
+/**
+ * Focus-dim opacity for the editors — one CSS var consumed by both
+ * CodeMirror themes (`.cm-focus-dimmed`), so Settings changes apply live
+ * without rebuilding either editor.
+ */
+export function applyFocusDimStyle(strength: number): void {
+  const safe = Number.isFinite(strength) ? Math.min(1, Math.max(0.1, strength)) : 0.35;
+  document.documentElement.style.setProperty("--cm-focus-dim-opacity", String(safe));
+}
 
 export function applyEditorTypography(font: string, size: number, lineHeight: number): void {
   // Non-default families arrive on demand (see ensureEditorFont) instead
@@ -55,7 +80,7 @@ export function isAccentHex(value: string): boolean {
 
 /** The style's built-in accent per mode (color input fallback + reset target). */
 const STYLE_ACCENTS: Record<string, { dark: string; light: string }> = {
-  default: { dark: "#8FC7A9", light: "#3F6656" },
+  default: { dark: "#C9A96E", light: "#8A6B2E" },
   brutalist: { dark: "#FFB000", light: "#FFB000" },
   glass: { dark: "#A9E8C6", light: "#1F7A52" },
 };
@@ -89,7 +114,7 @@ export function applyAppearance(style: string, mode: string, accentOverride: str
   const root = document.documentElement;
   const safeStyle: ThemeStyle =
     style === "brutalist" || style === "glass" ? style : "default";
-  const safeMode: ThemeMode = mode === "light" ? "light" : "dark";
+  const safeMode: ThemeMode = resolveThemeMode(mode);
   root.dataset.theme = safeStyle;
   root.dataset.mode = safeMode;
   // Display type arrives with a Brutalist switch (first paint is covered

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
-  import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
+  import { EditorView, keymap, highlightActiveLine } from "@codemirror/view";
   import { EditorState } from "@codemirror/state";
   import { markdown } from "@codemirror/lang-markdown";
   import { api } from "$lib/api";
@@ -46,7 +46,6 @@
     const state = EditorState.create({
       doc: text,
       extensions: [
-        lineNumbers(),
         highlightActiveLine(),
         markdown(),
         EditorState.readOnly.of(!editable),
@@ -239,9 +238,5 @@
     font-family: var(--font-body);
     font-size: var(--font-size-base);
     line-height: var(--line-height-relaxed);
-  }
-
-  .viewer-content :global(.cm-gutters) {
-    border: none;
   }
 </style>

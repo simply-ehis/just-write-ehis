@@ -8,8 +8,8 @@
 
         let mut stmt = if let Some(ws) = workspace {
             let mut s = conn.prepare(
-                 "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-                  FROM docs WHERE workspace = ?1 AND locked = 0 AND (title LIKE ?2 OR path LIKE ?2)
+                 "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
+                  FROM docs WHERE workspace = ?1 AND (title LIKE ?2 OR path LIKE ?2)
                   ORDER BY updated_at DESC LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![ws, search_term], |row| {
@@ -32,14 +32,13 @@
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             }).map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
         } else {
             let mut s = conn.prepare(
-                 "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked
-                  FROM docs WHERE locked = 0 AND (title LIKE ?1 OR path LIKE ?1)
+                 "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline
+                  FROM docs WHERE (title LIKE ?1 OR path LIKE ?1)
                   ORDER BY updated_at DESC LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![search_term], |row| {
@@ -62,7 +61,6 @@
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             }).map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
@@ -82,7 +80,7 @@
         // can never leave the FTS index half-empty.
         let docs: Vec<(String, String, String, String)> = {
             let mut stmt = conn.prepare(
-                "SELECT id, title, content, workspace FROM docs WHERE locked = 0"
+                "SELECT id, title, content, workspace FROM docs"
             ).map_err(|e| e.to_string())?;
             let rows = stmt.query_map([], |row| {
                 Ok((
@@ -127,10 +125,10 @@
         // stored rank is `-bm25` and rows arrive best-first.
         if let Some(ws) = workspace {
             let mut s = conn.prepare(
-                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
+                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
                  FROM docs_fts
                  JOIN docs d ON d.rowid = docs_fts.rowid
-                 WHERE docs_fts MATCH ?1 AND d.workspace = ?2 AND d.locked = 0
+                 WHERE docs_fts MATCH ?1 AND d.workspace = ?2
                  ORDER BY rank LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![fts_query, ws], |row| {
@@ -154,19 +152,18 @@
                         pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                         goal_words: row.get(16)?,
                         deadline: row.get(17)?,
-                        locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                     },
-                    row.get::<_, String>(19).ok(),
-                    row.get::<_, f64>(20).unwrap_or(0.0),
+                    row.get::<_, String>(18).ok(),
+                    row.get::<_, f64>(19).unwrap_or(0.0),
                 ))
             }).map_err(|e| e.to_string())?;
             Ok(rows.filter_map(|r| r.ok()).map(|(doc, snippet, score)| SearchResult { doc, snippet, rank: -score }).collect())
         } else {
             let mut s = conn.prepare(
-                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
+                "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, snippet(docs_fts, 2, '<mark>', '</mark>', '...', 32) as snip, bm25(docs_fts) as rank
                  FROM docs_fts
                  JOIN docs d ON d.rowid = docs_fts.rowid
-                 WHERE docs_fts MATCH ?1 AND d.locked = 0
+                 WHERE docs_fts MATCH ?1
                  ORDER BY rank LIMIT 50"
             ).map_err(|e| e.to_string())?;
             let rows = s.query_map(params![fts_query], |row| {
@@ -190,10 +187,9 @@
                         pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                         goal_words: row.get(16)?,
                         deadline: row.get(17)?,
-                        locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                     },
-                    row.get::<_, String>(19).ok(),
-                    row.get::<_, f64>(20).unwrap_or(0.0),
+                    row.get::<_, String>(18).ok(),
+                    row.get::<_, f64>(19).unwrap_or(0.0),
                 ))
             }).map_err(|e| e.to_string())?;
             Ok(rows.filter_map(|r| r.ok()).map(|(doc, snippet, score)| SearchResult { doc, snippet, rank: -score }).collect())

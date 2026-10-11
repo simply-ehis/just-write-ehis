@@ -8,7 +8,7 @@
  * present the same categories.
  *
  * Group membership covers the union of both surfaces: the sidebar hides
- * HIDDEN_IDS (inbox/canvas stay palette-only on desktop) while the
+ * HIDDEN_IDS (canvas stays palette-only on desktop) while the
  * mobile More menu shows everything. "files" is virtual — no route, it
  * deep-links to Library's Files tab — but stays listed so More/palette
  * keep reaching it. Home is pinned and ungrouped;

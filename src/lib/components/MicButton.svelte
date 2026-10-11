@@ -6,9 +6,11 @@
    * Captures real 16 kHz mono WAV via WebAudio (ScriptProcessor, muted tap)
    * and posts it to the transcribe.cpp STT sidecar.
    * Lazy-loads STT sidecar on first tap (A7.6).
+   * Esc discards a mis-started recording; gated buttons retry on click.
    */
 import {
   ensureStt,
+  warmStt,
   sttRecording,
   sttTranscribing,
   sttError,
@@ -16,9 +18,11 @@ import {
   sttProbed,
   sttStarting,
   STT_FETCH_HINT,
+  voiceShortcutLock,
 } from '$lib/stores/audio';
 import { startDictation, voiceSupported, type VoiceHandle } from '$lib/voice';
 import { isBrowserPreview } from '$lib/api';
+import { showToast } from '$lib/stores/notifications';
 
   let {
     onTranscribe = (text: string) => {},
@@ -28,6 +32,20 @@ import { isBrowserPreview } from '$lib/api';
 
   let recording = $state(false);
   let processing = $state(false);
+  // In-flight guard (3.3): while the sidecar cold-starts or the mic opens,
+  // ignore further taps so a double-tap can't leak a second MediaStream.
+  let starting = $state(false);
+  // Warm-on-intent (slice 4B): ~120ms dwell on hover pre-warms STT so
+  // the first tap is instant. Cancelled on pointerleave; no-op in browser mode.
+  let warmTimer: ReturnType<typeof setTimeout> | undefined;
+  function onIntentEnter() {
+    if (browserMode || recording || processing || starting) return;
+    clearTimeout(warmTimer);
+    warmTimer = setTimeout(() => { void warmStt(); }, 120);
+  }
+  function onIntentLeave() {
+    clearTimeout(warmTimer);
+  }
   // Explicit one-tap fallback: offered (never auto-switched) when the
   // sidecar fails but Web Speech exists. Browser dictation may hit the
   // network — the tap is the consent.
@@ -38,8 +56,11 @@ import { isBrowserPreview } from '$lib/api';
   // probing Moonshine and failing first.
   const browserMode = isBrowserPreview();
   let unsupportedBrowserVoice = $state(browserMode && !voiceSupported());
-  // Gated only after a probe attempt: never disabled on cold boot.
+  // Gated only after a probe attempt: never disabled on cold boot. A gated
+  // desktop button now RETRIES the probe on click (3.2) instead of being
+  // a dead end; browser-gated stays inert (nothing to retry).
   let gated = $derived(browserMode ? unsupportedBrowserVoice : $sttProbed && !$sttModelLoaded);
+  let retryable = $derived(!browserMode && gated);
   // WebAudio capture chain — produces real 16 kHz mono WAV for the STT server.
   let audioCtx: AudioContext | null = null;
   let micStream: MediaStream | null = null;
@@ -49,17 +70,52 @@ import { isBrowserPreview } from '$lib/api';
   let pcmChunks: Float32Array[] = [];
   let captureRate = 16000;
 
+  /** One-line human mic error (never a raw DOMException dump). */
+  function humanMicError(e: unknown): string {
+    const name = e instanceof DOMException ? e.name : "";
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      return "Microphone access denied — allow the mic in system privacy settings.";
+    }
+    if (name === "NotFoundError") return "No microphone found — plug one in and try again.";
+    if (name === "NotReadableError") return "Microphone is busy in another app.";
+    return `Mic unavailable: ${e instanceof Error ? e.message : e}`;
+  }
+
   async function handleToggle() {
     if (recording) {
       // Stop recording
       stopRecording();
     } else {
-      // Start recording
+      // Start recording (also the retry path for a gated button).
       await startRecording();
     }
   }
 
+  /** Esc while recording: tear down without transcribing (3.5).
+   * Ctrl+Shift+M: global mic toggle (3.10). */
+  function onKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.shiftKey && (e.key === "m" || e.key === "M")) {
+      if (gated && browserMode) return; // nothing to retry on web
+      if (Date.now() - voiceShortcutLock.mic < 100) return;
+      voiceShortcutLock.mic = Date.now();
+      e.preventDefault();
+      if (browserVoiceOn) stopBrowserDictation();
+      else void handleToggle();
+      return;
+    }
+    if (e.key !== "Escape") return;
+    if (recording) {
+      e.preventDefault();
+      discardRecording();
+    } else if (browserVoiceOn) {
+      e.preventDefault();
+      stopBrowserDictation();
+    }
+  }
+
   async function startRecording() {
+    if (starting || processing) return;
     if (browserMode) {
       offerBrowserVoice = false;
       if (voiceSupported()) {
@@ -69,48 +125,56 @@ import { isBrowserPreview } from '$lib/api';
       $sttError = "Voice input not supported in this browser.";
       return;
     }
-    // Lazy-load sidecar on first tap
+    // Lazy-load sidecar on first tap (also the gated-retry path).
+    starting = true;
     offerBrowserVoice = false;
-    const ready = await ensureStt();
-    if (!ready) {
-      // Offer (don't auto-switch) browser dictation when available.
-      if (voiceSupported()) offerBrowserVoice = true;
-      return;
-    }
+    $sttError = null;
     try {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
+      const ready = await ensureStt();
+      if (!ready) {
+        // Offer (don't auto-switch) browser dictation when available.
+        if (voiceSupported()) offerBrowserVoice = true;
+        return;
+      }
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
 
-      // Ask for 16 kHz; resampled below if the device insists otherwise.
-      audioCtx = new AudioContext({ sampleRate: 16000 });
-      captureRate = audioCtx.sampleRate;
-      sourceNode = audioCtx.createMediaStreamSource(micStream);
-      processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
-      muteNode = audioCtx.createGain();
-      muteNode.gain.value = 0; // never play the mic back
+        // Ask for 16 kHz; resampled below if the device insists otherwise.
+        audioCtx = new AudioContext({ sampleRate: 16000 });
+        captureRate = audioCtx.sampleRate;
+        sourceNode = audioCtx.createMediaStreamSource(micStream);
+        processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+        muteNode = audioCtx.createGain();
+        muteNode.gain.value = 0; // never play the mic back
 
-      pcmChunks = [];
-      processorNode.onaudioprocess = (e) => {
-        pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-      };
+        pcmChunks = [];
+        processorNode.onaudioprocess = (e) => {
+          pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        };
 
-      sourceNode.connect(processorNode);
-      processorNode.connect(muteNode);
-      muteNode.connect(audioCtx.destination);
+        sourceNode.connect(processorNode);
+        processorNode.connect(muteNode);
+        muteNode.connect(audioCtx.destination);
 
-      recording = true;
-      $sttRecording = true;
-    } catch (e) {
-      $sttError = `Mic access denied: ${e}`;
+        recording = true;
+        $sttRecording = true;
+      } catch (e) {
+        $sttError = humanMicError(e);
+      }
+    } finally {
+      starting = false;
     }
   }
 
-  function stopRecording() {
+  /** Tear down the capture chain. Returns true when a recording existed. */
+  function teardownCapture(): boolean {
+    const was = recording;
     try {
       processorNode?.disconnect();
       muteNode?.disconnect();
@@ -125,7 +189,20 @@ import { isBrowserPreview } from '$lib/api';
       muteNode = null;
       recording = false;
       $sttRecording = false;
-      void processRecording();
+    }
+    return was;
+  }
+
+  function stopRecording() {
+    const had = teardownCapture();
+    if (had) void processRecording();
+  }
+
+  /** Esc: stop and throw the audio away — never transcribe (3.5). */
+  function discardRecording() {
+    if (teardownCapture()) {
+      pcmChunks = [];
+      showToast("Recording discarded.", "info");
     }
   }
 
@@ -195,7 +272,9 @@ import { isBrowserPreview } from '$lib/api';
   }
 
   function startBrowserDictation() {
+    if (starting || processing) return;
     offerBrowserVoice = false;
+    $sttError = null;
     try {
       browserHandle = startDictation(
         (text, isFinal) => {
@@ -240,9 +319,13 @@ import { isBrowserPreview } from '$lib/api';
 
       if (text && text.trim()) {
         onTranscribe(text.trim());
+      } else if (!$sttError) {
+        // Empty result with no transport error: the mic heard nothing
+        // recognizable — say so instead of silently dropping the input (3.1).
+        showToast("Nothing heard — try again, closer to the mic.", "warning");
       }
     } catch (e) {
-      $sttError = `Transcription failed: ${e}`;
+      $sttError = `Transcription failed: ${e instanceof Error ? e.message : e}`;
     } finally {
       processing = false;
       $sttTranscribing = false;
@@ -263,14 +346,18 @@ import { isBrowserPreview } from '$lib/api';
     browserHandle?.stop();
     recording = false;
     $sttRecording = false;
+    clearTimeout(warmTimer);
   });
 </script>
+
+<svelte:window onkeydown={onKeydown} />
 
 <button
   class="mic-btn"
   class:recording
   class:processing
-  disabled={processing || gated}
+  class:starting
+  disabled={processing || starting || (gated && !retryable)}
   onclick={() => {
     if (browserVoiceOn) {
       stopBrowserDictation();
@@ -278,8 +365,20 @@ import { isBrowserPreview } from '$lib/api';
     }
     void handleToggle();
   }}
-  title={gated ? (browserMode ? 'Voice input not supported in this browser' : STT_FETCH_HINT) : recording || browserVoiceOn ? 'Stop recording' : browserMode ? 'Dictate (browser voice)' : 'Record (Moonshine Voice STT)'}
-  aria-label={gated ? 'Voice input unavailable' : recording || browserVoiceOn ? 'Stop recording' : browserMode ? 'Start browser dictation' : 'Start voice recording'}
+  onpointerenter={onIntentEnter}
+  onpointerleave={onIntentLeave}
+  title={gated
+    ? (browserMode ? 'Voice input not supported in this browser' : `${STT_FETCH_HINT} Click to retry.`)
+    : starting ? 'Starting voice…'
+    : recording || browserVoiceOn ? 'Stop recording (Esc discards)'
+    : browserMode ? 'Dictate (browser voice)'
+    : 'Record (Moonshine Voice STT)'}
+  aria-label={gated
+    ? (browserMode ? 'Voice input unavailable' : 'Retry voice model')
+    : starting ? 'Starting voice'
+    : recording || browserVoiceOn ? 'Stop recording'
+    : browserMode ? 'Start browser dictation'
+    : 'Start voice recording'}
 >
   {#if processing}
     <svg width="16" height="16" viewBox="0 0 16 16" class="spinner">
@@ -310,7 +409,7 @@ import { isBrowserPreview } from '$lib/api';
   </button>
 {/if}
 {#if $sttError}
-  <div class="stt-error">{$sttError}</div>
+  <div class="stt-error" role="alert">{$sttError}</div>
 {/if}
 
 <style>
@@ -336,7 +435,8 @@ import { isBrowserPreview } from '$lib/api';
     color: var(--text-on-accent);
     border-color: var(--accent-semantic-red);
   }
-  .mic-btn.processing {
+  .mic-btn.processing,
+  .mic-btn.starting {
     opacity: 0.6;
     cursor: wait;
   }

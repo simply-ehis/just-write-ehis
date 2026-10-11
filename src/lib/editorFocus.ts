@@ -3,12 +3,18 @@ import { RangeSet } from "@codemirror/state";
 
 const focusMark = Decoration.mark({ class: "cm-focus-dimmed" });
 
+export interface FocusDimOptions {
+  isEnabled: () => boolean;
+  getContextLines: () => number;
+}
+
 /**
  * Dims everything outside the cursor neighborhood. Shared by Write and
  * the docked editor so focus dimming behaves identically everywhere.
  * (Requires a `.cm-focus-dimmed` rule in the editor theme.)
  */
-export function focusDimmingPlugin(isEnabled: () => boolean) {
+export function focusDimmingPlugin(options: FocusDimOptions) {
+  const { isEnabled, getContextLines } = options;
   return ViewPlugin.fromClass(
     class {
       decorations: RangeSet<Decoration>;
@@ -25,9 +31,13 @@ export function focusDimmingPlugin(isEnabled: () => boolean) {
         const selection = view.state.selection.main;
         const doc = view.state.doc;
         const builder: { from: number; to: number; value: Decoration }[] = [];
-        const contextLines = 2;
-        const focusStart = Math.max(0, selection.from - contextLines * 100);
-        const focusEnd = Math.min(doc.length, selection.to + contextLines * 100);
+        const contextLines = getContextLines();
+        const selStartLine = doc.lineAt(selection.from).number;
+        const selEndLine = doc.lineAt(selection.to).number;
+        const focusStartLine = Math.max(1, selStartLine - contextLines);
+        const focusEndLine = Math.min(doc.lines, selEndLine + contextLines);
+        const focusStart = doc.line(focusStartLine).from;
+        const focusEnd = doc.line(focusEndLine).to;
         if (focusStart > 0) {
           builder.push({ from: 0, to: focusStart, value: focusMark });
         }
@@ -90,6 +100,12 @@ export function centerCursorIn(
     const targetY = containerRect.height / 2;
     const currentY = coords.top - containerRect.top;
     const scrollDiff = currentY - targetY;
-    container.scrollBy({ top: scrollDiff, behavior: "smooth" });
+    // Dead-zone: don't scroll while the cursor is within the middle band
+    // (~±20% of the container). Otherwise every keystroke fights the user.
+    const deadZone = containerRect.height * 0.2;
+    if (Math.abs(scrollDiff) <= deadZone) return;
+    // Instant jump: smooth scrolling queues on every keystroke and reduced-
+    // motion users get the same behavior for free.
+    container.scrollBy({ top: scrollDiff, behavior: "auto" });
   }
 }

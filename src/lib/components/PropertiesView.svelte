@@ -265,7 +265,7 @@
       <option value="script">Script</option>
       <option value="projects">Projects</option>
       <option value="reader">Reader</option>
-      <option value="inbox">Inbox</option>
+      <option value="inbox">Capture</option>
     </select>
     <select bind:value={filterStatus} onchange={applyFilters}>
       <option value="all">All Statuses</option>

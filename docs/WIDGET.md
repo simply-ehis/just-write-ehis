@@ -2,9 +2,9 @@ PURPOSE: companion-window architecture, invariants, and verification status
 OWNS: widget window lifecycle, dock geometry, workspace selection, settings/tray wiring, proof evidence
 READ-WHEN: changing widget routing, window capabilities, docking behavior, tray behavior, or cross-window settings
 KEY-FILES: src/WidgetApp.svelte, src/lib/widgetBridge.ts, src/lib/components/LazyWorkspace.svelte, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json
-INVARIANTS: one Tauri process; main/widget only; setup_file_watcher runs once from main; no widget DB/watcher/sidecar/RAG initializer; app-lock state is checked before workspace loading
-GOTCHAS: hidden does not mean destroyed; storage events synchronize non-secret settings; widget lock verification is a separate session gate; files deep-links to Library; native timing/RSS remain unmeasured
-UPDATED: 2026-09-25
+INVARIANTS: one Tauri process; main/widget only; setup_file_watcher runs once from main; no widget DB/watcher/sidecar/RAG initializer; no secrets hydrated into the widget
+GOTCHAS: hidden does not mean destroyed; storage events synchronize non-secret settings; files deep-links to Library; native timing/RSS remain unmeasured
+UPDATED: 2026-10-09
 
 # Companion widget
 
@@ -12,7 +12,7 @@ UPDATED: 2026-09-25
 
 The widget is the second declarative entry in `tauri.conf.json`, not a runtime `WebviewWindowBuilder`. One config entry guarantees one native `widget` label at startup, avoids duplicate creation races, and keeps Settings, tray, and recovery looking up the same label. It starts as a transparent 56px always-on-top figure and is resized to a 520×720 panel when expanded.
 
-The expanded panel has no application sidebar, tab strip, or breadcrumb chrome. It renders exactly one selected workspace using the same lazy-loading component and workspace data contracts as the main app. The canonical workspace list includes Home, Logs, Write, Inbox, Map, Canvas, Novel, Script, Projects, Reader, Files, and Library. Write uses the existing `EditorPane` in companion mode so the lightweight dock does not start editor AI/voice features; Files deep-links to Library’s Files view. The selected workspace remains persisted in Settings. A locked widget expands to show its PIN gate, and handoff requests close the widget only after the main window acknowledges success.
+The expanded panel has no application sidebar, tab strip, or breadcrumb chrome. It renders exactly one selected workspace using the same lazy-loading component and workspace data contracts as the main app. The canonical workspace list includes Home, Logs, Write, Inbox, Map, Canvas, Novel, Script, Projects, Reader, Files, and Library. Write uses the existing `EditorPane` in companion mode so the lightweight dock does not start editor AI/voice features; Files deep-links to Library’s Files view. The selected workspace remains persisted in Settings, and handoff requests close the widget only after the main window acknowledges success.
 
 The collapsed figure is draggable and expands on click or keyboard activation. The expanded titlebar can be dragged, collapses on click-away, and exposes an explicit collapse control. Dock edge, dock offset, collapsed state, visibility, and OS-startup preference are persisted through the existing settings store.
 

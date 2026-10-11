@@ -7,7 +7,12 @@
     {#each $banners as banner (banner.id)}
       <div class="banner banner-{banner.kind}">
         <span class="banner-msg">{banner.message}</span>
-        <button class="banner-dismiss" onclick={() => dismissBanner(banner.id)}>&times;</button>
+        <span class="banner-actions">
+          {#if banner.action}
+            <button class="banner-action" onclick={() => { banner.action?.run(); dismissBanner(banner.id); }}>{banner.action.label}</button>
+          {/if}
+          <button class="banner-dismiss" onclick={() => dismissBanner(banner.id)}>&times;</button>
+        </span>
       </div>
     {/each}
   </div>
@@ -49,6 +54,27 @@
   .banner-info {
     background: color-mix(in srgb, var(--accent-primary) 15%, var(--surface-base));
     border-bottom: 1px solid var(--accent-primary);
+  }
+
+  .banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .banner-action {
+    background: none;
+    border: 1px solid currentColor;
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  .banner-action:hover {
+    background: var(--surface-overlay);
   }
 
   .banner-dismiss {

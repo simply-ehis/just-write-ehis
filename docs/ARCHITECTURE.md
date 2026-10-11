@@ -4,7 +4,7 @@ READ-WHEN: adding a command/workspace, touching storage, AI, theming, or icons
 KEY-FILES: src/lib/api.ts (invoke router), src/lib/browserBackend.ts (preview), src/WidgetApp.svelte + src/lib/components/LazyWorkspace.svelte + src-tauri/tauri.conf.json (two-window shell), src-tauri/tauri.windows.conf.json (Windows packaging), src-tauri/src/sidecar.rs + sidecars/build_sidecars.py (local runtimes), src-tauri/src/commands.rs + doc_store.rs, src/app.css (theme vars)
 INVARIANTS: files-on-disk truth; every api.ts command has a browserBackend case; one process has main/widget only; setup_file_watcher runs once from main; widget never initializes DB/watcher/sidecars/RAG; Windows OS registration is Windows-only and opt-in; no Lucide/emoji icons; all UI strings go through native title/aria-label tooltips on icon buttons
 GOTCHAS: app.css must stay imported by main.ts (the whole theme died once when it wasn't); widget capabilities must include label `widget`; Files is a virtual workspace and deep-links to Library; Windows associations are installer-owned; native model/sidecar packaging is release-gated; $lib alias only, no relative climbs
-UPDATED: 2026-09-25
+UPDATED: 2026-10-09
 
 # Architecture
 
@@ -54,7 +54,7 @@ atomic saves keep external sync tools (Syncthing etc.) safe.
   localStorage), `lock` (session-only unlocks), `lastPlace` (per-workspace
   restore), `writeBack` (AI→editor pipe), `saveState`, `notifications`.
 - Components are one-workspace-per-file plus shared pieces (`Icon`,
-  `CommandPalette`, `TabBar`, `InspectorPanel`, `LockScreen`, …).
+  `CommandPalette`, `TabBar`, `InspectorPanel`, …).
 - `Icon.svelte` is the **only** icon source: 53 hand-authored stroke
   icons. Never Lucide, never emoji-as-icon (syntax glyphs like `☐`/`[[`
   inside menus are content, not icons, and stay).
@@ -62,16 +62,32 @@ atomic saves keep external sync tools (Syncthing etc.) safe.
 - `bookparse.ts` extracts book text (epub/docx/pdf), lazy-imported so the
   pdf.js engine never touches the main bundle.
 
-## Lock semantics (the rule)
+## Capture flow (workspace id `inbox`, label "Capture")
 
-App locking is a session gate: it defaults off, requires a confirmed PIN,
-persists that PIN through the OS keychain, and blocks the main and widget
-shells until the session is unlocked. The same master switch enables
-per-document locks. Locked docs keep **content invisible, titles visible**;
-they are excluded from search, RAG, AI context (even the open doc), Home
-stats, and smart tabs. Unlocks live only in memory. At-rest secrecy is
-explicitly *not* this flag's job — that's the future encrypted vault (see
-`TODOS.md`).
+One capture box per surface, one handoff store pair (`stores/capture.ts`:
+`capturePrefill` text + `captureFocus` bump) that only InboxWorkspace
+consumes. Entry points: the `Ctrl+Shift+F` QuickCaptureOverlay (any
+target workspace; default `inbox`), the palette's Quick Capture action
+(focuses the box — never creates an Untitled doc), the status-bar /
+mobile Capture button (same overlay), and PWA launch intents
+(`launch.ts`: share-target / `?capture=inbox` notification taps /
+app shortcuts) which queue text via `sendToCapture`). Share-target text
+auto-saves when the capture box was empty (a half-typed draft only gets
+the shared text appended). Saves toast "Saved to Capture"; Logs' own box
+toasts "Saved to Logs". Triage (move) = recreate the snippet in the
+target workspace, then delete the `inbox` original — the id never
+migrates. The sidebar hides only Canvas by default
+(`DEFAULT_HIDDEN_WORKSPACES`); Capture is a first-class nav entry in the
+"Capture" group alongside Logs.
+
+## Privacy & secrets
+
+Secrets (API keys) live in the OS keychain, not localStorage; a boot
+migration strips any legacy `apiKey` from localStorage
+(`stripPersistedSecrets`, `settings.ts`). Files on disk stay plaintext —
+the future encrypted vault (see `TODOS.md`) is what would provide at-rest
+secrecy. The earlier PIN / app-lock session gate and per-document lock were
+removed 2026-10-09 (see `CHANGELOG.md`).
 
 ## Companion window
 

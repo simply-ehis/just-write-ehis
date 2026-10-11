@@ -45,7 +45,7 @@
   $effect(() => {
     const doc = $currentDoc;
     craftNudge = null;
-    if (!doc || doc.locked) return;
+    if (!doc) return;
     const docId = doc.id;
     const dismissId = `craft-filter-${docId}`;
     if ($settings.dismissedNudges.includes(dismissId)) return;

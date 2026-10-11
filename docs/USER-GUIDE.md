@@ -3,8 +3,8 @@ OWNS: feature tour, shortcuts, privacy model in plain language
 READ-WHEN: onboarding copy changes; answering "where is X / how do I Y"
 KEY-FILES: HelpOverlay (? shortcut sheet), SettingsPane (every toggle lives here)
 INVARIANTS: every setting stated here must exist in Settings; no documented feature may be a stub
-GOTCHAS: browser preview stores in localStorage; desktop stores files+SQLite — same UI, different persistence; app PIN is a session gate, not encryption
-UPDATED: 2026-09-25
+GOTCHAS: browser preview stores in localStorage; desktop stores files+SQLite — same UI, different persistence; the workspace id is still `inbox` even though the label is Capture
+UPDATED: 2026-10-09
 
 # User guide
 
@@ -22,10 +22,12 @@ writing with screenplay view. **Projects** — dashboard + board.
 **Reader** — import epub/pdf/docx/md/txt (text is extracted), shelf,
 ratings, position sync. **Preview PDF** (Reader header) renders faithful
 PDF pages (zoom + page nav) before you import; import still extracts text.
-**Files** — raw vault browser. **Inbox** — capture first, triage weekly
-(multi-select + bulk move/delete). Type in the box (Enter saves) or dictate:
-mic uses the STT sidecar when enabled, otherwise the browser's speech
-recognition (works in the mobile PWA).
+**Files** — raw vault browser. **Capture** (id `inbox`) — capture first,
+triage weekly (multi-select + bulk move/delete). Type in the box (Enter
+saves, and a "Saved to Capture" toast confirms) or dictate: mic uses the
+STT sidecar when enabled, otherwise the browser's speech recognition
+(works in the mobile PWA). `Ctrl+Shift+F` opens Quick Capture from
+anywhere.
 
 `Ctrl+K` jumps anywhere: docs, workspaces, actions.
 
@@ -40,15 +42,6 @@ autocomplete; auto-suppressed for private workspaces).
 
 - **Per-workspace local-only** (Settings → Privacy): Logs is local-only by
   default. Blocked calls refuse loudly, including Ghost.
-- **App & document lock** (Settings → Privacy): locking starts off and cannot
-  be enabled until you create and confirm a PIN. On desktop the PIN is kept in
-  the OS keychain; in browser preview it lasts only for the current tab
-  session. Once enabled, launch shows an app-wide PIN gate. **Lock app now**
-  tests it without restarting; repeated wrong guesses trigger a growing wait.
-- **Per-doc lock** (right-click a tab → Lock): locked content is excluded from
-  search, AI, stats, and smart tabs, and the pane PIN-gates. Titles stay
-  visible in lists so docs stay manageable. Unlocks last for the session only.
-  Files on disk stay plaintext — both locks are gates, not encryption.
 - **AI memory** (Settings → Privacy): opt-in cross-session facts recalled
   into chats; opt-in secret scrubbing that blocks the call (never silently
   passes) when the sidecar is missing. Wipe anytime via Clear History.
@@ -76,16 +69,17 @@ locked documents and unavailable local models are skipped safely.
 
 ## Capture outside the app (PWA / Android)
 
-Install the PWA (browser menu → Install) and three doors open into Inbox:
+Install the PWA (browser menu → Install) and three doors open into Capture:
 
 - **App shortcuts** (long-press the icon): Quick Capture, New Document,
   Daily Note.
 - **Share Target**: Android's share sheet sends text/links straight into
-  the capture box (needs the `share-target` capture method or any method —
-  the boot URL is always honored).
-- **Notification** (Settings → Capture → Android Capture Method →
-  Notification → Pin now): a sticky notification whose tap opens the
-  capture box. Needs notification permission + the installed PWA.
+  the capture box, where shared text **saves automatically** (a
+  "Saved to Capture" toast confirms; a half-typed draft is never
+  clobbered — shared text appends instead).
+- **Notification** (Settings → Capture & Notifications → Android Capture
+  Method → Notification → Pin now): a sticky notification whose tap opens
+  the capture box. Needs notification permission + the installed PWA.
 - **Widget** needs the native Android shell — not available in the browser;
   use Notification or Share Target instead.
 
@@ -97,5 +91,6 @@ chart toggle in the editor toolbar.
 
 ## Shortcuts
 
-`Ctrl+K` palette · `Ctrl+S` flush save · `Ctrl+T` timestamp · `F11` zen ·
-`?` full shortcut sheet · `Ctrl+Enter` insert last AI response.
+`Ctrl+K` palette · `Ctrl+Shift+F` quick capture · `Ctrl+S` flush save ·
+`Ctrl+T` timestamp · `F11` zen · `?` full shortcut sheet · `Ctrl+Enter`
+insert last AI response.

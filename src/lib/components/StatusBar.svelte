@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "$lib/api";
+  import { api, isBrowserPreview } from "$lib/api";
   import { currentDoc, currentWorkspace } from "$lib/stores/app";
   import { saveState } from "$lib/stores/saveState";
   import Icon from "$lib/components/Icon.svelte";
@@ -7,6 +7,7 @@
   import { settings } from "$lib/stores/settings";
   import { warnOnce } from "$lib/errors";
 
+  const browserVoice = isBrowserPreview();
   let wordCount = $derived($currentDoc?.word_count ?? 0);
   let stats = $state<{ totalDocs: number; totalWords: number; totalBacklinks: number } | null>(null);
   let streak = $state<[number, number] | null>(null);
@@ -72,6 +73,12 @@
     <span class="save-dot" class:pulse={$saveState === "saving"}></span>
     <span>{$saveState === "saving" ? "Saving..." : $saveState === "error" ? "Save failed" : "Saved"}</span>
   </div>
+  {#if browserVoice}
+    <div class="item browser-badge" title="Voice features use your browser's speech APIs (no local models in web preview)">
+      <Icon name="mic" size={12} />
+      <span>Browser voice</span>
+    </div>
+  {/if}
   <div class="spacer"></div>
   {#if streak}
     <div class="item streak" title="Writing streak (days in a row)">
@@ -138,6 +145,14 @@
 
   .streak {
     color: var(--accent-primary);
+  }
+
+  .browser-badge {
+    color: var(--warning);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-sm);
+    padding: 1px 6px;
+    flex-shrink: 0;
   }
 
   .sparkline {

@@ -5,8 +5,6 @@
   import { api } from "$lib/api";
   import type { Doc } from "$lib/api";
   import Icon from "$lib/components/Icon.svelte";
-  import { settings } from "$lib/stores/settings";
-  import { hasPin, isUnlocked, markLocked } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
   import { onMount } from "svelte";
@@ -45,6 +43,15 @@
   let tabContainer = $state<HTMLElement | null>(null);
   let showOverflow = $state(false);
 
+  // Workspace-scoped strip: only this workspace's tabs render (plus the
+  // active doc, so a doc opened from elsewhere never vanishes under the
+  // user). Hidden tabs keep their position in the global stack and
+  // reappear in their own workspace — daily logs used to leak into Write.
+  function isVisible(t: Doc): boolean {
+    return t.workspace === $currentWorkspace || t.id === $currentDoc?.id;
+  }
+  const visibleTabs = $derived($openTabs.filter((t) => isVisible(t)));
+
   function selectTab(doc: Doc) {
     $currentDoc = doc;
     api.usageRecord(doc.id, "open").catch((e) => warnOnce("Tabs usage telemetry", e));
@@ -52,22 +59,25 @@
 
   function closeTab(doc: Doc, event?: Event) {
     event?.stopPropagation();
-    const idx = $openTabs.findIndex((t) => t.id === doc.id);
+    const idx = visibleTabs.findIndex((t) => t.id === doc.id);
+    const wasActive = $currentDoc?.id === doc.id;
     $openTabs = $openTabs.filter((t) => t.id !== doc.id);
     pinnedIds.delete(doc.id);
-    if ($currentDoc?.id === doc.id) {
-      if ($openTabs.length > 0) {
-        const nextIdx = Math.min(idx, $openTabs.length - 1);
-        $currentDoc = $openTabs[nextIdx];
-      } else {
-        $currentDoc = null;
-      }
+    if (wasActive) {
+      // Next active comes from THIS workspace's strip — a hidden
+      // other-workspace tab must never surface as the open document.
+      const remaining = $openTabs.filter((t) => t.workspace === $currentWorkspace);
+      $currentDoc = remaining.length > 0
+        ? remaining[Math.min(Math.max(idx, 0), remaining.length - 1)]
+        : null;
     }
     contextMenu = null;
   }
 
   function closeOthers(doc: Doc) {
-    $openTabs = $openTabs.filter((t) => t.id === doc.id || pinnedIds.has(t.id));
+    // Hidden other-workspace tabs are untouched: they aren't on screen,
+    // so closing them here would silently destroy another workspace's strip.
+    $openTabs = $openTabs.filter((t) => !isVisible(t) || t.id === doc.id || pinnedIds.has(t.id));
     if (!$openTabs.find(t => t.id === $currentDoc?.id)) {
       $currentDoc = doc;
     }
@@ -75,19 +85,19 @@
   }
 
   function closeAll() {
-    $openTabs = $openTabs.filter(t => pinnedIds.has(t.id));
-    if ($openTabs.length > 0) {
-      $currentDoc = $openTabs[0];
-    } else {
-      $currentDoc = null;
+    $openTabs = $openTabs.filter((t) => !isVisible(t) || pinnedIds.has(t.id));
+    if (!$openTabs.find((t) => t.id === $currentDoc?.id)) {
+      $currentDoc = $openTabs.find((t) => t.workspace === $currentWorkspace) ?? null;
     }
     contextMenu = null;
   }
 
   function closeToRight(doc: Doc) {
-    const idx = $openTabs.findIndex(t => t.id === doc.id);
-    const keep = $openTabs.filter((_, i) => i <= idx || pinnedIds.has($openTabs[i].id));
-    $openTabs = keep;
+    const vis = visibleTabs;
+    const idx = vis.findIndex((t) => t.id === doc.id);
+    const keepIds = new Set(vis.slice(0, Math.max(idx, 0) + 1).map((t) => t.id));
+    keepIds.add(doc.id);
+    $openTabs = $openTabs.filter((t) => !isVisible(t) || keepIds.has(t.id) || pinnedIds.has(t.id));
     if (!$openTabs.find(t => t.id === $currentDoc?.id)) {
       $currentDoc = doc;
     }
@@ -101,41 +111,6 @@
       pinnedIds.add(doc.id);
     }
     pinnedIds = new Set(pinnedIds);
-    contextMenu = null;
-  }
-
-  function refreshDocInStores(updated: Partial<Doc> & { id: string }) {
-    if ($currentDoc?.id === updated.id) $currentDoc = { ...$currentDoc, ...updated };
-    $openTabs = $openTabs.map((t) => (t.id === updated.id ? { ...t, ...updated } : t));
-  }
-
-  async function toggleLock(doc: Doc) {
-    if (!$settings.lockEnabled) {
-      showToast("Document locking is turned off — enable it in Settings → Privacy & Security", "warning");
-      contextMenu = null;
-      return;
-    }
-    if (!doc.locked && !(await hasPin())) {
-      showToast("Set a PIN in Settings → Privacy & Security first", "warning");
-      contextMenu = null;
-      return;
-    }
-    // Unlocking here must not bypass the PIN: the flag may only be
-    // cleared after this session proved the PIN (via the LockScreen).
-    // Otherwise anyone with the open app could permanently unlock a doc.
-    if (doc.locked && !isUnlocked(doc.id)) {
-      showToast("Enter the PIN in the document view first", "warning");
-      contextMenu = null;
-      return;
-    }
-    try {
-      await api.docSetLocked(doc.id, !doc.locked);
-      if (!doc.locked) markLocked(doc.id);
-      refreshDocInStores({ id: doc.id, locked: !doc.locked });
-      showToast(!doc.locked ? `Locked "${doc.title}" — excluded from AI, search, and stats` : `Unlocked "${doc.title}"`, "success");
-    } catch (e) {
-      showToast(`Lock failed: ${e instanceof Error ? e.message : e}`, "error");
-    }
     contextMenu = null;
   }
 
@@ -238,6 +213,33 @@
       showToast(`Couldn't create doc: ${e instanceof Error ? e.message : e}`, "error");
     }
   }
+
+  onMount(() => {
+    // Tab shortcuts live here, next to the strip logic they drive. App's
+    // global keydown forwards Ctrl+Tab / Ctrl+T / Ctrl+W as custom events
+    // (the editor layer keeps Ctrl+T for spec §4.1 timestamps — CM
+    // preventDefaults it before App ever sees the key).
+    const onCycle = (e: Event) => {
+      const backward = !!(e as CustomEvent<{ backward?: boolean }>).detail?.backward;
+      const vis = visibleTabs;
+      if (vis.length === 0) return;
+      const cur = vis.findIndex((t) => t.id === $currentDoc?.id);
+      const dir = backward ? -1 : 1;
+      selectTab(cur === -1 ? vis[0] : vis[(cur + dir + vis.length) % vis.length]);
+    };
+    const onCloseActive = () => {
+      if ($currentDoc) closeTab($currentDoc);
+    };
+    const onNewTab = () => { void newTabDoc(); };
+    window.addEventListener("jwe-cycle-tab", onCycle);
+    window.addEventListener("jwe-close-active-tab", onCloseActive);
+    window.addEventListener("jwe-new-tab", onNewTab);
+    return () => {
+      window.removeEventListener("jwe-cycle-tab", onCycle);
+      window.removeEventListener("jwe-close-active-tab", onCloseActive);
+      window.removeEventListener("jwe-new-tab", onNewTab);
+    };
+  });
 </script>
 
 <svelte:window onclick={handleDocClick} onkeydown={(e) => { if (e.key === 'Escape') contextMenu = null; }} />
@@ -254,7 +256,7 @@
       <Icon name="menu" size={14} />
     </button>
   {/if}
-  {#each $openTabs as doc (doc.id)}
+  {#each visibleTabs as doc (doc.id)}
     {@const isPinned = pinnedIds.has(doc.id)}
     {@const isDraggedOver = dragOverId === doc.id && draggedId !== doc.id}
     <button
@@ -274,9 +276,6 @@
       ondragend={handleDragEnd}
     >
       <span class="ws-badge" title={doc.workspace}>{getWorkspaceLabel(doc)}</span>
-      {#if doc.locked}
-        <span class="lock-badge" title="Locked — excluded from AI, search, and stats"><Icon name="lock" size={10} label="Locked" /></span>
-      {/if}
       <span class="tab-title">{getTabTitle(doc)}</span>
       {#if !isPinned}
         <span
@@ -295,7 +294,7 @@
     </button>
   {/each}
 
-  {#if $openTabs.length === 0}
+  {#if visibleTabs.length === 0}
     <div class="tab-placeholder">No open documents</div>
     <button class="new-tab-btn" onclick={newTabDoc} title="New document in this workspace" aria-label="New document">+ New</button>
   {/if}
@@ -327,9 +326,6 @@
     <div class="menu-divider" role="separator"></div>
     <button role="menuitem" onclick={() => { togglePin(contextMenu!.doc); }}>
       {pinnedIds.has(contextMenu!.doc.id) ? 'Unpin' : 'Pin'}
-    </button>
-    <button role="menuitem" onclick={() => { toggleLock(contextMenu!.doc); }} title="Locked docs stay out of AI context, search, and stats">
-      {contextMenu!.doc.locked ? 'Unlock' : 'Lock'}
     </button>
     <div class="menu-divider" role="separator"></div>
     <div class="menu-label" role="presentation">Send a copy to…</div>
@@ -479,12 +475,6 @@
   .pin-indicator {
     font-size: 10px;
     opacity: 0.6;
-    flex-shrink: 0;
-  }
-
-  .lock-badge {
-    display: inline-flex;
-    color: var(--text-muted);
     flex-shrink: 0;
   }
 

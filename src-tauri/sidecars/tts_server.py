@@ -11,21 +11,34 @@ HuggingFace download at runtime. The model bundle is vendored locally.
 Lazy-loads on first synthesis call (A7.6).
 Sentence-boundary chunking per A9.3 (~150 tokens/chunk, never mid-sentence).
 
-Endpoints:
-  GET  /health        → {"status": "ok", "model_loaded": bool}
-  POST /synthesize    → {"audio": base64, "sample_rate": int, "format": "wav"}
-  POST /stop          → acknowledges stop (client kills audio)
+Transport: private stdio JSON-line pipe (no TCP port, no HTTP). One JSON
+request per line on stdin, one response per line on stdout, diagnostics
+on stderr. Request/response envelopes:
 
-Synthesize body:
-  text, voice (default af_heart), speed (0.5–2.0), lang_code (a/b/j/z/e/f/h/i/p),
-  split_pattern, chunk_size.
+  Request:  {"id": 1, "method": "...", "params": {...}}
+  Response: {"id": 1, "ok": true, "result": {...}}
+         or {"id": 1, "ok": false, "error": "..."}.
 
-argv: [port] [model_dir]  — model_dir paste-to-swap from Settings → AI.
+Methods:
+  health      {}                                → {"status", "ready",
+                                                   "model_loaded", "error"}
+  synthesize  {text, voice, speed, lang_code,   → {"audio": base64,
+              split_pattern, chunk_size}           "sample_rate": int,
+                                                   "format": "wav"}
+  stop        {}                                → {"status": "stopped"}
+
+Synthesize params: text, voice (default af_heart), speed (0.5–2.0),
+lang_code (a/b/j/z/e/f/h/i/p), split_pattern, chunk_size.
+
+argv: [model_dir]  — model_dir paste-to-swap from Settings → AI.
 
 Voice → sid map is Kokoro v1.0 (sherpa generate_voices_bin.py order).
 Voices absent from the v1.0 bundle (jf_never, fm_alpha, hf_baya, hm_pratik,
 it_paola, pm_mario, kf_*, km_*) fall back to af_heart with a logged warning;
 Korean has no v1.0 voice — see docs/MODELS.md.
+
+The launcher sets JWE_SIDECAR_TOKEN (required at startup — the pipe is
+private, but the contract keeps old/new builds interchangeable).
 """
 
 import base64
@@ -36,12 +49,7 @@ import os
 import re
 import sys
 import wave
-import hmac
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Per-launch token supplied by the desktop launcher (sidecar.rs). Required: the
-# server refuses to start without it, so it can never fall back to being an open
-# loopback endpoint. See TtsHandler._authorized.
 AUTH_TOKEN = os.environ.get("JWE_SIDECAR_TOKEN", "")
 
 HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
@@ -133,7 +141,7 @@ def _inside_models(path: str) -> bool:
 
 
 def _model_dir() -> str:
-    override = sys.argv[2].strip() if len(sys.argv) > 2 and sys.argv[2].strip() else ""
+    override = sys.argv[1].strip() if len(sys.argv) > 1 and sys.argv[1].strip() else ""
     if override in ("hexgrad/Kokoro-82M", "hexgrad/kokoro-82m"):
         print(f"[tts] Legacy repo id '{override}' is from the torch era — "
               f"using vendored bundle instead.", flush=True)
@@ -349,105 +357,66 @@ def synthesize(text: str, voice: str = "af_heart", speed: float = 1.0,
     return buf.getvalue(), eng.sample_rate, fallback
 
 
-# ── HTTP handler ─────────────────────────────────────────────────
-class TtsHandler(BaseHTTPRequestHandler):
-    def log_message(self, _fmt, *_args):
-        pass
-
-    def _json(self, data: dict, status: int = 200):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length", 0))
-        return self.rfile.read(length) if length else b""
-
-    def _authorized(self) -> bool:
-        """Require the launcher's per-process token.
-
-        Loopback is not a trust boundary: any process running as any local
-        account can reach 127.0.0.1, and any website can issue a bodyless POST
-        (a CORS-simple request, no preflight) to make this machine speak. The
-        desktop launcher mints a token per launch and sends it as
-        X-JWE-Sidecar-Token; without a match every route is refused.
-        """
-        supplied = self.headers.get("X-JWE-Sidecar-Token", "")
-        if not AUTH_TOKEN or not hmac.compare_digest(supplied, AUTH_TOKEN):
-            self._json({"error": "unauthorized"}, 401)
-            return False
-        return True
-
-    def do_GET(self):
-        if not self._authorized():
-            return
-        if self.path == "/health":
-            try:
-                eng = _engine()
-                self._json({"status": "ok" if eng.ready else "error",
-                            "ready": eng.ready, "model_loaded": eng.loaded,
-                            "error": eng.ready_error})
-            except Exception as e:
-                self._json({"status": "error", "ready": False,
-                            "model_loaded": False, "error": str(e)})
-        else:
-            self._json({"error": "not found"}, 404)
-
-    def do_POST(self):
-        if not self._authorized():
-            return
-        routes = {
-            "/synthesize": self._handle_synthesize,
-            "/stop": lambda: self._json({"status": "stopped"}),
-        }
-        handler = routes.get(self.path)
-        if handler:
-            handler()
-        else:
-            self._json({"error": "not found"}, 404)
-
-    def _handle_synthesize(self):
-        raw = self._read_body()
-        if not raw:
-            self._json({"error": "empty body"}, 400)
-            return
+# ── stdio dispatch + frame loop ──────────────────────────────────
+def _dispatch(method: str, params: dict) -> dict:
+    if method == "health":
         try:
-            data = json.loads(raw)
-            text = data.get("text", "")
-            if not text.strip():
-                self._json({"error": "empty text"}, 400)
-                return
-            wav_bytes, sr, fallback = synthesize(
-                text,
-                voice=data.get("voice", "af_heart"),
-                speed=float(data.get("speed", 1.0)),
-                lang_code=data.get("lang_code", "a"),
-                split_pattern=data.get("split_pattern", r"\n+"),
-                chunk_size=int(data.get("chunk_size", 150)),
-            )
-            resp: dict = {
-                "audio": base64.b64encode(wav_bytes).decode() if wav_bytes else "",
-                "sample_rate": sr,
-                "format": "wav",
-            }
-            if fallback:
-                resp["voice_fallback"] = fallback
-            self._json(resp)
+            eng = _engine()
+            return {"status": "ok" if eng.ready else "error",
+                    "ready": eng.ready, "model_loaded": eng.loaded,
+                    "error": eng.ready_error}
         except Exception as e:
-            print(f"[tts] Error: {e}", flush=True)
-            self._json({"error": str(e)}, 500)
+            return {"status": "error", "ready": False,
+                    "model_loaded": False, "error": str(e)}
+    if method == "synthesize":
+        text = str(params.get("text", ""))
+        if not text.strip():
+            raise ValueError("empty text")
+        wav_bytes, sr, fallback = synthesize(
+            text,
+            voice=params.get("voice", "af_heart"),
+            speed=float(params.get("speed", 1.0)),
+            lang_code=params.get("lang_code", "a"),
+            split_pattern=params.get("split_pattern", r"\n+"),
+            chunk_size=int(params.get("chunk_size", 150)),
+        )
+        resp: dict = {
+            "audio": base64.b64encode(wav_bytes).decode() if wav_bytes else "",
+            "sample_rate": sr,
+            "format": "wav",
+        }
+        if fallback:
+            resp["voice_fallback"] = fallback
+        return resp
+    if method == "stop":
+        return {"status": "stopped"}
+    raise ValueError(f"unknown method: {method}")
+
+
+def _write(out, obj: dict) -> None:
+    out.write(json.dumps(obj) + "\n")
+    out.flush()
 
 
 def main():
     if not AUTH_TOKEN:
         raise RuntimeError("JWE_SIDECAR_TOKEN is required")
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8091
-    server = HTTPServer(("127.0.0.1", port), TtsHandler)
-    print(f"[tts] Kokoro TTS (sherpa-onnx) on http://127.0.0.1:{port}", flush=True)
-    server.serve_forever()
+    out = sys.stdout
+    sys.stdout = sys.stderr  # keep stdout pure frames; prints become logs
+    print("[tts] stdio sidecar ready (Kokoro, sherpa-onnx)", flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        rid = None
+        try:
+            req = json.loads(line)
+            rid = req.get("id")
+            result = _dispatch(str(req.get("method", "")), req.get("params") or {})
+            _write(out, {"id": rid, "ok": True, "result": result})
+        except Exception as e:
+            print(f"[tts] Error: {e}", flush=True)
+            _write(out, {"id": rid, "ok": False, "error": str(e)})
 
 
 if __name__ == "__main__":

@@ -86,7 +86,7 @@ if (!only || only === "desktop") {
   dom.window.dispatchEvent(new dom.window.CustomEvent("open-command-palette"));
   await sleep(600);
   const results = qa(".palette-result").map((b) => b.textContent.trim()).join("\n");
-  for (const label of ["Go to Canvas", "Go to Files", "Open Inbox"]) {
+  for (const label of ["Go to Canvas", "Go to Files", "Open Capture"]) {
     check(`palette surfaces "${label}"`, results.includes(label));
   }
   console.log(`INFO  desktop console.error count: ${errors.length}`);
@@ -127,10 +127,10 @@ if (!only || only === "mobile") {
   check("mobile More sections unified", JSON.stringify(sections) === JSON.stringify(["Create", "Capture", "Organize", "Explore", "Tools"]), sections.join("|"));
   const moreLabels = qa(".more-item").map((b) => (b.getAttribute("aria-label") || "").trim());
   check("one Settings entry, no duplicates", moreLabels.filter((l) => l === "Settings").length === 1 && !moreLabels.some((l) => ["Craft", "Stats", "Skills"].includes(l)), moreLabels.join(","));
-  for (const dest of ["Logs", "Inbox", "Map", "Canvas", "Novel", "Script", "Projects", "Reader", "Files", "Library"]) {
+  for (const dest of ["Logs", "Capture", "Map", "Canvas", "Novel", "Script", "Projects", "Reader", "Files", "Library"]) {
     if (!moreLabels.includes(dest)) check(`mobile reaches "${dest}"`, false);
   }
-  check("all 10 More destinations reachable", ["Logs", "Inbox", "Map", "Canvas", "Novel", "Script", "Projects", "Reader", "Files", "Library"].every((d) => moreLabels.includes(d)), moreLabels.join(","));
+  check("all 10 More destinations reachable", ["Logs", "Capture", "Map", "Canvas", "Novel", "Script", "Projects", "Reader", "Files", "Library"].every((d) => moreLabels.includes(d)), moreLabels.join(","));
   const mainLabels = qa(".bottom-bar-item").map((b) => (b.getAttribute("aria-label") || "").trim());
   check("main row keeps Write/Home/Search", ["Write", "Home", "Search"].every((d) => mainLabels.includes(d)), mainLabels.join(","));
 

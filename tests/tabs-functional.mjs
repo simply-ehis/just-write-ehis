@@ -91,7 +91,7 @@ async function waitFor(fn, timeoutMs, label) {
   }
 }
 function clickNav(label) {
-  // Labels can carry live suffixes ("Inbox, 3 untriaged") — prefix match.
+  // Labels can carry live suffixes ("Capture, 3 untriaged") — prefix match.
   const btn = [...doc.querySelectorAll(".workspace-nav .nav-item")]
     .find((b) => {
       const a = (b.getAttribute("aria-label") || "").trim();
@@ -103,7 +103,7 @@ function clickNav(label) {
 }
 const text = () => doc.getElementById("app")?.textContent ?? "";
 
-// Hidden-by-default tabs (inbox, canvas) open via the command palette.
+// Hidden-by-default tabs (canvas) open via the command palette.
 async function openViaPalette(query, label) {
   globalThis.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
   const opened = await waitFor(() => !!doc.querySelector(".palette-input"), 5000);
@@ -147,31 +147,48 @@ const todayStr = `${_d.getFullYear()}-${String(_d.getMonth() + 1).padStart(2, "0
 check("nav has Logs", clickNav("Logs"));
 check("Logs shows today", await waitFor(() => text().includes(todayStr), 12000));
 
-// Inbox: hidden from sidebar by default — opens via the More overflow menu.
-async function openViaMore(wsId) {
-  const more = [...doc.querySelectorAll(".workspace-nav .nav-item")]
-    .find((b) => (b.getAttribute("aria-label") || "") === "More workspaces");
-  if (!more) return false;
-  more.click();
-  await sleep(400);
-  const item = doc.querySelector(`.more-pop .nav-item[data-ws="${wsId}"]`);
-  if (!item) return false;
-  item.click();
-  return true;
-}
-check("More overflow lists Inbox", await waitFor(() => {
-  const more = [...doc.querySelectorAll(".workspace-nav .nav-item")]
-    .find((b) => (b.getAttribute("aria-label") || "") === "More workspaces");
-  return !!more;
-}, 5000));
-check("Inbox opens via More menu", await openViaMore("inbox"));
+// Workspace-scoped strip: a doc open in one workspace must not surface in
+// another (daily logs used to leak into the Write strip — the global tab
+// stack is now filtered per workspace, with the active doc as the only
+// exception).
+check("nav back to Write", clickNav("Write"));
+check("Write strip shows write tabs only", await waitFor(() => {
+  const badges = [...doc.querySelectorAll(".tab .ws-badge")];
+  return badges.length > 0 && badges.every((b) => b.getAttribute("title") === "write");
+}, 8000), `found ${[...doc.querySelectorAll(".tab .ws-badge")].map((b) => b.getAttribute("title")).join(",")}`);
+check("nav back to Logs", clickNav("Logs"));
+check("Logs strip shows logs tabs only", await waitFor(() => {
+  const badges = [...doc.querySelectorAll(".tab .ws-badge")];
+  return badges.length > 0 && badges.every((b) => b.getAttribute("title") === "logs");
+}, 8000), `found ${[...doc.querySelectorAll(".tab .ws-badge")].map((b) => b.getAttribute("title")).join(",")}`);
+
+// Tab shortcuts (documented in KeyboardShortcuts; forwarded from App's
+// keydown to the TabBar that owns the strip).
+check("nav to Write for shortcut probe", clickNav("Write"));
 {
-  check("Inbox capture box renders", await waitFor(() => !!doc.querySelector('.quick-capture input[aria-label="Quick capture text"]'), 8000));
+  const tabsBefore = doc.querySelectorAll(".tab").length;
+  globalThis.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "t", ctrlKey: true, bubbles: true }));
+  check("Ctrl+T opens a new tab in Write", await waitFor(() => doc.querySelectorAll(".tab").length === tabsBefore + 1, 8000));
+  const activeBefore = [...doc.querySelectorAll(".tab")].findIndex((t) => t.classList.contains("active"));
+  globalThis.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }));
+  check("Ctrl+Tab cycles to the next tab", await waitFor(() => {
+    const idx = [...doc.querySelectorAll(".tab")].findIndex((t) => t.classList.contains("active"));
+    return idx !== -1 && activeBefore !== -1 && idx !== activeBefore;
+  }, 5000));
+  globalThis.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "w", ctrlKey: true, bubbles: true }));
+  check("Ctrl+W closes the active tab", await waitFor(() => doc.querySelectorAll(".tab").length === tabsBefore, 5000));
+}
+
+// Capture (workspace id "inbox"): visible in the sidebar by default —
+// opens via nav; the capture box creates a snippet doc.
+check("Capture opens from sidebar", clickNav("Capture"));
+{
+  check("Capture box renders", await waitFor(() => !!doc.querySelector('.quick-capture input[aria-label="Quick capture text"]'), 8000));
   {
     const input = doc.querySelector('.quick-capture input[aria-label="Quick capture text"]');
     if (!input) {
-      check("Inbox save button present", false, "no input element");
-      check("Inbox capture creates item", false, "no input element");
+      check("Capture save button present", false, "no input element");
+      check("Capture creates item", false, "no input element");
     } else {
       const before = doc.querySelectorAll(".inbox-item").length;
       input.value = "PROBE_CAPTURE_123";
@@ -179,13 +196,14 @@ check("Inbox opens via More menu", await openViaMore("inbox"));
       // Let Svelte flush the bound value (enables the save button).
       await sleep(500);
       const save = doc.querySelector('.quick-capture button[aria-label="Save capture"]');
-      check("Inbox save button present", !!save);
+      check("Capture save button present", !!save);
       save?.click();
-      check("Inbox capture creates item", await waitFor(
+      check("Capture creates item", await waitFor(
         () => [...doc.querySelectorAll(".inbox-item")].some((el) => (el.textContent || "").includes("PROBE_CAPTURE_123")) || doc.querySelectorAll(".inbox-item").length > before,
         8000
       ));
     }
+  }
 }
 
 // Novel: studio surface renders.
@@ -295,7 +313,6 @@ check("Canvas board renders", await waitFor(
   check("Script editor returns with shared typography", await waitFor(() => !!doc.querySelector(".fountain-input"), 10000));
   const scriptSource = await readFile(join(root, "src/lib/components/ScriptWorkspace.svelte"), "utf8");
   check("Script uses shared typography contract", scriptSource.includes("font-family: var(--editor-font-family)") && scriptSource.includes("font-size: var(--editor-font-size)") && scriptSource.includes("line-height: var(--editor-line-height)"));
-}
 }
 
 // jsdom ships no canvas implementation — the getContext "not implemented"

@@ -270,7 +270,10 @@ pub fn find_typst(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     }
     // Dev fallback: a typst on PATH. Warn-worthy in production, but it
     // keeps `cargo test` and local runs working before the fetch step.
-    if Command::new("typst").arg("--version").output().is_ok() {
+    let mut probe = Command::new("typst");
+    probe.arg("--version");
+    crate::procutil::hide_console(&mut probe);
+    if probe.output().is_ok() {
         return Some(PathBuf::from("typst"));
     }
     None
@@ -301,7 +304,8 @@ pub fn typst_available(resource_dir: Option<PathBuf>) -> bool {
         let output = dir.path().join("output.pdf");
         std::fs::write(&input, source).map_err(|e| format!("Temp write failed: {}", e))?;
 
-        let mut child = Command::new(bin)
+        let mut compile = Command::new(bin);
+        compile
             .arg("compile")
             // Root is the temp dir so no document-relative path can reach the
             // vault or the wider filesystem.
@@ -311,7 +315,9 @@ pub fn typst_available(resource_dir: Option<PathBuf>) -> bool {
             .arg(&output)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        crate::procutil::hide_console(&mut compile);
+        let mut child = compile
             .spawn()
             .map_err(|e| format!("Failed to run typst: {}", e))?;
 

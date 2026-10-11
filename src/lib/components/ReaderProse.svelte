@@ -69,11 +69,11 @@
 
   /* Fixed reading papers (theme="light|sepia|dark" ignore the app theme). */
   .reader-prose.theme-light {
-    --text-primary: #2b2a25;
-    --text-secondary: #5f5c50;
-    --text-muted: #5f5c50;
-    --accent-primary: #3f6656;
-    background: #f1efe6;
+    --text-primary: #2c2a26;
+    --text-secondary: #6b675f;
+    --text-muted: #6b675f;
+    --accent-primary: #8a6b2e;
+    background: #faf9f6;
   }
 
   .reader-prose.theme-sepia {
@@ -85,11 +85,11 @@
   }
 
   .reader-prose.theme-dark {
-    --text-primary: #ece7d8;
-    --text-secondary: #9c9686;
-    --text-muted: #9c9686;
-    --accent-primary: #8fc7a9;
-    background: #1b1a15;
+    --text-primary: #e8e4dc;
+    --text-secondary: #a39e94;
+    --text-muted: #a39e94;
+    --accent-primary: #c9a96e;
+    background: #1a1917;
   }
 
   .reader-prose.theme-light,

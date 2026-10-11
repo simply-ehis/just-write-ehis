@@ -63,7 +63,9 @@
         atlasStars = await api.atlasGetStars().catch(() => []);
       }
     } catch (e) {
-      console.warn("Home dashboard load failed:", e);
+      // Not just a console line: an empty catch made a failed load look
+      // exactly like an empty library ("No documents yet").
+      domainError("Home", "couldn't load dashboard", e);
     }
   });
 
@@ -219,7 +221,7 @@
       script: "Script",
       reader: "Reader",
       logs: "Logs",
-      inbox: "Inbox",
+      inbox: "Capture",
       properties: "Library",
       craft: "Craft",
       stats: "Stats",
@@ -291,9 +293,6 @@
             <button class="pinned-card" onclick={() => openPinned(doc)} title="Open {doc.title}">
               <span class="ws-icon"><Icon name={workspaceIcons[doc.workspace] ?? "files"} size={18} /></span>
               <span class="pinned-title">{doc.title}</span>
-              {#if doc.locked}
-                <span class="pinned-lock" title="Locked"><Icon name="lock" size={12} label="Locked" /></span>
-              {/if}
             </button>
           {/each}
         </div>
@@ -716,12 +715,6 @@
     white-space: nowrap;
     font-size: 12px;
     text-align: left;
-  }
-
-  .pinned-lock {
-    display: inline-flex;
-    color: var(--text-muted);
-    flex-shrink: 0;
   }
 
   .heatmap {

@@ -1,29 +1,34 @@
 """AI memory sidecar (vendored harness, adapted).
 
 Wraps `harness/memory.py` (vendored from small-model-harness, see
-harness/ATTRIBUTION.md) in the same stdlib HTTP shape as stt/tts_server.py.
-The desktop launcher supplies a per-process X-JWE-Memory-Token header.
+harness/ATTRIBUTION.md) over a private stdio JSON-line pipe. No TCP port,
+no HTTP: one JSON request object per line on stdin, one response line on
+stdout, diagnostics on stderr (stdout is reserved for frames).
 
-Endpoints (all JSON):
-  GET  /health          → {"status": "ok", "facts": N}
-  POST /learn   {text}  → {"stored": N}      (extract + store facts)
-  GET  /recall?q=...    → {"facts": "..."}   (prompt-ready block or "")
-  POST /redact  {text}  → {"text": "..."}    (secrets scrubbed)
-  POST /clear           → {"facts": 0}
+Request:  {"id": 1, "method": "health"|"learn"|"recall"|"redact"|"clear",
+           "params": {...}}
+Response: {"id": 1, "ok": true, "result": {...}}
+        or {"id": 1, "ok": false, "error": "..."}.
 
-Persistence: facts JSON at argv[2]/memory.json (default: alongside this
-script's working dir). argv[1] is the port, like the other sidecars.
+Methods (params → result):
+  health  {}                  → {"status": "ok", "facts": N}
+  learn   {text}              → {"stored": N}     (extract + store facts)
+  recall  {q}                 → {"facts": "..."}  (prompt-ready block or "")
+  redact  {text}              → {"text": "..."}   (secrets scrubbed)
+  clear   {}                  → {"facts": 0}
+
+The launcher sets JWE_MEMORY_TOKEN (still required at startup: the pipe
+is private, but the contract keeps old/new builds interchangeable).
+
+Persistence: facts JSON at argv[1]/memory.json (default: this script's
+working dir).
 
 Stdlib only — no new requirements.
 """
 
-import hmac
 import json
 import os
 import sys
-import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import parse_qs, urlparse
 
 HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -89,91 +94,61 @@ class MemoryStore:
                 )
             os.replace(tmp, self.path)
         except OSError as e:
-            print(f"[memory] save failed: {e}", flush=True)
+            print(f"[memory] save failed: {e}", file=sys.stderr, flush=True)
 
 
 STORE: MemoryStore | None = None
 
 
-class MemoryHandler(BaseHTTPRequestHandler):
-    def log_message(self, _fmt, *_args):
-        pass
+def _dispatch(method: str, params: dict) -> dict:
+    if method == "health":
+        return {"status": "ok", "facts": len(STORE.mem) if STORE else 0}
+    if STORE is None:
+        raise RuntimeError("store not ready")
+    if method == "learn":
+        stored = STORE.mem.learn_from_user_text(str(params.get("text", "")))
+        STORE.save()
+        return {"stored": len(stored)}
+    if method == "recall":
+        return {"facts": STORE.mem.build_memory_prompt(str(params.get("q", "")))}
+    if method == "redact":
+        return {"text": redact_secrets(str(params.get("text", "")))}
+    if method == "clear":
+        STORE.mem.clear()
+        STORE.save()
+        return {"facts": 0}
+    raise ValueError(f"unknown method: {method}")
 
-    def _json(self, data: dict, status: int = 200):
-        body = json.dumps(data).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
-    def _authorized(self) -> bool:
-        supplied = self.headers.get("X-JWE-Memory-Token", "")
-        if not AUTH_TOKEN or not hmac.compare_digest(supplied, AUTH_TOKEN):
-            self._json({"error": "unauthorized"}, 401)
-            return False
-        return True
-
-    def _body(self) -> dict:
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
-            length = 0
-        if length <= 0:
-            return {}
-        try:
-            return json.loads(self.rfile.read(length) or b"{}")
-        except ValueError:
-            return {}
-
-    def do_GET(self):
-        if not self._authorized():
-            return
-        parsed = urlparse(self.path)
-        if parsed.path == "/health":
-            self._json({"status": "ok", "facts": len(STORE.mem) if STORE else 0})
-        elif parsed.path == "/recall":
-            q = parse_qs(parsed.query).get("q", [""])[0]
-            block = STORE.mem.build_memory_prompt(q) if STORE else ""
-            self._json({"facts": block})
-        else:
-            self._json({"error": "unknown endpoint"}, 404)
-
-    def do_POST(self):
-        if not self._authorized():
-            return
-        if STORE is None:
-            self._json({"error": "store not ready"}, 500)
-            return
-        body = self._body()
-        if self.path == "/learn":
-            stored = STORE.mem.learn_from_user_text(str(body.get("text", "")))
-            STORE.save()
-            self._json({"stored": len(stored)})
-        elif self.path == "/redact":
-            self._json({"text": redact_secrets(str(body.get("text", "")))})
-        elif self.path == "/clear":
-            STORE.mem.clear()
-            STORE.save()
-            self._json({"facts": 0})
-        else:
-            self._json({"error": "unknown endpoint"}, 404)
+def _write(out, obj: dict) -> None:
+    out.write(json.dumps(obj) + "\n")
+    out.flush()
 
 
 def main():
     global STORE
     if not AUTH_TOKEN:
         raise RuntimeError("JWE_MEMORY_TOKEN is required")
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8092
-    data_dir = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    data_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
+    out = sys.stdout
+    sys.stdout = sys.stderr  # keep stdout pure frames; prints become logs
     STORE = MemoryStore(data_dir)
     print(
-        f"[memory] AI memory server on http://127.0.0.1:{port} "
-        f"({len(STORE.mem)} facts loaded)",
+        f"[memory] stdio sidecar ready ({len(STORE.mem)} facts loaded)",
         flush=True,
     )
-    server = HTTPServer(("127.0.0.1", port), MemoryHandler)
-    server.serve_forever()
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        rid = None
+        try:
+            req = json.loads(line)
+            rid = req.get("id")
+            result = _dispatch(str(req.get("method", "")), req.get("params") or {})
+            _write(out, {"id": rid, "ok": True, "result": result})
+        except Exception as e:
+            _write(out, {"id": rid, "ok": False, "error": str(e)})
 
 
 if __name__ == "__main__":

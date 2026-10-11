@@ -14,6 +14,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
   import { settings } from "$lib/stores/settings";
+  import { resolveThemeMode } from "$lib/appearance";
 
   const CARD_W = 200;
   // Card accent hues keep their meaning (amber = warning, forest = done…)
@@ -35,7 +36,7 @@
     rose: "#E11D48",
     forest: "#15803D",
   };
-  let COLORS = $derived($settings.themeMode === "light" ? CARD_COLORS_PAPER : CARD_COLORS_INK);
+  let COLORS = $derived(resolveThemeMode($settings.themeMode) === "light" ? CARD_COLORS_PAPER : CARD_COLORS_INK);
 
   let nodes = $state<CanvasNode[]>([]);
   let edges = $state<CanvasEdge[]>([]);

@@ -69,7 +69,7 @@ export const workspaces = [
   { id: "home", label: "Home", icon: "home" },
   { id: "logs", label: "Logs", icon: "calendar" },
   { id: "write", label: "Write", icon: "pencil" },
-  { id: "inbox", label: "Inbox", icon: "inbox" },
+  { id: "inbox", label: "Capture", icon: "inbox" },
   { id: "map", label: "Map", icon: "graph" },
   { id: "canvas", label: "Canvas", icon: "board" },
   { id: "novel", label: "Novel", icon: "book" },

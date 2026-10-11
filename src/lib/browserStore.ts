@@ -29,7 +29,6 @@ export interface BrowserDoc {
   deadline?: string | null;
   shelf_status?: string;
   rating?: number | null;
-  locked?: boolean;
 }
 
 export interface BrowserMetric {
@@ -345,7 +344,6 @@ class BrowserStore {
       frontmatter_json: frontmatterJson ?? null,
       activity_score: 1,
       embedding_ref: null,
-      locked: false,
     };
     this.docs.push(doc);
     this.touchDay();
@@ -452,12 +450,10 @@ class BrowserStore {
       .map((d) => ({ ...d }));
   }
 
-  /** Locked docs are invisible to search (content + titles). */
   search(query: string, workspace?: string): { doc: BrowserDoc; rank: number; snippet: string | null }[] {
     const q = query.trim().toLowerCase();
     const out: { doc: BrowserDoc; rank: number; snippet: string | null }[] = [];
     for (const doc of this.docs) {
-      if (doc.locked) continue;
       if (workspace && doc.workspace !== workspace) continue;
       if (!q) {
         out.push({ doc: { ...doc }, rank: 0, snippet: null });
@@ -597,18 +593,6 @@ class BrowserStore {
       .map((s) => ({ ...s }));
   }
 
-  setLocked(id: string, locked: boolean): void {
-    this.saveDoc(id, { locked });
-    if (!locked) return;
-    const affected = new Set<string>();
-    for (const doc of this.docs) {
-      if (doc.id === id || this.isDescendantOf(doc.id, id)) affected.add(doc.id);
-    }
-    this.bibleMentions = this.bibleMentions.filter((mention) => !affected.has(mention.doc_id));
-    this.bibleSuggestions = this.bibleSuggestions.filter((suggestion) => !affected.has(suggestion.source_doc_id));
-    this.persistBibleMemory();
-  }
-
   isDescendantOf(docId: string, ancestorId: string): boolean {
     let current = this.docs.find((doc) => doc.id === docId);
     const seen = new Set<string>();
@@ -625,7 +609,6 @@ class BrowserStore {
     if (!current) return false;
     const seen = new Set<string>();
     while (current && !seen.has(current.id)) {
-      if (current.locked) return false;
       seen.add(current.id);
       if (!current.parent_id) return true;
       current = this.docs.find((doc) => doc.id === current?.parent_id);
@@ -668,7 +651,7 @@ class BrowserStore {
     attributeValue: string | null,
   ): BrowserBibleMention {
     if (this.bibleScopeId(docId) !== scopeId) throw new Error("Mention source does not belong to this Story Bible");
-    if (!this.bibleSourceAllowed(scopeId) || !this.bibleSourceAllowed(docId)) throw new Error("Locked documents cannot receive Story Memory evidence");
+    if (!this.bibleSourceAllowed(scopeId) || !this.bibleSourceAllowed(docId)) throw new Error("Document scope is unavailable for Story Memory evidence");
     const doc = this.get(docId);
     const existing = this.bibleMentions.find((mention) =>
       mention.bible_doc_id === scopeId && mention.fact_key === factKey && mention.kind === kind &&
@@ -696,7 +679,7 @@ class BrowserStore {
 
   bibleDeleteMentions(scopeId: string, docId?: string, factKey?: string): void {
     if (!this.bibleSourceAllowed(scopeId) || (docId && (!this.bibleSourceAllowed(docId) || this.bibleScopeId(docId) !== scopeId))) {
-      throw new Error("Locked documents cannot modify Story Memory evidence");
+      throw new Error("Document scope is unavailable for Story Memory evidence");
     }
     this.bibleMentions = this.bibleMentions.filter((mention) =>
       mention.bible_doc_id !== scopeId ||
@@ -708,7 +691,7 @@ class BrowserStore {
 
   deleteBibleFact(factId: string): void {
     const fact = this.bible.find((item) => item.id === factId);
-    if (fact && !this.bibleSourceAllowed(fact.doc_id)) throw new Error("Locked documents cannot modify Story Memory evidence");
+    if (fact && !this.bibleSourceAllowed(fact.doc_id)) throw new Error("Document scope is unavailable for Story Memory evidence");
     this.bible = this.bible.filter((item) => item.id !== factId);
     if (fact) {
       this.bibleMentions = this.bibleMentions.filter((mention) => mention.bible_doc_id !== fact.doc_id || mention.fact_key !== fact.key);

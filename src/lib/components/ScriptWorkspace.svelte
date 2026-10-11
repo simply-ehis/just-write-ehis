@@ -22,7 +22,7 @@
   let showCast = $state(false);
   let roles = $state<Array<{ id: string; name: string; color: string; assignedTo: string }>>([]);
   let newRoleName = $state('');
-  let newRoleColor = $state('#8FC7A9');
+  let newRoleColor = $state('#C9A96E');
   let listCollapsed = $state(false);
   // Debounce handle: plain let, only touched in event handlers (never in
   // an $effect), so it can't resubscribe anything.

@@ -5,8 +5,8 @@ import { normalizeCharacters } from "$lib/autocorrect";
 
 describe("validateSettings", () => {
   it("accepts known keys with valid values", () => {
-    const r = validateSettings({ lockEnabled: true, backupFrequency: "weekly" });
-    expect(r.valid).toMatchObject({ lockEnabled: true, backupFrequency: "weekly" });
+    const r = validateSettings({ backupFrequency: "weekly", snapshotRetentionDays: 30 });
+    expect(r.valid).toMatchObject({ backupFrequency: "weekly", snapshotRetentionDays: 30 });
     expect(r.rejected).toEqual([]);
   });
 
@@ -23,9 +23,16 @@ describe("validateSettings", () => {
   });
 
   it("routes secrets aside instead of validating them", () => {
-    const r = validateSettings({ apiKey: "sk-x", lockEnabled: false });
+    const r = validateSettings({ apiKey: "sk-x", fontSize: 18 });
     expect(r.secrets).toEqual(["apiKey"]);
-    expect(r.valid).toMatchObject({ lockEnabled: false });
+    expect(r.valid).toMatchObject({ fontSize: 18 });
+  });
+
+  it("rejects removed lock keys", () => {
+    const r = validateSettings({ lockEnabled: true, appLockPin: "1234" });
+    expect(r.rejected).toEqual(expect.arrayContaining(["lockEnabled", "appLockPin"]));
+    expect("lockEnabled" in r.valid).toBe(false);
+    expect("appLockPin" in r.valid).toBe(false);
   });
 
   it("clampNumber clamps ranged keys and rejects the rest", () => {

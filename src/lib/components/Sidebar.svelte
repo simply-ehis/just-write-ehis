@@ -17,11 +17,12 @@
   import Icon from "$lib/components/Icon.svelte";
   import { formatRelativeTime } from "$lib/text";
   import { domainError } from "$lib/errors";
+  import { resolveThemeMode } from "$lib/appearance";
 
   // Ehis pen mark — nib crop for the 20px home icon, full wordmark for
   // the sidebar header. Theme-aware: dark ink on paper, paper ink on dark/glass.
-  let markSrc = $derived($settings.themeMode === "dark" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
-  let logoSrc = $derived($settings.themeMode === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
+  let markSrc = $derived(resolveThemeMode($settings.themeMode) === "dark" ? "ehis-mark-light.svg" : "ehis-mark-dark.svg");
+  let logoSrc = $derived(resolveThemeMode($settings.themeMode) === "dark" ? "ehis-logo-light.svg" : "ehis-logo-dark.svg");
 
   const wsIcons = workspaceIcons;
 
@@ -69,8 +70,8 @@
   });
 
   // Hidden from the sidebar (still reachable via command palette Ctrl+K
-  // and direct navigation): null = default hides (Inbox + Canvas are
-  // power-user surfaces). "files" is not a route anymore — it deep-links
+  // and direct navigation): null = default hides (Canvas is a
+  // power-user surface). "files" is not a route anymore — it deep-links
   // to Library's Files tab — so it never renders here, hidden or not.
   const DEFAULT_HIDDEN_IDS = DEFAULT_HIDDEN_WORKSPACES;
   let effectiveHidden = $derived($settings.hiddenIds ?? DEFAULT_HIDDEN_IDS);
@@ -157,7 +158,7 @@
     recordWorkspaceVisit(id);
   }
 
-  // Overflow menu: workspaces hidden from the sidebar (Inbox + Canvas by
+  // Overflow menu: workspaces hidden from the sidebar (Canvas by
   // default, plus anything the user hides in Settings) stay one tap away
   // at the bottom of the tab list. "files" is virtual (Library owns it).
   let showMoreWorkspaces = $state(false);
@@ -235,7 +236,7 @@
             data-ws={ws.id}
             onclick={() => selectWorkspace(ws.id)}
             title={`${ws.label} — pinned in onboarding`}
-            aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
+            aria-label={ws.id === "inbox" && inboxCount ? `Capture, ${inboxCount} untriaged` : ws.label}
           >
             <span class="nav-icon">
               {#if ws.id === "home"}
@@ -267,7 +268,7 @@
         ondrop={(e) => handleWsDrop(ws.id, e)}
         ondragend={() => (dragWsId = null)}
         title={ws.id === "home" ? ws.label : ws.id === "inbox" ? `${ws.label} — untriaged captures` : `${ws.label} — ${wsTips[ws.id] ?? "workspace"}`}
-        aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
+        aria-label={ws.id === "inbox" && inboxCount ? `Capture, ${inboxCount} untriaged` : ws.label}
       >
         <span class="nav-icon">
           {#if ws.id === "home"}
@@ -305,7 +306,7 @@
               data-ws={ws.id}
               onclick={() => selectWorkspace(ws.id)}
               title={`${ws.label} — hidden from the tab list`}
-              aria-label={ws.id === "inbox" && inboxCount ? `Inbox, ${inboxCount} untriaged` : ws.label}
+              aria-label={ws.id === "inbox" && inboxCount ? `Capture, ${inboxCount} untriaged` : ws.label}
             >
               <span class="nav-icon"><Icon name={wsIcons[ws.id] ?? "files"} size={17} /></span>
               <span>{ws.label}</span>

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1B1A15" />
+    <meta name="theme-color" content="#FAF9F6" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -19,11 +19,23 @@
     <script>
       try {
         var s = JSON.parse(localStorage.getItem("writing-app-settings") || "{}");
+        // One-time design migration (v1): warm paper + gold palette, serif
+        // (Georgia) editor. Runs here so first paint matches the app, and
+        // settingsVersion makes it fire exactly once — a deliberate switch
+        // back to dark/mono later is preserved.
+        if (typeof s.settingsVersion !== "number" || s.settingsVersion < 1) {
+          if (s.themeMode === "dark") s.themeMode = "light";
+          if (s.fontFamily === "JetBrains Mono") s.fontFamily = "Georgia";
+          s.settingsVersion = 1;
+          try { localStorage.setItem("writing-app-settings", JSON.stringify(s)); } catch (e) {}
+        }
         // Legacy single-theme installs migrate: dark/brutalist/glass = dark
         // base, light = light base; style defaults to the plain room.
         var legacy = s.theme;
         var style = (legacy === "brutalist" || legacy === "glass") ? legacy : "default";
-        var mode = s.themeMode === "light" || (s.themeMode !== "dark" && legacy === "light") ? "light" : "dark";
+        var mode = s.themeMode === "light" || (s.themeMode !== "dark" && s.themeMode !== "system" && legacy === "light") ? "light"
+          : s.themeMode === "system" ? (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
+          : "dark";
         document.documentElement.dataset.theme = style;
         document.documentElement.dataset.mode = mode;
         var st = document.documentElement.style;
@@ -33,11 +45,14 @@
           st.setProperty("--accent-primary", hex);
           st.setProperty("--accent-write", hex);
         }
-        var editorFonts = ["JetBrains Mono", "Fira Code", "Source Code Pro", "IBM Plex Mono", "Cascadia Code", "Consolas", "monospace"];
-        var editorFont = editorFonts.includes(s.fontFamily) ? s.fontFamily : "JetBrains Mono";
+        var editorFonts = ["Georgia", "JetBrains Mono", "Fira Code", "Source Code Pro", "IBM Plex Mono", "Cascadia Code", "Consolas", "monospace"];
+        var editorFont = editorFonts.includes(s.fontFamily) ? s.fontFamily : "Georgia";
         var fontSize = Math.min(32, Math.max(10, Number(s.fontSize) || 15));
         var lineHeight = Math.min(3, Math.max(1, Number(s.lineHeight) || 1.7));
-        st.setProperty("--editor-font-family", editorFont === "monospace" ? "monospace" : '"' + editorFont + '", "Cascadia Code", Consolas, monospace');
+        var fontStack = editorFont === "monospace" ? "monospace"
+          : editorFont === "Georgia" ? 'Georgia, "Times New Roman", serif'
+          : '"' + editorFont + '", "Cascadia Code", Consolas, monospace';
+        st.setProperty("--editor-font-family", fontStack);
         st.setProperty("--editor-font-size", fontSize + "px");
         st.setProperty("--editor-line-height", String(lineHeight));
       } catch (e) {}

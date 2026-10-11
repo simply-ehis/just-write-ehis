@@ -127,7 +127,6 @@ export interface Doc {
   pinned?: boolean;
   goal_words?: number | null;
   deadline?: string | null;
-  locked?: boolean;
 }
 
 export interface Backlink {
@@ -743,6 +742,9 @@ export const api = {
   sidecarPythonProbe: (pythonPath: string) =>
     safeInvoke<string>("sidecar_python_probe", { pythonPath }),
 
+  sidecarsDir: () =>
+    safeInvoke<string>("sidecars_dir"),
+
   memoryGetStreak: () =>
     safeInvoke<[number, number]>("memory_get_streak"),
 
@@ -831,9 +833,6 @@ export const api = {
   sttHealth: () =>
     safeInvoke<{ status: string; ready: boolean; model_loaded: boolean; model?: string; error?: string }>("stt_health"),
 
-  sttPort: () =>
-    safeInvoke<number>("stt_port"),
-
   sttTranscribe: (audio: string, format: string) =>
     safeInvoke<string>("stt_transcribe", { audio, format }),
 
@@ -859,9 +858,6 @@ export const api = {
   ttsHealth: () =>
     safeInvoke<{ status: string; ready: boolean; model_loaded: boolean; error?: string }>("tts_health"),
 
-  ttsPort: () =>
-    safeInvoke<number>("tts_port"),
-
   ttsSynthesize: (text: string, voice: string, speed: number, langCode: string, splitPattern: string, chunkSize: number) =>
     safeInvoke<[string, number]>("tts_synthesize", { text, voice, speed, langCode, splitPattern, chunkSize }),
 
@@ -881,9 +877,6 @@ export const api = {
   llmHealth: () =>
     safeInvoke<{ status: string; model?: string; error?: string }>("llm_health"),
 
-  llmPort: () =>
-    safeInvoke<number>("llm_port"),
-
   llmCompletion: (prompt: string, maxTokens: number, temperature: number) =>
     safeInvoke<string>("llm_completion", { prompt, maxTokens, temperature }),
 
@@ -901,9 +894,6 @@ export const api = {
 
   convertStatus: () =>
     safeInvoke<ConvertStatus>("convert_status"),
-
-  docSetLocked: (id: string, locked: boolean) =>
-    safeInvoke<void>("doc_set_locked", { id, locked }),
 
   docListPinned: () =>
     safeInvoke<Doc[]>("doc_list_pinned"),
@@ -1001,19 +991,10 @@ export const api = {
     safeInvoke<AtlasStar[]>("atlas_get_stars"),
 
   // ── OS keychain secrets (never persisted to localStorage) ──────
-  secretSet: (key: "apiKey" | "appLockPin", value: string) =>
+  secretSet: (key: "apiKey", value: string) =>
     safeInvoke<void>("secret_set", { key, value }),
 
-  secretGet: (key: "apiKey" | "appLockPin") =>
+  secretGet: (key: "apiKey") =>
     safeInvoke<string | null>("secret_get", { key }),
-
-  appLockConfigured: () =>
-    safeInvoke<boolean>("app_lock_configured"),
-
-  appLockVerify: (pin: string) =>
-    safeInvoke<{ verified: boolean; retry_after_ms: number }>("app_lock_verify", { pin }),
-
-  appLockReset: () =>
-    safeInvoke<void>("app_lock_reset"),
 
 };

@@ -10,6 +10,9 @@
  * per combination. Unknown styles fall back to default, modes to dark.
  */
 import { EDITOR_FONT_VALUES } from "./settingsValidate";
+import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
+import type { Extension } from "@codemirror/state";
+import { tags as t } from "@lezer/highlight";
 
 export interface EditorPalette {
   bg: string;
@@ -28,43 +31,43 @@ export interface EditorPalette {
 
 const PALETTES: Record<string, EditorPalette> = {
   light: {
-    bg: "#F1EFE6", fg: "#2B2A25", muted: "#5F5C50", overlay: "#EBE7D9",
-    accent: "#3F6656",
-    sel: "#3F665630", selFocus: "#3F665640",
-    match: "#3F665640", matchSel: "#3F665680",
+    bg: "#FAF9F6", fg: "#2C2A26", muted: "#6B675F", overlay: "#F0EDE5",
+    accent: "#8A6B2E",
+    sel: "#C9A96E40", selFocus: "#C9A96E59",
+    match: "#C9A96E59", matchSel: "#C9A96E8C",
     radius: "6px",
   },
   dark: {
-    bg: "#100E0B", fg: "#ECE7D8", muted: "#9C9686", overlay: "#1C1815",
-    accent: "#8FC7A9",
-    sel: "#8FC7A930", selFocus: "#8FC7A940",
-    match: "#8FC7A940", matchSel: "#8FC7A980",
+    bg: "#1A1917", fg: "#E8E4DC", muted: "#A39E94", overlay: "#242320",
+    accent: "#C9A96E",
+    sel: "#C9A96E33", selFocus: "#C9A96E4D",
+    match: "#C9A96E4D", matchSel: "#C9A96E80",
     radius: "6px",
   },
   brutalist: {
-    bg: "#100E0B", fg: "#ECE7D8", muted: "#9C9686", overlay: "#1C1815",
+    bg: "#1A1917", fg: "#E8E4DC", muted: "#A39E94", overlay: "#242320",
     accent: "#FFB000",
     sel: "#FFB00030", selFocus: "#FFB00040",
     match: "#FFB00040", matchSel: "#FFB00080",
     radius: "0",
   },
   "brutalist-light": {
-    bg: "#F1EFE6", fg: "#2B2A25", muted: "#5F5C50", overlay: "#EBE7D9",
+    bg: "#FAF9F6", fg: "#2C2A26", muted: "#6B675F", overlay: "#F0EDE5",
     accent: "#FFB000",
-    sel: "#FFB00030", selFocus: "#FFB00040",
-    match: "#FFB00040", matchSel: "#FFB00080",
+    sel: "#FFB00040", selFocus: "#FFB00059",
+    match: "#FFB00059", matchSel: "#FFB0008C",
     radius: "0",
   },
   glass: {
-    bg: "rgba(10,10,10,0.55)", fg: "#ECE7D8", muted: "#9C9686",
+    bg: "rgba(10,10,10,0.55)", fg: "#E8E4DC", muted: "#A39E94",
     overlay: "rgba(255,255,255,0.07)", accent: "#A9E8C6",
     sel: "rgba(143,199,169,0.3)", selFocus: "rgba(143,199,169,0.35)",
     match: "rgba(143,199,169,0.3)", matchSel: "rgba(143,199,169,0.45)",
     radius: "14px",
   },
   "glass-light": {
-    bg: "rgba(250,249,243,0.72)", fg: "#2B2A25", muted: "#5F5C50",
-    overlay: "rgba(43,42,37,0.07)", accent: "#1F7A52",
+    bg: "rgba(250,249,243,0.72)", fg: "#2C2A26", muted: "#6B675F",
+    overlay: "rgba(44,42,38,0.07)", accent: "#1F7A52",
     sel: "rgba(31,122,82,0.18)", selFocus: "rgba(31,122,82,0.25)",
     match: "rgba(31,122,82,0.18)", matchSel: "rgba(31,122,82,0.3)",
     radius: "14px",
@@ -76,6 +79,44 @@ export function editorPalette(style: string, mode = "dark"): EditorPalette {
     return PALETTES[mode === "light" ? `${style}-light` : style] ?? PALETTES.dark;
   }
   return PALETTES[mode === "light" ? "light" : "dark"];
+}
+
+/**
+ * Markdown syntax coloring for the editor. Prose stays the body color so
+ * the page reads like paper; only structure is tinted, and the punctuation
+ * you type (##, **, -, >) drops to muted so words carry the weight.
+ *
+ * Compose AFTER the theme inside the same compartment: the highlight style
+ * must come later than the base theme to win the cascade, and later than
+ * the markdown parser's own default highlight fallback.
+ */
+export function markdownSyntaxTheme(p: EditorPalette): Extension {
+  const dim = { color: p.muted };
+  return [
+    syntaxHighlighting(
+      HighlightStyle.define([
+        { tag: t.heading1, color: p.accent, fontWeight: "700", fontSize: "1.35em" },
+        { tag: t.heading2, color: p.accent, fontWeight: "700", fontSize: "1.2em" },
+        { tag: t.heading3, color: p.accent, fontWeight: "600", fontSize: "1.1em" },
+        { tag: [t.heading4, t.heading5, t.heading6], color: p.accent, fontWeight: "600" },
+        { tag: t.strong, fontWeight: "700" },
+        { tag: t.emphasis, fontStyle: "italic" },
+        { tag: t.strikethrough, textDecoration: "line-through" },
+        { tag: t.link, color: p.accent, textDecoration: "underline" },
+        { tag: t.url, color: p.accent, textDecoration: "underline" },
+        { tag: t.monospace, color: p.muted, backgroundColor: p.overlay },
+        { tag: t.quote, color: p.muted, fontStyle: "italic" },
+        { tag: t.list, color: p.muted },
+        // Syntax markers: dim the punctuation, never the words it wraps.
+        // In the markdown grammar the `#`/`-`/`>` marker glyphs themselves
+        // tokenize as comments, so dimming t.comment is what keeps them quiet.
+        { tag: [t.comment, t.processingInstruction], ...dim },
+      ]),
+      // fallback: our style wins over the parser's built-in default, so
+      // markers stay muted instead of flashing the parser's own colors.
+      { fallback: true },
+    ),
+  ];
 }
 
 /** Autocorrect suggestion underline — theme warning via CSS var. */
@@ -139,6 +180,9 @@ export function editorFontStack(font: string): string {
     ? (font as EditorFont)
     : "JetBrains Mono";
   switch (selected) {
+    case "Georgia":
+      // The Apple-Notes-style writing face: a system serif, no download.
+      return `Georgia, "Times New Roman", serif`;
     case "JetBrains Mono":
       return `"JetBrains Mono", "Cascadia Code", Consolas, monospace`;
     case "Fira Code":

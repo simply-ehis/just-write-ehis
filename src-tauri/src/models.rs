@@ -23,8 +23,6 @@ pub struct Doc {
     pub goal_words: Option<i64>,
     #[serde(default)]
     pub deadline: Option<String>,
-    #[serde(default)]
-    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

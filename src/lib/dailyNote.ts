@@ -7,6 +7,7 @@ import { get } from "svelte/store";
 import { api } from "$lib/api";
 import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
 import { createDocFromTemplate } from "$lib/stores/templates";
+import { domainError } from "$lib/errors";
 
 export async function openDailyNote(): Promise<void> {
   // Local calendar day (not UTC): toISOString at 11pm local already reads
@@ -38,6 +39,8 @@ export async function openDailyNote(): Promise<void> {
       openTabs.set([doc, ...get(openTabs)]);
     }
   } catch (e) {
-    console.error("Failed to open daily note:", e);
+    // The palette/PWA "Daily note" action must never fail silently — the
+    // user pressed a button and nothing happened.
+    domainError("Daily note", "couldn't open today's note", e);
   }
 }

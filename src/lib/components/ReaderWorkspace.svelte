@@ -36,6 +36,8 @@
   let readerPosition = $state(0);
   let scrollEl = $state<HTMLElement | null>(null);
   let posSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** One latched "couldn't save position" toast per failure streak. */
+  let posSaveFailed = false;
 
   // Structured reading flow: the stored body (markdown + transclude
   // islands) is split into sections, each rendered through the shared
@@ -375,7 +377,18 @@
       anchor = anchorFor(measuredSections(), el.scrollTop + el.clientHeight * 0.4);
       if (!anchor.section) anchor = { section: null, ratio: readerPosition };
     }
-    await api.readerUpdatePosition(selectedBook.doc.id, readerPosition);
+    try {
+      await api.readerUpdatePosition(selectedBook.doc.id, readerPosition);
+      posSaveFailed = false;
+    } catch (e) {
+      // Debounced to 1.5s during scroll: toast once per failure streak,
+      // not once per tick.
+      if (!posSaveFailed) {
+        posSaveFailed = true;
+        domainError("Reader", "couldn't save reading position", e);
+      }
+      return;
+    }
     try {
       const fm = JSON.parse(selectedBook.doc.frontmatter_json ?? "{}");
       fm.readerAnchor = anchor;

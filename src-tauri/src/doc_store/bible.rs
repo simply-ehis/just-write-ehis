@@ -20,23 +20,6 @@
         }
     }
 
-    fn bible_source_allowed_tx(tx: &Transaction<'_>, doc_id: &str) -> Result<bool, String> {
-        let mut current = doc_id.to_string();
-        let mut seen = HashSet::new();
-        loop {
-            let row: Option<(Option<String>, i64)> = tx.query_row(
-                "SELECT parent_id, locked FROM docs WHERE id = ?1",
-                params![&current],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            ).ok();
-            let Some((parent_id, locked)) = row else { return Ok(false) };
-            if locked != 0 || !seen.insert(current.clone()) { return Ok(false); }
-            let Some(parent_id) = parent_id else { return Ok(true) };
-            if parent_id == current { return Ok(false) };
-            current = parent_id;
-        }
-    }
-
     fn bible_scope_id_tx(tx: &Transaction<'_>, doc_id: &str) -> Result<String, String> {
         let mut current = doc_id.to_string();
         let mut seen = HashSet::new();
@@ -54,27 +37,7 @@
         }
     }
 
-    pub fn bible_source_allowed(&self, doc_id: &str) -> Result<bool, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut current = doc_id.to_string();
-        let mut seen = HashSet::new();
-        loop {
-            let row: Option<(Option<String>, i64)> = conn.query_row(
-                "SELECT parent_id, locked FROM docs WHERE id = ?1",
-                params![&current],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            ).ok();
-            let Some((parent_id, locked)) = row else { return Ok(false) };
-            if locked != 0 || !seen.insert(current.clone()) { return Ok(false); }
-            let Some(parent_id) = parent_id else { return Ok(true) };
-            if parent_id == current { return Ok(false); }
-            current = parent_id;
-        }
-    }
     pub fn bible_get_facts(&self, doc_id: &str) -> Result<Vec<BibleFact>, String> {
-        if !self.bible_source_allowed(doc_id)? {
-            return Ok(Vec::new());
-        }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, doc_id, kind, key, value FROM bible_facts WHERE doc_id = ?1 ORDER BY kind, key"
@@ -89,8 +52,8 @@
     }
 
     pub fn bible_upsert_fact(&self, doc_id: &str, kind: &str, key: &str, value: &str) -> Result<BibleFact, String> {
-        if self.bible_scope_id(doc_id)? != doc_id || !self.bible_source_allowed(doc_id)? {
-            return Err("Story Bible facts require an unlocked project scope".into());
+        if self.bible_scope_id(doc_id)? != doc_id {
+            return Err("Story Bible facts require a project scope".into());
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let existing: Option<String> = conn.query_row(
@@ -116,17 +79,6 @@
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).ok();
         if let Some((doc_id, key)) = fact {
-            if !Self::bible_source_allowed_tx(&tx, &doc_id)? {
-                return Err("Locked documents cannot modify Story Memory evidence".into());
-            }
-            let mut stmt = tx.prepare("SELECT DISTINCT source_id FROM (SELECT doc_id AS source_id FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2 UNION SELECT source_doc_id AS source_id FROM bible_suggestions WHERE bible_doc_id = ?1 AND key = ?2)")
-                .map_err(|e| e.to_string())?;
-            let sources: Vec<String> = stmt.query_map(params![&doc_id, &key], |row| row.get(0))
-                .map_err(|e| e.to_string())?.filter_map(|row| row.ok()).collect();
-            drop(stmt);
-            if sources.iter().any(|source| !Self::bible_source_allowed_tx(&tx, source).unwrap_or(false)) {
-                return Err("Locked documents cannot modify Story Memory evidence".into());
-            }
             tx.execute("DELETE FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2", params![doc_id, key])
                 .map_err(|e| e.to_string())?;
             tx.execute("DELETE FROM bible_suggestions WHERE bible_doc_id = ?1 AND key = ?2", params![doc_id, key])
@@ -144,8 +96,7 @@
             "SELECT m.id, m.bible_doc_id, m.fact_key, m.kind, m.doc_id, COALESCE(d.title, ''), m.snippet, m.attribute_key, m.attribute_value, COALESCE(d.content, ''), m.created_at
              FROM bible_mentions m
              LEFT JOIN docs d ON d.id = m.doc_id
-             LEFT JOIN docs b ON b.id = m.bible_doc_id
-             WHERE m.bible_doc_id = ?1 AND COALESCE(d.locked, 0) = 0 AND COALESCE(b.locked, 0) = 0 ORDER BY d.title, m.created_at"
+             WHERE m.bible_doc_id = ?1 ORDER BY d.title, m.created_at"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map(params![bible_doc_id], bible_mention_from_row)
             .map_err(|e| e.to_string())?;
@@ -153,9 +104,7 @@
         drop(stmt);
         drop(conn);
         Ok(rows.into_iter().filter(|mention| {
-            self.bible_source_allowed(bible_doc_id).unwrap_or(false)
-                && self.bible_scope_id(&mention.doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
-                && self.bible_source_allowed(&mention.doc_id).unwrap_or(false)
+            self.bible_scope_id(&mention.doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
         }).collect())
     }
 
@@ -168,9 +117,6 @@
         let actual_scope = Self::bible_scope_id_tx(&tx, doc_id)?;
         if actual_scope != bible_doc_id {
             return Err("Mention source does not belong to this Story Bible".into());
-        }
-        if !Self::bible_source_allowed_tx(&tx, doc_id)? || !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
-            return Err("Locked documents cannot receive Story Memory evidence".into());
         }
         let existing: Option<String> = tx.query_row(
             "SELECT id FROM bible_mentions WHERE bible_doc_id = ?1 AND fact_key = ?2 AND kind = ?3 AND doc_id = ?4 AND snippet = ?5 AND attribute_key IS ?6 AND attribute_value IS ?7 LIMIT 1",
@@ -193,21 +139,9 @@
     pub fn bible_delete_mentions(&self, bible_doc_id: &str, doc_id: Option<&str>, fact_key: Option<&str>) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        if !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
-            return Err("Locked documents cannot modify Story Memory evidence".into());
-        }
         if let Some(source_doc_id) = doc_id {
-            if Self::bible_scope_id_tx(&tx, source_doc_id)? != bible_doc_id || !Self::bible_source_allowed_tx(&tx, source_doc_id)? {
-                return Err("Mention source does not belong to an unlocked Story Bible".into());
-            }
-        } else {
-            let mut stmt = tx.prepare("SELECT DISTINCT doc_id FROM bible_mentions WHERE bible_doc_id = ?1")
-                .map_err(|e| e.to_string())?;
-            let sources: Vec<String> = stmt.query_map(params![bible_doc_id], |row| row.get(0))
-                .map_err(|e| e.to_string())?.filter_map(|row| row.ok()).collect();
-            drop(stmt);
-            if sources.iter().any(|source| !Self::bible_source_allowed_tx(&tx, source).unwrap_or(false)) {
-                return Err("Locked documents cannot modify Story Memory evidence".into());
+            if Self::bible_scope_id_tx(&tx, source_doc_id)? != bible_doc_id {
+                return Err("Mention source does not belong to this Story Bible".into());
             }
         }
         tx.execute(
@@ -224,8 +158,7 @@
             "SELECT s.id, s.bible_doc_id, s.source_doc_id, COALESCE(d.title, ''), s.kind, s.key, s.value, s.snippet, s.attribute_key, s.attribute_value, s.status, COALESCE(d.content, ''), s.created_at
              FROM bible_suggestions s
              LEFT JOIN docs d ON d.id = s.source_doc_id
-             LEFT JOIN docs b ON b.id = s.bible_doc_id
-             WHERE s.bible_doc_id = ?1 AND s.status = 'pending' AND COALESCE(d.locked, 0) = 0 AND COALESCE(b.locked, 0) = 0 ORDER BY s.created_at"
+             WHERE s.bible_doc_id = ?1 AND s.status = 'pending' ORDER BY s.created_at"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map(params![bible_doc_id], bible_suggestion_from_row)
             .map_err(|e| e.to_string())?;
@@ -233,25 +166,20 @@
         drop(stmt);
         drop(conn);
         Ok(rows.into_iter().filter(|suggestion| {
-            self.bible_source_allowed(bible_doc_id).unwrap_or(false)
-                && self.bible_scope_id(&suggestion.source_doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
-                && self.bible_source_allowed(&suggestion.source_doc_id).unwrap_or(false)
+            self.bible_scope_id(&suggestion.source_doc_id).map(|scope| scope == bible_doc_id).unwrap_or(false)
         }).collect())
     }
 
     pub fn bible_reject_suggestion(&self, bible_doc_id: &str, suggestion_id: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        if !Self::bible_source_allowed_tx(&tx, bible_doc_id)? {
-            return Err("Locked documents cannot modify Story Memory evidence".into());
-        }
         let source_doc_id: String = tx.query_row(
             "SELECT source_doc_id FROM bible_suggestions WHERE bible_doc_id = ?1 AND id = ?2 AND status = 'pending'",
             params![bible_doc_id, suggestion_id],
             |row| row.get(0),
         ).map_err(|_| "Suggestion not found".to_string())?;
-        if Self::bible_scope_id_tx(&tx, &source_doc_id)? != bible_doc_id || !Self::bible_source_allowed_tx(&tx, &source_doc_id)? {
-            return Err("Suggestion source does not belong to an unlocked Story Bible".into());
+        if Self::bible_scope_id_tx(&tx, &source_doc_id)? != bible_doc_id {
+            return Err("Suggestion source does not belong to this Story Bible".into());
         }
         tx.execute("UPDATE bible_suggestions SET status = 'rejected' WHERE bible_doc_id = ?1 AND id = ?2 AND status = 'pending'", params![bible_doc_id, suggestion_id])
             .map_err(|e| e.to_string())?;
@@ -260,9 +188,6 @@
     }
 
     pub fn bible_confirm_suggestion(&self, bible_doc_id: &str, suggestion_id: &str) -> Result<BibleFact, String> {
-        if !self.bible_source_allowed(bible_doc_id)? {
-            return Err("Locked documents cannot confirm Story Memory evidence".into());
-        }
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         let suggestion = {
@@ -278,7 +203,7 @@
         let source_scope = Self::bible_scope_id_tx(&tx, &suggestion.source_doc_id)?;
         let source_content: Option<String> = tx.query_row("SELECT content FROM docs WHERE id = ?1", params![&suggestion.source_doc_id], |row| row.get(0))
             .map_err(|e| e.to_string())?;
-        if source_scope != bible_doc_id || !Self::bible_source_allowed_tx(&tx, &suggestion.source_doc_id)? {
+        if source_scope != bible_doc_id {
             return Err("Suggestion source is no longer in this Story Bible".into());
         }
         if !source_content.unwrap_or_default().contains(&suggestion.snippet) {
@@ -329,8 +254,8 @@
             }
         }
         let actual_scope = Self::bible_scope_id_tx(&tx, doc_id)?;
-        if actual_scope != bible_doc_id || !Self::bible_source_allowed_tx(&tx, bible_doc_id)? || !Self::bible_source_allowed_tx(&tx, doc_id)? {
-            return Err("Mention source does not belong to an unlocked Story Bible".into());
+        if actual_scope != bible_doc_id {
+            return Err("Mention source does not belong to this Story Bible".into());
         }
         if !content.trim().is_empty() && candidates.is_empty() {
             return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
@@ -417,7 +342,7 @@
                  UNION
                  SELECT d.id FROM docs d JOIN descendants p ON d.parent_id = p.id
              )
-             SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline, d.locked
+             SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline
              FROM docs d JOIN descendants x ON d.id = x.id ORDER BY d.created_at"
         ).map_err(|e| e.to_string())?;
         let rows = stmt.query_map(params![project_id], |row| Ok(Doc {
@@ -425,7 +350,7 @@
             parent_id: row.get(5)?, created_at: row.get(6)?, updated_at: row.get(7)?, content: row.get(8)?,
             word_count: row.get(9)?, reading_position: row.get(10)?, status: row.get(11)?, frontmatter_json: row.get(12)?,
             activity_score: row.get(13)?, embedding_ref: row.get(14)?, pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-            goal_words: row.get(16)?, deadline: row.get(17)?, locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
+            goal_words: row.get(16)?, deadline: row.get(17)?,
         })).map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }

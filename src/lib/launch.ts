@@ -162,7 +162,7 @@ export async function pinCaptureNotification(): Promise<string> {
     if (!("serviceWorker" in navigator)) throw new Error("no service worker");
     const reg = await navigator.serviceWorker.ready;
     await reg.showNotification("Quick capture", {
-      body: "Tap to capture to Inbox",
+      body: "Tap to capture",
       tag: "jwe-capture",
       renotify: false,
       data: { url: `${location.origin}${location.pathname}?capture=inbox` },
@@ -172,7 +172,7 @@ export async function pinCaptureNotification(): Promise<string> {
     // No SW (Tauri shell, insecure context): fall back to a page
     // notification, which still works while the app is open.
     try {
-      new Notification("Quick capture", { body: "App is open — use the Inbox capture box.", tag: "jwe-capture" });
+      new Notification("Quick capture", { body: "App is open — use the Capture box.", tag: "jwe-capture" });
       return "Pinned for this session (no service worker here, so it won't survive app close).";
     } catch {
       return "Couldn't show the notification.";

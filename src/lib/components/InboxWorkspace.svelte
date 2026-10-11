@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api, type Doc } from "$lib/api";
-  import { currentDoc, openTabs } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { capturePrefill, captureFocus } from "$lib/stores/capture";
   import Icon from "$lib/components/Icon.svelte";
   import QuickCaptureInput from "$lib/components/QuickCaptureInput.svelte";
   import DocDetail from "$lib/components/DocDetail.svelte";
   import DockSplit from "$lib/components/DockSplit.svelte";
-import { formatRelativeTime } from "$lib/text";
+  import { formatRelativeTime } from "$lib/text";
   import { domainError } from "$lib/errors";
+  import { showToast } from "$lib/stores/notifications";
 
   let inboxItems = $state<Doc[]>([]);
   let loading = $state(false);
@@ -32,7 +33,7 @@ import { formatRelativeTime } from "$lib/text";
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
     } catch (e) {
-      domainError("Inbox", "couldn't load captures", e);
+      domainError("Capture", "couldn't load captures", e);
     }
     loading = false;
   }
@@ -43,8 +44,11 @@ import { formatRelativeTime } from "$lib/text";
       const doc = await api.docCreate("inbox", "snippet", quickCapture.trim().slice(0, 80), undefined, quickCapture.trim());
       inboxItems = [doc, ...inboxItems];
       quickCapture = "";
+      // Same feedback the Quick Capture overlay gives — the box clears,
+      // so silence would read as "did that even save?".
+      showToast("Saved to Capture", "success");
     } catch (e) {
-      domainError("Inbox", "couldn't save capture", e);
+      domainError("Capture", "couldn't save capture", e);
     }
   }
 
@@ -76,7 +80,7 @@ import { formatRelativeTime } from "$lib/text";
       if ($currentDoc?.id === item.id) $currentDoc = newDoc;
       if (!$openTabs.find((t) => t.id === newDoc.id)) $openTabs = [newDoc, ...$openTabs];
     } catch (e) {
-      domainError("Inbox", "couldn't move capture", e);
+      domainError("Capture", "couldn't move capture", e);
     }
   }
 
@@ -89,12 +93,12 @@ import { formatRelativeTime } from "$lib/text";
       $openTabs = $openTabs.filter((t) => t.id !== item.id);
       if (viewing?.id === item.id) {
         viewing = null;
-        if ($currentDoc?.id === item.id) $currentDoc = $openTabs[0] ?? null;
+        if ($currentDoc?.id === item.id) $currentDoc = $openTabs.find((t) => t.workspace === $currentWorkspace) ?? null;
       } else if ($currentDoc?.id === item.id) {
-        $currentDoc = $openTabs[0] ?? null;
+        $currentDoc = $openTabs.find((t) => t.workspace === $currentWorkspace) ?? null;
       }
     } catch (e) {
-      domainError("Inbox", "couldn't delete capture", e);
+      domainError("Capture", "couldn't delete capture", e);
     }
   }
 
@@ -130,11 +134,15 @@ import { formatRelativeTime } from "$lib/text";
 
   // Launch handoff: prefill queued by share target / shortcuts /
   // notification taps is appended once, then a focus request focuses the box.
+  // Share-target text arrives complete — when the box was empty it saves
+  // immediately (never clobber a half-typed draft: append-only then).
   $effect(() => {
     const pre = $capturePrefill;
     if (pre) {
+      const wasEmpty = !quickCapture.trim();
       quickCapture = quickCapture ? quickCapture + "\n" + pre : pre;
       capturePrefill.set("");
+      if (wasEmpty) void handleQuickCapture();
     }
     const f = $captureFocus;
     if (f !== lastFocusSeen) {
@@ -157,7 +165,7 @@ import { formatRelativeTime } from "$lib/text";
           aria-label="Select all inbox items"
         />
       {/if}
-      <h1>Inbox</h1>
+      <h1>Capture</h1>
       <span class="item-count">{inboxItems.length} items</span>
       {#if viewing}
         <button class="bulk-btn" onclick={() => (listCollapsed = !listCollapsed)} title={listCollapsed ? "Show list" : "Focus editor — hide list"} aria-pressed={listCollapsed}>
@@ -165,7 +173,7 @@ import { formatRelativeTime } from "$lib/text";
         </button>
       {/if}
     </div>
-    <button class="refresh-btn" onclick={loadInbox} disabled={loading} title="Refresh inbox" aria-label="Refresh inbox">
+    <button class="refresh-btn" onclick={loadInbox} disabled={loading} title="Refresh captures" aria-label="Refresh captures">
       <Icon name="refresh" size={15} />
     </button>
   </div>
@@ -195,7 +203,7 @@ import { formatRelativeTime } from "$lib/text";
     <QuickCaptureInput
       bind:value={quickCapture}
       bind:inputRef={captureInput}
-      placeholder="Quick capture... (Enter to save to inbox)"
+      placeholder="Quick capture... (Enter to save to Capture)"
       disabled={loading}
       webFallback={true}
       onSubmit={handleQuickCapture}
@@ -205,7 +213,7 @@ import { formatRelativeTime } from "$lib/text";
 
   <DockSplit
     storageKey="jwe-split-inbox"
-    topLabel="Inbox list height"
+    topLabel="Capture list height"
     hasBottom={!!viewing}
     topCompact={listCollapsed && !!viewing}
   >
@@ -221,8 +229,8 @@ import { formatRelativeTime } from "$lib/text";
     {:else if inboxItems.length === 0}
       <div class="empty-state">
         <div class="empty-icon"><Icon name="inbox" size={44} /></div>
-        <div class="empty-title">Inbox is empty</div>
-        <div class="empty-desc">Capture quick ideas here. Triage them into your workspaces later.</div>
+        <div class="empty-title">Capture is empty</div>
+        <div class="empty-desc">Capture quick ideas here — press Ctrl+Shift+F from anywhere. Triage them into your workspaces later.</div>
       </div>
     {:else}
       {#each inboxItems as item}
@@ -238,12 +246,9 @@ import { formatRelativeTime } from "$lib/text";
           />
           <div class="item-content" role="button" tabindex="0" onclick={() => openItem(item)} onkeydown={(e) => { if (e.key === 'Enter') openItem(item); }}>
             <div class="item-title">
-              {#if item.locked}<span class="inline-lock" title="Locked"><Icon name="lock" size={11} /></span>{/if}
               {item.title}
             </div>
-            {#if item.locked}
-              <div class="item-preview locked-hint">Locked — content hidden until unlocked.</div>
-            {:else if item.content}
+            {#if item.content}
               <div class="item-preview">{item.content.slice(0, 120)}{item.content.length > 120 ? '...' : ''}</div>
             {/if}
             <div class="item-meta">
@@ -275,7 +280,7 @@ import { formatRelativeTime } from "$lib/text";
   {#if viewing}
     <div class="inbox-dock">
       <DocDetail
-        backLabel="Inbox"
+        backLabel="Capture"
         onBack={closeDetail}
         onDeleted={(id) => {
           inboxItems = inboxItems.filter((i) => i.id !== id);
@@ -499,17 +504,6 @@ import { formatRelativeTime } from "$lib/text";
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .inline-lock {
-    display: inline-flex;
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-
-  .item-preview.locked-hint {
-    font-style: italic;
-    color: var(--text-muted);
   }
 
   .item-preview {

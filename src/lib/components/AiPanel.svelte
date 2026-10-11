@@ -6,7 +6,6 @@
   import { writeBack } from "$lib/stores/writeBack";
   import { splitTarget } from "$lib/stores/split";
   import { globalLoading } from "$lib/stores/loading";
-  import { assertAiAllowedForDoc } from "$lib/stores/lock";
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
   import { ensureHarness } from "$lib/memorySidecar";
@@ -47,12 +46,38 @@
     };
   }
 
+  // 5.4 — which model the panel will actually call, shown in the context chip
+  // so the user can tell main vs light-model-at-a-glance without opening Settings.
+  let modelIdentity = $derived.by(() => {
+    const slot = mainSlot();
+    const name = slot.model?.trim() || (slot.provider?.trim() ? "configured model" : "no model set");
+    const kind = $settings.useSmallAsMain ? "Light model" : "Main model";
+    return `${kind} · ${name}`;
+  });
+
   function cancelGeneration() {
-    if (abortController) {
-      abortController.abort();
-      abortController = null;
-    }
+    // Keep the aborted controller until the stream settles (nulled in the
+    // send handler's `finally`): nulling it here broke the onToken guard —
+    // `abortController?.signal.aborted` read undefined, so tokens kept
+    // appending after "Cancel".
+    abortController?.abort();
     generating = false;
+    composerRunning = false;
+    structurizeRunning = false;
+    globalLoading.set(false);
+  }
+
+  // 5.3 — Composer and Structurize are single awaited calls, not streams, so
+  // they track their own running flag and drop the result if cancelled.
+  function cancelComposer() {
+    composerRunning = false;
+    abortController?.abort();
+    globalLoading.set(false);
+  }
+
+  function cancelStructurize() {
+    structurizeRunning = false;
+    abortController?.abort();
     globalLoading.set(false);
   }
 
@@ -174,10 +199,60 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   let generating = $state(false);
   let composerPrompt = $state("");
   let composerOutput = $state("");
+  let composerRunning = $state(false);
+  let structurizeRunning = $state(false);
   let llmToggleBusy = $state(false);
   let abortController = $state<AbortController | null>(null);
   let lastSendTime = $state(0);
   let lastUserMessage = $state("");
+  // 5.5 — true while re-running the previous prompt so sendMessage skips the
+  // duplicate user-message append and just streams a fresh assistant reply.
+  let regenerating = $state(false);
+
+  // 5.2 — focus the chat box the moment the panel opens, so a shortcut
+  // (Ctrl+J) lands the user ready to type instead of hunting for the field.
+  let chatInputEl = $state<HTMLTextAreaElement | null>(null);
+  $effect(() => {
+    if (aiPanelOpen && mode === "chat" && !minimized && chatInputEl) {
+      chatInputEl.focus();
+    }
+  });
+
+  // 5.7 — Escape unwinds one layer at a time: replace-confirm, then history,
+  // then the panel itself. Registered on window so it works from any focus.
+  $effect(() => {
+    if (!aiPanelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (confirmReplace) { confirmReplace = null; e.preventDefault(); return; }
+      if (historyOpen) { historyOpen = false; e.preventDefault(); return; }
+      if (!minimized) { $aiPanelOpen = false; e.preventDefault(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  // near the bottom. Resuming/scrolling up must never yank them back down
+  // mid-read; scroll-to-bottom is exposed as a real button instead.
+  let messagesEl = $state<HTMLDivElement | null>(null);
+  let stickToBottom = $state(true);
+
+  function nearBottom(el: HTMLElement, slack = 96): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < slack;
+  }
+
+  function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    messagesEl?.scrollTo({ top: messagesEl.scrollHeight, behavior });
+  }
+
+  function handleMessagesScroll() {
+    if (messagesEl) stickToBottom = nearBottom(messagesEl);
+  }
+
+  // Only auto-scroll while streaming: a resumed conversation settles at the
+  // top and stays there until the user sends something new.
+  $effect(() => {
+    if (generating && stickToBottom && messagesEl) scrollToBottom("auto");
+  });
 
   // Generation clock: "Thinking… {elapsed}s / {total}s" (totals mirror the
   // Rust timeouts: 120s streams, 180s structurize). Driven by `generating`
@@ -186,10 +261,15 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   let genElapsed = $state(0);
   let genTimeoutTotal = $state(120);
   let genTimer: ReturnType<typeof setInterval> | null = null;
+  // True once at least one assistant token has landed for the current
+  // generation, so the status can say "Generating" instead of a stale
+  // "Thinking…" that never resolves while the stream is still open.
+  let gotToken = $state(false);
   $effect(() => {
     if (generating) {
       genStartAt = Date.now();
       genElapsed = 0;
+      gotToken = false;
       if (genTimer) clearInterval(genTimer);
       genTimer = setInterval(() => {
         genElapsed = Math.floor((Date.now() - genStartAt) / 1000);
@@ -289,7 +369,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     try {
       const list = await api.conversationList();
       historyList = list.slice(0, 30);
-      // Resolve a one-line preview per conversation (first user message).
+      // 5.10 — show the rows immediately with the date fallback. Fetching the
+      // first-user-message preview per conversation is N+1 IPC calls; gating
+      // the list on all of them put a bare "Loading…" on screen for seconds.
+      // Titles now fill in progressively as each resolves.
+      historyLoading = false;
       await Promise.all(
         historyList.map(async (c) => {
           if (historyTitles[c.id]) return;
@@ -351,7 +435,6 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   let structurizeOutput = $state("");
   let structurizeAccepted = $state(false);
   const structurizePlaceholder = "Paste raw text here. Wrap instructions in {braces}. Example: {make this a table}, {expand each bullet to 2 paragraphs}, {draw a timeline}...";
-
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
@@ -400,10 +483,12 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   }
 
   async function handleStructurize() {
-    if (!structurizeInput.trim() || generating) return;
+    if (!structurizeInput.trim() || structurizeRunning) return;
     if (!guardRate()) return;
 
+    structurizeRunning = true;
     generating = true;
+    abortController = new AbortController();
     genTimeoutTotal = 180;
     globalLoading.set(true);
     structurizeOutput = "";
@@ -424,13 +509,18 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         model: slot.model,
         api_key: $settings.apiKey || undefined,
       });
+      // Cancelled mid-flight: drop the result instead of committing it.
+      if (abortController?.signal.aborted) return;
       structurizeOutput = response.result;
     } catch (e) {
+      if (abortController?.signal.aborted) return;
       const friendly = friendlyEndpointError(e);
       showToast(`Structurize failed: ${friendly}`, "error");
       structurizeOutput = `Error: ${friendly}`;
     } finally {
+      structurizeRunning = false;
       generating = false;
+      abortController = null;
       globalLoading.set(false);
       lastSendTime = Date.now();
     }
@@ -453,25 +543,16 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     if (!input.trim() || generating) return;
     if (!guardRate()) return;
 
-    if (!blankMode) {
-      try {
-        assertAiAllowedForDoc($currentDoc);
-      } catch (e) {
-        input = "";
-        messages = [...messages, {
-          id: `local-${Date.now()}`,
-          conversation_id: conversation?.id ?? "",
-          role: "assistant",
-          content: `Locked: ${e instanceof Error ? e.message : String(e)}`,
-          created_at: new Date().toISOString(),
-        }];
-        return;
-      }
-    }
-
     const userContent = input.trim();
     input = "";
     lastUserMessage = userContent;
+
+    // 5.5 — Regenerate path: drop the stale assistant reply up front so the
+    // stream placeholder lands in a clean slot. Reuses the open conversation
+    // (no extra user message) — the prompt is identical to the one before.
+    if (regenerating && conversation) {
+      messages = messages.filter((m) => m.role !== "assistant");
+    }
 
     if (!conversation) {
       conversation = await api.conversationCreate(
@@ -485,8 +566,12 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       historyTitles[conversation.id] = userContent.slice(0, 60) + (userContent.length > 60 ? "…" : "");
     }
 
-    const userMsg = await api.conversationAddMessage(conversation.id, "user", userContent);
-    messages = [...messages, userMsg];
+    // Regenerate keeps the existing user turn; a fresh send appends a new one.
+    if (!regenerating) {
+      const userMsg = await api.conversationAddMessage(conversation.id, "user", userContent);
+      messages = [...messages, userMsg];
+    }
+    regenerating = false;
 
     generating = true;
     genTimeoutTotal = 120;
@@ -560,10 +645,19 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         },
         (token) => {
           if (abortController?.signal.aborted) return;
+          gotToken = true;
           streamed += token;
           messages = messages.map((m) => (m.id === placeholder.id ? { ...m, content: streamed } : m));
         }
       );
+
+      // Cancelled: drop the partial placeholder and never persist a reply
+      // the user rejected. The backend stream still drains (no per-request
+      // abort exists server-side), but nothing is appended or saved.
+      if (abortController?.signal.aborted) {
+        messages = messages.filter((m) => m.id !== placeholder.id);
+        return;
+      }
 
       const aiMsg = await api.conversationAddMessage(conversation.id, "assistant", full);
       messages = messages.map((m) => (m.id === placeholder.id ? aiMsg : m));
@@ -590,16 +684,10 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   }
 
   async function handleComposerGenerate() {
-    if (!composerPrompt.trim() || generating) return;
+    if (!composerPrompt.trim() || composerRunning) return;
     if (!guardRate()) return;
 
-    try {
-      assertAiAllowedForDoc($currentDoc);
-    } catch (e) {
-      composerOutput = `Locked: ${e instanceof Error ? e.message : String(e)}`;
-      return;
-    }
-
+    composerRunning = true;
     generating = true;
     genTimeoutTotal = 120;
     globalLoading.set(true);
@@ -625,15 +713,18 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         },
         (token) => {
           if (abortController?.signal.aborted) return;
+          gotToken = true;
           composerOutput += token;
         }
       );
     } catch (e) {
+      if (abortController?.signal.aborted) return;
       const friendly = friendlyEndpointError(e);
       showToast(`Composer failed: ${friendly}`, "error");
       composerOutput = `Error: ${friendly}`;
     } finally {
       abortController = null;
+      composerRunning = false;
       generating = false;
       globalLoading.set(false);
       lastSendTime = Date.now();
@@ -661,6 +752,16 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     if (!lastUserMessage || generating) return;
     input = lastUserMessage;
     lastUserMessage = "";
+    sendMessage();
+  }
+
+  // 5.5 — Regenerate the last assistant reply without retyping the prompt.
+  // Reuses lastUserMessage and the open conversation; sendMessage drops the
+  // stale assistant turn and streams a fresh one in its place.
+  function regenerateLastMessage() {
+    if (!lastUserMessage || generating) return;
+    input = lastUserMessage;
+    regenerating = true;
     sendMessage();
   }
 </script>
@@ -706,7 +807,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         title={$llmRunning ? "Bundled LLM running — click to stop" : "Start bundled LLM"}
       >
         <span class="sidecar-dot" class:running={$llmRunning}></span>
-        <span>{$llmStarting || "Bundled LLM"}</span>
+        <span>{($llmStarting || "").trim() || "Bundled LLM"}</span>
       </button>
       <button class="toggle-blank" class:active={blankMode} onclick={toggleBlank}>
         {blankMode ? "Blank" : "Context"}
@@ -816,27 +917,31 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           placeholder="Describe what you want to write... (Ctrl+Enter to generate)"
           rows="4"
         ></textarea>
-        <button class="generate-btn" onclick={handleComposerGenerate} disabled={generating}>
-          {generating ? "Generating..." : "Generate"}
-        </button>
+        {#if composerRunning}
+          <button class="generate-btn cancel" onclick={cancelComposer}>Cancel</button>
+        {:else}
+          <button class="generate-btn" onclick={handleComposerGenerate} disabled={generating}>Generate</button>
+        {/if}
       </div>
       {#if composerOutput}
         <div class="composer-output">
           <div class="output-header">
             <span>Generated</span>
             {@render wbTargetToggle()}
-            <div class="output-actions">
-              <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", composerOutput)} title="Insert at cursor" aria-label="Insert at cursor">
-                <Icon name="plus" size={14} />
-              </button>
-              {@render replaceBtn("composer", "composer", composerOutput, () => handleWriteBack("replace", composerOutput))}
-              <button class="action-btn icon-btn" onclick={() => handleWriteBack("append", composerOutput)} title="Append to doc" aria-label="Append to doc">
-                <Icon name="send" size={14} />
-              </button>
-              <button class="action-btn icon-btn" onclick={() => handleCopy(composerOutput)} title="Copy" aria-label="Copy">
-                <Icon name="files" size={14} />
-              </button>
-            </div>
+            {#if !composerOutput.startsWith("Error:")}
+              <div class="output-actions">
+                <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", composerOutput)} title="Insert at cursor" aria-label="Insert at cursor">
+                  <Icon name="plus" size={14} />
+                </button>
+                {@render replaceBtn("composer", "composer", composerOutput, () => handleWriteBack("replace", composerOutput))}
+                <button class="action-btn icon-btn" onclick={() => handleWriteBack("append", composerOutput)} title="Append to doc" aria-label="Append to doc">
+                  <Icon name="send" size={14} />
+                </button>
+                <button class="action-btn icon-btn" onclick={() => handleCopy(composerOutput)} title="Copy" aria-label="Copy">
+                  <Icon name="files" size={14} />
+                </button>
+              </div>
+            {/if}
           </div>
           <div class="output-content">{composerOutput}</div>
         </div>
@@ -846,7 +951,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     <div class="structurize-view">
       <div class="structurize-input">
           <div class="input-label">
-            <span>Paste text with <code>{'{{...}}'}</code> directives</span>
+            <span>Paste text with <code>{'{...}'}</code> directives</span>
           </div>
         <div class="structurize-textarea-wrap">
           <div class="directive-highlight" aria-hidden="true">
@@ -858,9 +963,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
             rows="8"
           ></textarea>
         </div>
-        <button class="generate-btn" onclick={handleStructurize} disabled={generating || !structurizeInput.trim()}>
-          {generating ? "Structuring..." : "Structurize"}
-        </button>
+        {#if structurizeRunning}
+          <button class="generate-btn cancel" onclick={cancelStructurize}>Cancel</button>
+        {:else}
+          <button class="generate-btn" onclick={handleStructurize} disabled={generating || !structurizeInput.trim()}>Structurize</button>
+        {/if}
       </div>
       {#if structurizeOutput}
         <div class="structurize-output">
@@ -868,16 +975,18 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
             <span>Result</span>
             {@render wbTargetToggle()}
             <div class="output-actions">
-              {@render replaceBtn("structurize", "structurize", structurizeOutput, acceptStructurize)}
-              <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", structurizeOutput)} title="Insert at cursor" aria-label="Insert at cursor">
-                <Icon name="plus" size={14} />
-              </button>
-              <button class="action-btn icon-btn" onclick={() => handleWriteBack("append", structurizeOutput)} title="Append to doc" aria-label="Append to doc">
-                <Icon name="send" size={14} />
-              </button>
-              <button class="action-btn icon-btn" onclick={() => writeBack.copy(structurizeOutput)} title="Copy" aria-label="Copy">
-                <Icon name="files" size={14} />
-              </button>
+              {#if !structurizeOutput.startsWith("Error:")}
+                {@render replaceBtn("structurize", "structurize", structurizeOutput, acceptStructurize)}
+                <button class="action-btn icon-btn" onclick={() => handleWriteBack("insert", structurizeOutput)} title="Insert at cursor" aria-label="Insert at cursor">
+                  <Icon name="plus" size={14} />
+                </button>
+                <button class="action-btn icon-btn" onclick={() => handleWriteBack("append", structurizeOutput)} title="Append to doc" aria-label="Append to doc">
+                  <Icon name="send" size={14} />
+                </button>
+                <button class="action-btn icon-btn" onclick={() => writeBack.copy(structurizeOutput)} title="Copy" aria-label="Copy">
+                  <Icon name="files" size={14} />
+                </button>
+              {/if}
               <button class="action-btn icon-btn dismiss" onclick={dismissStructurize} title="Dismiss" aria-label="Dismiss">
                 <Icon name="x" size={14} />
               </button>
@@ -901,25 +1010,25 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           onclick={probeGhostSlot}
           disabled={ghostProbe.running}
         >
-          {ghostProbe.running ? "Probing…" : "Test small slot"}
+          {ghostProbe.running ? "Probing…" : "Test connection"}
         </button>
         {#if ghostProbe.text}
           <p class="ghost-status">{ghostProbe.text}</p>
         {/if}
         <p class="ghost-status">{ghostStatusText()}</p>
         {#if isBrowserPreview()}
-          <p class="ghost-route">Routes to the small slot's HTTP endpoint here — there is no local model on the web. Never the main slot.</p>
+          <p class="ghost-route">Uses the light model configured in Settings — never your main writing model.</p>
         {:else}
-          <p class="ghost-route">Routes to the local model (:8093) when enabled, else the small slot — never the main slot.</p>
+          <p class="ghost-route">Uses the light model when it's running, otherwise the one in Settings — never your main writing model.</p>
         {/if}
       </div>
     </div>
   {:else}
-    <div class="ai-messages">
+    <div class="ai-messages" bind:this={messagesEl} onscroll={handleMessagesScroll}>
       {#if messages.length === 0}
         <div class="empty-ai">
           <span class="icon"><Icon name="sparkle" size={28} /></span>
-          <span>{blankMode ? "Blank mode — no context injected" : "Ask about your work"}</span>
+          <span>{blankMode ? "Blank mode — document context off" : "Ask about your work"}</span>
           {#if !$settings.mainModelEndpoint.trim() && !$settings.smallModelEndpoint.trim()}
             <span class="endpoint-hint">No model connected — set an endpoint in Settings → AI & Providers, then Test it.</span>
           {:else if endpointUnreachable}
@@ -942,6 +1051,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
             {/if}
             {#if msg.role === "assistant" && !msg.content.startsWith("Error:") && !msg.content.startsWith("Locked:")}
               <div class="writeback-bar">
+                {#if idx === messages.length - 1 && lastUserMessage}
+                  <button class="icon-btn" onclick={regenerateLastMessage} disabled={generating} title="Regenerate reply" aria-label="Regenerate last reply">
+                    <Icon name="refresh" size={14} />
+                  </button>
+                {/if}
                 <button class="icon-btn" onclick={() => handleWriteBack("insert", msg.content)} title="Insert at cursor (Ctrl+Enter)" aria-label="Insert at cursor">
                   <Icon name="plus" size={14} />
                 </button>
@@ -959,16 +1073,32 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         {#if generating}
           <div class="message generating">
             <div class="role">AI</div>
-            <div class="content">Thinking… {genElapsed}s / {genTimeoutTotal}s</div>
+            <div class="content">
+              {gotToken ? "Generating" : "Thinking…"} {genElapsed}s / {genTimeoutTotal}s
+            </div>
             <button class="icon-btn cancel-btn" onclick={cancelGeneration} title="Cancel generation" aria-label="Cancel generation">
               <Icon name="x" size={14} />
             </button>
           </div>
         {/if}
       {/if}
+      {#if messages.length > 0 && !stickToBottom}
+        <button
+          class="scroll-bottom-btn"
+          onclick={() => { stickToBottom = true; scrollToBottom(); }}
+          aria-label="Scroll to latest message"
+          title="Jump to latest"
+        >
+          <Icon name="arrow-down" size={16} />
+        </button>
+      {/if}
     </div>
 
     <div class="ai-input">
+      <div class="model-chip" title="Which model answers your messages">
+        <span class="chip-icon"><Icon name="sparkle" size={13} /></span>
+        <span>{modelIdentity}</span>
+      </div>
       {#if !blankMode && $currentDoc}
         <div class="context-chip" title="Active context document">
           <span class="chip-icon"><Icon name="files" size={13} /></span>
@@ -982,6 +1112,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       {/if}
       <div class="input-row">
         <textarea
+          bind:this={chatInputEl}
           bind:value={input}
           onkeydown={handleKeydown}
           placeholder={blankMode ? "Ask anything..." : "Ask about your writing..."}
@@ -1326,6 +1457,26 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   .retry-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
   .retry-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  /* 5.1 — floating "jump to latest" while scrolled up mid-stream. */
+  .scroll-bottom-btn {
+    position: sticky;
+    bottom: 10px;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-top: 6px;
+    border-radius: 999px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 1;
+  }
+  .scroll-bottom-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+
   @keyframes pulse {
     0%, 100% { opacity: 0.7; }
     50% { opacity: 0.4; }
@@ -1421,6 +1572,20 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     border: 1px solid var(--border-subtle);
     font-size: 11px;
     color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+
+  /* 5.4 — same visual language as the context chip, one notch quieter. */
+  .model-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    font-size: 10px;
+    color: var(--text-muted);
     margin-bottom: 8px;
   }
 
@@ -1521,6 +1686,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   .generate-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .generate-btn.cancel {
+    background: var(--accent-semantic-red, #c0392b);
+    color: #fff;
   }
 
   .composer-output {

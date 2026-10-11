@@ -1,40 +1,10 @@
 <script lang="ts">
+  import { SHORTCUT_GROUPS } from '$lib/shortcuts';
   import Icon from '$lib/components/Icon.svelte';
 
   let open = $state(false);
 
-  const shortcuts = [
-    { category: 'General', items: [
-      { keys: 'Ctrl+K', desc: 'Command palette' },
-      { keys: 'Ctrl+B', desc: 'Toggle sidebar' },
-      { keys: 'Ctrl+J', desc: 'Toggle AI panel' },
-      { keys: 'Ctrl+S', desc: 'Save document' },
-      { keys: 'Ctrl+N', desc: 'New document' },
-      { keys: 'Ctrl+O', desc: 'Open file' },
-      { keys: 'Ctrl+F', desc: 'Find in document' },
-      { keys: 'Ctrl+H', desc: 'Version history' },
-    ]},
-    { category: 'Navigation', items: [
-      { keys: 'Alt+1-9', desc: 'Switch workspace' },
-      { keys: 'Ctrl+Tab', desc: 'Next tab' },
-      { keys: 'Ctrl+Shift+Tab', desc: 'Previous tab' },
-      { keys: 'Ctrl+W', desc: 'Close tab' },
-      { keys: 'Ctrl+T', desc: 'New tab' },
-    ]},
-    { category: 'Editor', items: [
-      { keys: 'Ctrl+B', desc: 'Bold' },
-      { keys: 'Ctrl+I', desc: 'Italic' },
-      { keys: 'Ctrl+Shift+K', desc: 'Code block' },
-      { keys: 'Ctrl+K', desc: 'Insert link' },
-      { keys: 'Ctrl+Shift+L', desc: 'Toggle list' },
-      { keys: 'Ctrl+/', desc: 'Comment' },
-    ]},
-    { category: 'Focus', items: [
-      { keys: 'F11', desc: 'Focus mode' },
-      { keys: 'Ctrl+Shift+F', desc: 'Fullscreen' },
-      { keys: 'Ctrl+Shift+P', desc: 'Pomodoro timer' },
-    ]},
-  ];
+  const shortcuts = SHORTCUT_GROUPS;
 
   function openPanel() { open = true; }
   function closePanel() { open = false; }

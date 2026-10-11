@@ -86,17 +86,11 @@
     }
 
     pub fn snapshot_list(&self, doc_id: &str) -> Result<Vec<Snapshot>, String> {
-        // Snapshots carry the FULL document body, so a locked doc's history is
-        // as sensitive as the doc itself. Every other read path filters on
-        // `docs.locked`; this one did not, and `allow-snapshot-list` is granted
-        // to the companion window — so it silently defeated the widget ACL's
-        // "locked docs stay out of the companion" guarantee.
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT s.id, s.doc_id, s.label, s.content, s.word_count, s.content_hash, s.created_at
              FROM snapshots s
              WHERE s.doc_id = ?1
-               AND EXISTS (SELECT 1 FROM docs d WHERE d.id = s.doc_id AND d.locked = 0)
              ORDER BY s.created_at DESC"
         ).map_err(|e| e.to_string())?;
 
@@ -163,7 +157,7 @@
 
         let doc = {
             let mut stmt = conn.prepare(
-                "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline, locked FROM docs WHERE id = ?1"
+                "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE id = ?1"
             ).map_err(|e| e.to_string())?;
             stmt.query_row(params![snapshot.doc_id], |row| {
                 Ok(Doc {
@@ -185,7 +179,6 @@
                     pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
-                    locked: row.get::<_, i64>(18).unwrap_or(0) != 0,
                 })
             }).map_err(|e| e.to_string())?
         };

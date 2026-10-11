@@ -79,6 +79,7 @@
     warn: '<path d="M12 3L2.5 20h19L12 3z"/><path d="M12 10v4"/><path d="M12 17.5h.01"/>',
     "arrow-right": '<path d="M5 12h14M12 5l7 7-7 7"/>',
     "arrow-left": '<path d="M19 12H5M12 19l-7-7 7-7"/>',
+    "arrow-down": '<path d="M12 5v14M5 12l7 7 7-7"/>',
     minus: '<path d="M5 12h14"/>',
     tag: '<path d="M6 3h10l4 4v10H6V3z"/><circle cx="12" cy="12" r="2"/>',
     waveform:
