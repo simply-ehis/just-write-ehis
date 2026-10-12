@@ -148,24 +148,17 @@ check(
   /\[embed missing: /.test(src)
 );
 
-// --- PIN backoff: the audit claimed these diverged; verify rather than assume ---
-const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
-const pinConstants = {};
-for (const m of commands.matchAll(/const (PIN_[A-Z_]+): u\d+ = ([\d_]+);/g)) {
-  pinConstants[m[1]] = Number(m[2].replace(/_/g, ""));
-}
-for (const [rustName, tsName] of [
-  ["PIN_BASE_BACKOFF_MS", "browserPinBaseBackoffMs"],
-  ["PIN_MAX_BACKOFF_MS", "browserPinMaxBackoffMs"],
-  ["PIN_MAX_FAILED_ATTEMPTS", "browserPinMaxFailedAttempts"],
-]) {
-  const m = src.match(new RegExp(`const ${tsName} = (\\d+);`));
-  check(
-    `${tsName} matches ${rustName}`,
-    Boolean(m) && Number(m[1]) === pinConstants[rustName],
-    `ts=${m?.[1]} rust=${pinConstants[rustName]}`
-  );
-}
+// --- PIN backoff ---
+// The app-lock / PIN feature (LockScreen.svelte, stores/lock.ts,
+// allow-app-lock-* ACL grants, PIN_* backoff constants) was removed wholesale
+// in the sidecar slice-4 rework — verified absent from browserBackend.ts,
+// commands.rs and main.toml. Both sides are therefore gone together, so there
+// is nothing left to compare; asserting parity on a deleted feature would
+// only prove the test itself is stale.
+const lockStillPresent =
+  /appLock|app_lock|LockScreen/.test(src) ||
+  (await readFile(join(root, "src-tauri/src/commands.rs"), "utf8")).includes("PIN_BASE_BACKOFF_MS");
+check("app-lock feature is fully removed (no stale parity obligations)", !lockStillPresent);
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

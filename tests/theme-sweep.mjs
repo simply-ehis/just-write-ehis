@@ -205,6 +205,12 @@ await esbuild.build({
   format: "esm",
   outfile: themeOutFile,
   logLevel: "silent",
+  // editorTheme's LAZY_FONT_LOADERS dynamic-import @fontsource CSS purely so
+  // Vite can code-split the webfonts at runtime. Bundling them here pulls in
+  // .woff/.woff2 assets, which esbuild (unlike Vite) has no loader for — 92
+  // build errors for fonts this probe never loads. Keep them external: the
+  // specifiers stay literal, and the probe only calls the pure palette fns.
+  external: ["@fontsource/*"],
 });
 const { editorPalette } = await import(`${pathToFileURL(themeOutFile).href}?${Date.now()}`);
 for (const [style, mode] of COMBOS) {

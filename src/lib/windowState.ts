@@ -147,8 +147,17 @@ function persist(): void {
 }
 
 /** Debounced save on resize + periodic save (catches moves, which fire no
- * web event) + flush on hide. Desktop shell only; safe to call twice. */
+ * web event) + flush on hide. Desktop shell only; safe to call twice.
+ *
+ * The listeners and interval are held so `stopMainWindowTracking()` can
+ * detach every one of them. A three-second timer plus a resize listener
+ * that outlive the window they describe is a leak, and in tests it keeps
+ * a timer (and its persist side effects) alive after the case ends. */
 let tracking = false;
+let trackingTimer: ReturnType<typeof setInterval> | null = null;
+let trackingResizeHandler: (() => void) | null = null;
+let trackingVisibilityHandler: (() => void) | null = null;
+
 export function trackMainWindow(): void {
   try {
     if (tracking || typeof window === "undefined") return;
@@ -158,17 +167,39 @@ export function trackMainWindow(): void {
       if (timer) clearTimeout(timer);
       timer = setTimeout(persist, 600);
     };
-    window.addEventListener("resize", debounced);
-    document.addEventListener("visibilitychange", () => {
+    const onVisibility = () => {
       if (document.hidden) persist();
-    });
+    };
+    trackingResizeHandler = debounced;
+    trackingVisibilityHandler = onVisibility;
+    window.addEventListener("resize", debounced);
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", persist);
-    window.setInterval(() => {
+    trackingTimer = window.setInterval(() => {
       if (!document.hidden) persist();
     }, 3000);
   } catch {
     /* tracking is best-effort */
   }
+}
+
+/** Detach every listener/interval `trackMainWindow` installed. Idempotent. */
+export function stopMainWindowTracking(): void {
+  if (typeof window === "undefined") return;
+  if (trackingTimer !== null) {
+    clearInterval(trackingTimer);
+    trackingTimer = null;
+  }
+  if (trackingResizeHandler) {
+    window.removeEventListener("resize", trackingResizeHandler);
+    trackingResizeHandler = null;
+  }
+  if (trackingVisibilityHandler) {
+    document.removeEventListener("visibilitychange", trackingVisibilityHandler);
+    trackingVisibilityHandler = null;
+  }
+  window.removeEventListener("pagehide", persist);
+  tracking = false;
 }
 
 /**

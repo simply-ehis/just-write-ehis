@@ -1,13 +1,23 @@
 /**
- * Sidecar auth: prove the loopback servers refuse unauthenticated callers.
+ * Sidecar auth: prove the private transports enforce their token contract.
  *
- * Loopback is not a trust boundary — any local process, and any website via a
- * CORS-simple POST, can reach 127.0.0.1. Only the memory sidecar enforced a
- * per-launch token; STT and TTS accepted anything. These tests boot the real
- * servers and check the contract end to end.
+ * ARCHITECTURE (post slice-4 redesign) — this file was rewritten when the
+ * sidecars stopped binding TCP ports. Loopback HTTP is no longer the threat
+ * model, because nothing listens on loopback:
  *
- * The Rust half is asserted statically (sidecar.rs must mint a token, pass it
- * to every manager, and send it on every request); the Python half is executed.
+ *   STT / TTS / memory  → newline-delimited JSON frames over the child's
+ *                         OWN stdin/stdout pipe (IpcSidecar). The pipe is
+ *                         private to the parent process, so a token cannot
+ *                         be replayed by another process — it exists purely
+ *                         as a BOOT GUARD: the server refuses to start
+ *                         without it in its environment.
+ *   LLM (llama-server)  → an AF_UNIX .sock at a per-session path, spoken to
+ *                         with a small HTTP/1.1 client carrying
+ *                         `Authorization: Bearer <token>`.
+ *
+ * So the assertions changed shape accordingly: Rust is checked statically
+ * (token minted, passed as ENV not header, absent from request frames), and
+ * the Python servers are executed over a real pipe.
  *
  * Run: node tests/sidecar-auth.mjs
  */
@@ -15,51 +25,65 @@ import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
-import { createServer } from "node:net";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFile(join(root, p), "utf8");
+const PY = process.platform === "win32" ? "python" : "python3";
 let failures = 0;
 function check(name, ok, detail = "") {
-  console.log(`${condition(ok) ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures++;
 }
-const condition = (v) => v;
 
-async function freePort() {
-  return new Promise((res) => {
-    const s = createServer();
-    s.listen(0, "127.0.0.1", () => {
-      const p = s.address().port;
-      s.close(() => res(p));
+/**
+ * Boot a python sidecar the way Rust does (token in the ENVIRONMENT, stdin
+ * open as a pipe), send one JSON frame, and resolve the response frame.
+ * Resolves as soon as a complete stdout line arrives, or on exit/timeout.
+ */
+async function probe(script, frame, { token = "test-token-abc123" } = {}) {
+  const child = spawn(PY, [join(root, "src-tauri/sidecars", script)], {
+    env: { ...process.env, JWE_SIDECAR_TOKEN: token },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let out = "";
+  let stderr = "";
+  let settled = false;
+  child.on("error", () => {});
+
+  const res = await new Promise((resolve) => {
+    const finish = (patch) => {
+      if (settled) return;
+      settled = true;
+      try { child.kill(); } catch {}
+      resolve({ out, stderr, ...patch });
+    };
+    // stdout carries pure JSON frames, one per line.
+    child.stdout.on("data", (d) => {
+      out += d.toString();
+      const line = out.split("\n").map((s) => s.trim()).find((s) => s.startsWith("{"));
+      if (line) {
+        try {
+          finish({ frame: JSON.parse(line) });
+        } catch {
+          finish({ frame: null, raw: line });
+        }
+      }
     });
-  });
-}
-
-/** Boot a python sidecar with a token, return a stop() and the base url. */
-async function boot(script, port, token) {
-  const child = spawn("python", [join(root, "src-tauri/sidecars", script), String(port)], {
-    env: { ...process.env, JWE_SIDECAR_TOKEN: token, JWE_SIDECARS_DIR: join(root, "src-tauri/sidecars") },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const err = [];
-  child.stderr.on("data", (d) => err.push(d.toString()));
-  child.stdout.on("data", () => {});
-  // Wait for the port to accept connections (the model loads lazily).
-  for (let i = 0; i < 60; i++) {
-    await sleep(250);
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("exit", (code) => finish({ exited: code }));
+    setTimeout(() => finish({ timeout: true }), 25000);
     try {
-      await fetch(`http://127.0.0.1:${port}/health`);
-      return { child, err };
-    } catch {}
-  }
-  child.kill();
-  return { child, err, failed: true };
+      child.stdin.write(JSON.stringify(frame) + "\n");
+    } catch {
+      /* stdin already closed: the process refused the token */
+    }
+  });
+  return res;
 }
 
 // ── Rust half: static contract ───────────────────────────────────────────────
 const rs = await read("src-tauri/src/sidecar.rs");
+const ipc = await read("src-tauri/src/ipc.rs");
 
 for (const mgr of ["SttManager", "TtsManager", "LlmManager"]) {
   const hasField = new RegExp(`pub struct ${mgr}\\s*\\{[^}]*auth_token: String`).test(rs);
@@ -68,96 +92,85 @@ for (const mgr of ["SttManager", "TtsManager", "LlmManager"]) {
     `${mgr} mints it as a UUID`,
     new RegExp(`impl ${mgr}[\\s\\S]{0,400}?auth_token: uuid::Uuid::new_v4\\(\\)`).test(rs)
   );
-  check(`${mgr} passes JWE_SIDECAR_TOKEN to the child`, /JWE_SIDECAR_TOKEN/.test(rs));
 }
 
-// Every request to a sidecar must carry the header. Count the request builders
-// in each manager and require the header on each.
-for (const mgr of ["SttManager", "TtsManager", "LlmManager"]) {
+// The token reaches the child through the ENVIRONMENT, not a request header.
+for (const mgr of ["SttManager", "TtsManager"]) {
   const start = rs.indexOf(`impl ${mgr}`);
   const end = rs.indexOf("\nimpl ", start + 10);
   const body = rs.slice(start, end === -1 ? undefined : end);
-  const requests = (body.match(/client\.(get|post)\(/g) || []).length;
-  const headers = (body.match(/\.header\(TOKEN_HEADER, &self\.auth_token\)/g) || []).length;
-  check(
-    `${mgr}: every request carries the token header`,
-    requests > 0 && requests === headers,
-    `${headers} headers / ${requests} requests`
-  );
+  const envPasses = (body.match(/\(\s*"JWE_SIDECAR_TOKEN",\s*self\.auth_token\.as_str\(\)\s*\)/g) || []).length;
+  check(`${mgr} passes JWE_SIDECAR_TOKEN to the child env`, envPasses > 0, `${envPasses} env passes`);
 }
 
+// The wire frame is id/method/params only. Anything token-shaped in there
+// would mean the secret travels on the pipe and is replayable by a debugger.
+const frameLine = ipc.split("\n").find((l) => l.includes('json!({ "id"') && l.includes("params")) || "";
 check(
-  "llama-server is started with --api-key (llama.cpp defaults to permissive CORS)",
+  "stdio frames carry no token (the pipe itself is private)",
+  frameLine !== "" &&
+    frameLine.includes('"method"') &&
+    frameLine.includes('"params"') &&
+    !/token|auth/i.test(frameLine),
+  frameLine.trim().slice(0, 70)
+);
+check(
+  "llama-server still gets --api-key (llama.cpp defaults to permissive CORS)",
   /"--api-key"/.test(rs) && rs.includes("self.auth_token.clone()")
 );
-check("shared header name is declared once", /const TOKEN_HEADER: &str = "X-JWE-Sidecar-Token"/.test(rs));
-check("memory sidecar's own token is untouched", /X-JWE-Memory-Token/.test(rs));
+check(
+  "AF_UNIX client authorizes with Bearer, not a bespoke header",
+  /Authorization: Bearer \{\}/.test(ipc)
+);
+check(
+  "memory sidecar keeps its own JWE_MEMORY_TOKEN env name",
+  /"JWE_MEMORY_TOKEN",\s*self\.auth_token\.as_str\(\)/.test(rs)
+);
 
-// ── Python half: executed ───────────────────────────────────────────────────
-for (const [script, port] of [["stt_server.py", 8090], ["tts_server.py", 8091]]) {
-  const src = await read(`src-tauri/sidecars/${script}`);
-  check(`${script} reads JWE_SIDECAR_TOKEN`, src.includes('JWE_SIDECAR_TOKEN'));
-  check(`${script} enforces it with hmac.compare_digest`, src.includes("hmac.compare_digest"));
-  check(`${script} refuses to start without a token`, src.includes('raise RuntimeError("JWE_SIDECAR_TOKEN is required")'));
-  check(`${script} gates do_GET`, /def do_GET\(self\):\s*\n\s*if not self\._authorized\(\):/.test(src));
-  check(`${script} gates do_POST`, /def do_POST\(self\):\s*\n\s*if not self\._authorized\(\):/.test(src));
+// ── Python half: executed over a real pipe ───────────────────────────────────
+// Probe with a method that answers WITHOUT loading a model: `health` builds
+// the engine (slow, and it cannot finish in a bare checkout), while these just
+// touch in-memory state. The point is to prove the framing works end to end.
+const FAST_METHOD = {
+  "stt_server.py": { id: 7, method: "stream_start", params: {} },
+  "tts_server.py": { id: 7, method: "stop", params: {} },
+};
 
-  // Run it for real.
-  const p = await freePort();
-  const token = "test-token-" + p;
-  const { child, failed } = await boot(script, p, token);
-  if (failed) {
-    check(`${script} boots with a token`, false, "never accepted a connection");
-  } else {
-    const base = `http://127.0.0.1:${p}`;
-    let anon, wrong, okTok;
-    try {
-      anon = await fetch(`${base}/health`);
-    } catch (e) {
-      anon = { status: `ERR ${e.message}` };
-    }
-    try {
-      wrong = await fetch(`${base}/health`, { headers: { "X-JWE-Sidecar-Token": "not-the-token" } });
-    } catch (e) {
-      wrong = { status: `ERR ${e.message}` };
-    }
-    try {
-      okTok = await fetch(`${base}/health`, { headers: { "X-JWE-Sidecar-Token": token } });
-    } catch (e) {
-      okTok = { status: `ERR ${e.message}` };
-    }
-    check(`${script} rejects an unauthenticated GET with 401`, anon.status === 401, `got ${anon.status}`);
-    check(`${script} rejects a wrong token with 401`, wrong.status === 401, `got ${wrong.status}`);
-    check(`${script} accepts the correct token`, okTok.status === 200, `got ${okTok.status}`);
-
-    // A bodyless POST is the CORS-simple request a website can send blind.
-    let anonPost;
-    try {
-      anonPost = await fetch(`${base}/stop`, { method: "POST" });
-    } catch (e) {
-      anonPost = { status: `ERR ${e.message}` };
-    }
-    check(`${script} rejects an unauthenticated POST with 401`, anonPost.status === 401, `got ${anonPost.status}`);
-  }
-  child.kill();
-}
-
-// A server started without the env var must refuse to run, not serve openly.
 for (const script of ["stt_server.py", "tts_server.py"]) {
-  const p = await freePort();
-  const child = spawn("python", [join(root, "src-tauri/sidecars", script), String(p)], {
-    env: { ...process.env, JWE_SIDECAR_TOKEN: "", JWE_SIDECARS_DIR: join(root, "src-tauri/sidecars") },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let out = "";
-  child.stdout.on("data", (d) => (out += d));
-  child.stderr.on("data", (d) => (out += d));
-  const exited = await Promise.race([
-    sleep(6000).then(() => null),
-    new Promise((r) => child.on("exit", (code) => r(code))),
-  ]);
-  check(`${script} exits rather than serving without a token`, exited !== null && !out.includes("on http://"), `exit=${exited}`);
-  child.kill();
+  const src = await read(`src-tauri/sidecars/${script}`);
+  check(`${script} reads JWE_SIDECAR_TOKEN`, src.includes('os.environ.get("JWE_SIDECAR_TOKEN"'));
+  check(
+    `${script} refuses to start without a token`,
+    src.includes('raise RuntimeError("JWE_SIDECAR_TOKEN is required")')
+  );
+  check(
+    `${script} answers with one JSON frame per request line`,
+    /_write\(out,\s*\{\s*"id":\s*rid,\s*"ok":\s*True/.test(src)
+  );
+
+  // With a token: it must answer our frame on stdout with the same id.
+  const token = "test-token-abc123";
+  const ok = await probe(script, FAST_METHOD[script], { token });
+  if (ok.timeout) {
+    check(`${script} answers a request frame`, false, `no response — ${ok.stderr.slice(-160)}`);
+  } else {
+    check(
+      `${script} answers a request frame`,
+      ok.frame && ok.frame.id === 7 && ok.frame.ok === true,
+      ok.frame ? `id=${ok.frame.id} ok=${ok.frame.ok}` : `exited=${ok.exited}`
+    );
+  }
+  // The boot-guard token must never be reflected back into the wire frames.
+  check(`${script} never echoes the token to stdout`, !ok.out.includes(token));
+
+  // Without a token: it must die rather than sit there serving.
+  const bad = await probe(script, FAST_METHOD[script], { token: "" });
+  check(
+    `${script} exits when the token is missing`,
+    bad.exited !== undefined && bad.exited !== null && !bad.timeout,
+    bad.timeout ? "still running without a token" : `exit=${bad.exited}`
+  );
+  check(`${script} says why in the log`, /JWE_SIDECAR_TOKEN/.test(bad.stderr || bad.out));
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILED`);
