@@ -213,7 +213,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   // (Ctrl+J) lands the user ready to type instead of hunting for the field.
   let chatInputEl = $state<HTMLTextAreaElement | null>(null);
   $effect(() => {
-    if (aiPanelOpen && mode === "chat" && !minimized && chatInputEl) {
+    if ($aiPanelOpen && mode === "chat" && !minimized && chatInputEl) {
       chatInputEl.focus();
     }
   });
@@ -221,9 +221,9 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   // 5.7 — Escape unwinds one layer at a time: replace-confirm, then history,
   // then the panel itself. Registered on window so it works from any focus.
   $effect(() => {
-    if (!aiPanelOpen) return;
+    if (!$aiPanelOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       if (confirmReplace) { confirmReplace = null; e.preventDefault(); return; }
       if (historyOpen) { historyOpen = false; e.preventDefault(); return; }
       if (!minimized) { $aiPanelOpen = false; e.preventDefault(); }

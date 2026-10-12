@@ -10,7 +10,7 @@ UPDATED: 2026-09-24
 
 ## Privacy and model routing
 
-The automatic save path calls `bible_extract_mentions` only after `doc_save` succeeds. The Rust handler calls `LlmManager::chat_completion`, whose endpoint is `http://127.0.0.1:<managed port>` and whose default managed port is `8093`. It does not call `ai_structurize`, `ai_generate`, `smallModelEndpoint`, `mainModelEndpoint`, or any configured cloud provider. The only HTTP client in this path is the managed local sidecar client. If the model is unavailable, loading, or both local parsing passes fail, the handler returns `skipped`; the frontend retries from a debounced queue without turning the save into a failure.
+The automatic save path calls `bible_extract_mentions` only after `doc_save` succeeds. The Rust handler calls `LlmManager::chat_completion`, which reaches the bundled local LLM over its private AF_UNIX socket (`SockClient`) — the managed server binds no TCP port at all. The endpoints `http://127.0.0.1:8093/v1` and `http://localhost:8093/v1` remain only as sentinel `smallModelEndpoint` values and are redirected server-side to that socket client. This path does not call `ai_structurize`, `ai_generate`, `smallModelEndpoint`, `mainModelEndpoint`, or any configured cloud provider. If the model is unavailable, loading, or both local parsing passes fail, the handler returns `skipped`; the frontend retries from a debounced queue without turning the save into a failure.
 
 Locked documents are rejected by `bible_source_allowed` before model input, including locked project ancestors. Mention and suggestion reads omit locked source and project documents.
 

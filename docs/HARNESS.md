@@ -18,11 +18,12 @@ no `tools` arrays).
 
 App adaptations (all marked inline):
 - `_SECRET_PATTERNS` gains `hf_` + `AKIA` credential patterns.
-- `memory_server.py` (ours, stdlib only): authenticated loopback HTTP wrapper
-  + JSON persistence across restarts. Rust supplies a per-launch
-  `X-JWE-Memory-Token`; implemented routes are `GET /health /recall` and
-  `POST /learn /redact /clear`. Port 8092, data dir from argv (Rust passes
-  app-data).
+- `memory_server.py` (ours, stdlib only): authenticated JSON persistence
+  across restarts. Rust supplies a per-launch `X-JWE-Memory-Token`;
+  implemented routes are `GET /health /recall` and
+  `POST /learn /redact /clear`. Transport is newline-delimited JSON over
+  the sidecar's own stdin/stdout pipes (no TCP port); data dir comes from
+  argv (Rust passes app-data).
 - Secrets are redacted **before storage** (`remember()` scrubs first).
 
 ## Flow in the app

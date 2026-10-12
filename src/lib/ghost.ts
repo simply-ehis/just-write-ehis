@@ -4,8 +4,9 @@
  * Gating (enabled flag, lock, workspace privacy) stays with the caller.
  *
  * ROUTING (canonical — enforced here, not at call sites):
- *   ghost → local llama-server (:8093) when settings.llmEnabled,
- *   else → the SMALL slot (smallModelEndpoint/smallModelName, no API key).
+ *   ghost → the bundled local LLM when settings.llmEnabled (over its
+ *   private AF_UNIX socket — no TCP port), else → the SMALL slot
+ *   (smallModelEndpoint/smallModelName, no API key).
  * Ghost NEVER touches the main slot: callers pass no provider config at
  * all (there is no config parameter), so main-slot values cannot leak in.
  */

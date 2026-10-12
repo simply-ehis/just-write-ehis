@@ -329,6 +329,9 @@
   async function openBook(entry: BookshelfEntry) {
     selectedBook = entry;
     $currentDoc = entry.doc;
+    // Claim the id BEFORE the effect can observe openBook's own
+    // $currentDoc write, otherwise the effect re-enters openBook.
+    lastOpenedDocId = entry.doc.id;
     if (!$openTabs.find((t) => t.id === entry.doc.id)) $openTabs = [entry.doc, ...$openTabs];
     readerContent = await processTransclusions(entry.doc.content || '');
     readSections = splitSections(readerContent);
@@ -399,19 +402,30 @@
   // but the Reader never reacted, so the book didn't re-load and the
   // saved position wasn't restored. Watch $currentDoc and re-open the
   // book if it belongs to this workspace.
+  //
+  // closeBook() deliberately does NOT clear $currentDoc (other surfaces
+  // still show it as the active doc), so a naive `!selectedBook` guard
+  // would immediately re-open the book the user just closed — the Back
+  // button would appear broken. `lastOpenedDocId` separates "user closed
+  // this book" from "user switched to this book"; it is written by both
+  // openBook (so its own $currentDoc write can't double-open) and
+  // closeBook (so closing suppresses the reopen).
+  let lastOpenedDocId = $state<string | null>(null);
   $effect(() => {
     const doc = $currentDoc;
     if (!doc || $currentWorkspace !== 'reader') return;
-    // Find the bookshelf entry for this doc.
     const entry = books.find((b) => b.doc.id === doc.id);
-    if (entry && (!selectedBook || selectedBook.doc.id !== doc.id)) {
-      void openBook(entry);
-    }
+    if (!entry) return;
+    if (doc.id === lastOpenedDocId) return;
+    lastOpenedDocId = doc.id;
+    void openBook(entry);
   });
 
   function closeBook() {
     void savePosition();
     selectedBook = null;
+    // Suppress the reopen effect above for this doc id.
+    lastOpenedDocId = $currentDoc?.id ?? lastOpenedDocId;
     readerContent = '';
     marginNotes = [];
     showNotes = false;
@@ -810,13 +824,15 @@
           hasBottom={showNotes}
         >
           {#snippet top()}
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div
           class="reader-content"
           bind:this={scrollEl}
           onscroll={handleScroll}
           tabindex="0"
           onkeydown={handleReaderKeys}
-          role="application"
+          role="region"
           aria-label="Book text — arrow keys, Page Up/Down, Home and End scroll"
         >
           {#each readSections.slice(0, renderedCount) as section, i (section.id)}

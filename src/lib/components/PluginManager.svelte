@@ -86,7 +86,7 @@
         <button class="close-btn" onclick={closePanel}>&times;</button>
       </div>
       <div class="plugin-notice">
-        <Icon name="info" size={14} />
+        <Icon name="info" size={14} class="plugin-notice-icon" />
         <span>Community plugins are under development — this panel is a preview of planned integrations. Toggles and installs are not yet functional.</span>
       </div>
       <div class="plugin-list">
@@ -196,7 +196,7 @@
     font-size: 12px;
     color: var(--text-muted);
   }
-  .plugin-notice svg {
+  :global(.plugin-notice-icon) {
     flex-shrink: 0;
     color: var(--accent-primary);
   }
