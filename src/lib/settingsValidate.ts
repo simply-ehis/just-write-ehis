@@ -123,6 +123,7 @@ const SCHEMA: Record<string, Rule> = {
   keybindings: OBJ,
   featuresUsed: STRARR,
   dismissedNudges: STRARR,
+  skillNudgesEnabled: BOOL,
   aiPersona: STR,
   templates: ARR,
 

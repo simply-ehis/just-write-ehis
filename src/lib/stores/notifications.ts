@@ -8,6 +8,8 @@ export interface Toast {
   kind: ToastKind;
   message: string;
   duration: number;
+  /** Optional inline undo/action button (e.g. "Undo" after Mark Finished). */
+  action?: { label: string; run: () => void };
 }
 
 export interface Banner {
@@ -23,10 +25,23 @@ let nextId = 0;
 export const toasts = writable<Toast[]>([]);
 export const banners = writable<Banner[]>([]);
 
-export function showToast(message: string, kind: ToastKind = "info", duration = 3000) {
+/**
+ * showToast — transient notification. `action` renders an inline button
+ * (e.g. "Undo") next to the message; running it dismisses the toast.
+ * Additive: existing 3-arg callers are unchanged.
+ *
+ * Note: an action toast never latches, even for kind "error" — the action
+ * button is the recovery path, so it must stay clickable.
+ */
+export function showToast(
+  message: string,
+  kind: ToastKind = "info",
+  duration = 3000,
+  action?: Toast["action"]
+) {
   const id = nextId++;
   toasts.update((t) => {
-    const next = [...t, { id, kind, message, duration }];
+    const next = [...t, { id, kind, message, duration, action }];
     if (next.length <= 3) return next;
     // Evict the oldest NON-error first: a data-loss error must not be
     // silently dropped because three success toasts arrived after it.
@@ -36,7 +51,8 @@ export function showToast(message: string, kind: ToastKind = "info", duration = 
 
   // Errors latch until dismissed — a 3s window is not enough to notice
   // (let alone act on) a failed save. Toast.svelte is click-to-dismiss.
-  if (kind === "error") return;
+  // An action button is the explicit recovery path, so it stays live.
+  if (kind === "error" && !action) return;
   setTimeout(() => {
     toasts.update((t) => t.filter((x) => x.id !== id));
   }, duration);

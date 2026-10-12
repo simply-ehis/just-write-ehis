@@ -169,7 +169,23 @@ export function addTask(title: string, workspace: string, docId = ""): SmartTask
 }
 
 export function toggleTask(id: string): void {
-  smartTasks.update((tasks) => tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+  smartTasks.update((tasks) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return tasks;
+    const wasCompleted = task.completed;
+    const updated = tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
+    // 6.8 — completing a task used to vanish silently; now offer undo.
+    if (!wasCompleted) {
+      // Fire-and-forget toast with undo; the task is already completed in state.
+      import("$lib/stores/notifications").then(({ showToast }) =>
+        showToast(`Completed "${task.title}"`, "success", 6000, {
+          label: "Undo",
+          run: () => toggleTask(id),
+        })
+      );
+    }
+    return updated;
+  });
 }
 
 export function removeTask(id: string): void {

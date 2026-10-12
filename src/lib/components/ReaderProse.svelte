@@ -92,11 +92,16 @@
     background: #1a1917;
   }
 
+  /* 6.6 — in fixed themes, sections were rendered as separate cards with
+     visible borders/padding, creating ugly seams in sepia/dark modes.
+     Remove the card-like styling so sections flow naturally as one
+     continuous text block; the parent reader-body provides the background. */
   .reader-prose.theme-light,
   .reader-prose.theme-sepia,
   .reader-prose.theme-dark {
-    padding: 24px 28px;
-    border-radius: var(--radius-md);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   .reader-prose :global(h1),

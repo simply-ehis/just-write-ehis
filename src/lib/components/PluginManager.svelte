@@ -85,6 +85,10 @@
         <h2>Community Plugins</h2>
         <button class="close-btn" onclick={closePanel}>&times;</button>
       </div>
+      <div class="plugin-notice">
+        <Icon name="info" size={14} />
+        <span>Community plugins are under development — this panel is a preview of planned integrations. Toggles and installs are not yet functional.</span>
+      </div>
       <div class="plugin-list">
         {#each plugins as plugin}
           <div class="plugin-item" class:enabled={plugin.enabled} class:installed={plugin.installed}>
@@ -174,6 +178,27 @@
     color: var(--text-secondary);
     font-size: 18px;
     cursor: pointer;
+  }
+
+  .close-btn:hover {
+    background: var(--surface-overlay);
+    color: var(--text-primary);
+  }
+
+  /* 6.11 — notice that the plugin system is a preview/roadmap. */
+  .plugin-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .plugin-notice svg {
+    flex-shrink: 0;
+    color: var(--accent-primary);
   }
 
   .plugin-list {

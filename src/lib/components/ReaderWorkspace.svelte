@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { api, type Doc, type BookshelfEntry } from '$lib/api';
-  import { currentDoc, openTabs } from '$lib/stores/app';
+  import { currentDoc, openTabs, currentWorkspace } from '$lib/stores/app';
   import { showToast } from '$lib/stores/notifications';
   import { domainError } from '$lib/errors';
   import WorkspaceError from './WorkspaceError.svelte';
@@ -48,6 +48,53 @@
   let renderedCount = $state(12);
   // Section currently read aloud (highlight + autoscroll target).
   let readSectionIdx = $state<number | null>(null);
+
+  // 6.1 — Contents panel + live reading progress. Sections already exist
+  // for read-aloud; this exposes them for navigation instead of leaving
+  // the reader a single undifferentiated scroll.
+  let tocOpen = $state(false);
+  let readingPct = $derived(Math.round(Math.max(0, Math.min(1, readerPosition)) * 100));
+
+  /** True once the reader is essentially at the end, for the progress chip. */
+  let atEnd = $derived(readingPct >= 98);
+
+  /** Jump to a section, expanding the progressive window past it first. */
+  async function jumpToSection(id: string) {
+    const idx = readSections.findIndex((s) => s.id === id);
+    if (idx < 0) return;
+    if (idx + 1 > renderedCount) renderedCount = Math.min(readSections.length, idx + 1);
+    tocOpen = false;
+    await tick();
+    const el = scrollEl?.querySelector(`section[data-section="${CSS.escape(id)}"]`);
+    el?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
+  // 6.2 — Keyboard scrolling. The content div had no tabindex/keydown, so
+  // the reader was mouse-only (arrows/PageUp/PageDown/Home/End did nothing).
+  function handleReaderKeys(e: KeyboardEvent) {
+    const el = scrollEl;
+    if (!el) return;
+    const line = 96;
+    const page = el.clientHeight * 0.9;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault(); el.scrollBy({ top: line, behavior: "smooth" }); break;
+      case "ArrowUp":
+        e.preventDefault(); el.scrollBy({ top: -line, behavior: "smooth" }); break;
+      case "PageDown":
+        e.preventDefault(); el.scrollBy({ top: page, behavior: "smooth" }); break;
+      case "PageUp":
+        e.preventDefault(); el.scrollBy({ top: -page, behavior: "smooth" }); break;
+      case " ":
+        e.preventDefault(); el.scrollBy({ top: page, behavior: "smooth" }); break;
+      case "Home":
+        e.preventDefault(); el.scrollTo({ top: 0, behavior: "smooth" }); break;
+      case "End":
+        e.preventDefault(); el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); break;
+      default:
+        break;
+    }
+  }
 
   /** Rendered HTML per section, in section order. */
   let sectionHtml = $derived(
@@ -335,11 +382,32 @@
       void restore();
     }
 
+    // 6.4 — opening a to-read book flips it to reading implicitly (that's
+    // correct), but it used to be an unwrapped await: a failure left the UI
+    // claiming "reading" while the backend still said "to-read". Fail loud.
     if (entry.shelf_status === 'to-read') {
-      await api.readerSetShelfStatus(entry.doc.id, 'reading');
-      entry.shelf_status = 'reading';
+      try {
+        await api.readerSetShelfStatus(entry.doc.id, 'reading');
+        entry.shelf_status = 'reading';
+      } catch (e) {
+        showToast(`Couldn't start "${entry.doc.title}": ${e instanceof Error ? e.message : e}`, 'error');
+      }
     }
   }
+
+  // 6.5 — when the user clicks a Reader tab, the tab bar sets $currentDoc
+  // but the Reader never reacted, so the book didn't re-load and the
+  // saved position wasn't restored. Watch $currentDoc and re-open the
+  // book if it belongs to this workspace.
+  $effect(() => {
+    const doc = $currentDoc;
+    if (!doc || $currentWorkspace !== 'reader') return;
+    // Find the bookshelf entry for this doc.
+    const entry = books.find((b) => b.doc.id === doc.id);
+    if (entry && (!selectedBook || selectedBook.doc.id !== doc.id)) {
+      void openBook(entry);
+    }
+  });
 
   function closeBook() {
     void savePosition();
@@ -402,8 +470,31 @@
   async function finishBook() {
     if (!selectedBook) return;
     await savePosition();
-    await api.readerSetShelfStatus(selectedBook.doc.id, 'finished');
-    selectedBook.shelf_status = 'finished';
+    try {
+      await api.readerSetShelfStatus(selectedBook.doc.id, 'finished');
+      selectedBook.shelf_status = 'finished';
+      // 6.4 — "Mark Finished" used to be silent and irreversible: no
+      // confirmation, no feedback, no way back. Confirm inline, then offer
+      // an undo, because mis-marking a book you're mid-way through is
+      // easy and otherwise unfixable from the UI.
+      const finishedBook = selectedBook;
+      showToast(`Marked "${finishedBook.doc.title}" as finished`, 'success', 6000, {
+        label: 'Undo',
+        run: () => {
+          void (async () => {
+            try {
+              await api.readerSetShelfStatus(finishedBook.doc.id, 'reading');
+              finishedBook.shelf_status = 'reading';
+              showToast('Moved back to reading', 'info');
+            } catch (e) {
+              showToast(`Couldn't undo: ${e instanceof Error ? e.message : e}`, 'error');
+            }
+          })();
+        },
+      });
+    } catch (e) {
+      showToast(`Couldn't mark as finished: ${e instanceof Error ? e.message : e}`, 'error');
+    }
   }
 
   /** Tap a star to rate; tap the current rating again to clear it. */
@@ -559,6 +650,15 @@
         <div class="shelf-empty">Loading...</div>
       {:else if booksLoadError}
         <WorkspaceError message={`Reader — couldn't load bookshelf: ${booksLoadError}`} onRetry={() => loadBooks()} />
+      {:else if books.length === 0 && shelfFilter !== 'all'}
+        <!-- 6.3 — "Your bookshelf is empty" was shown even when the shelf
+             had books and only the active filter hid them, which is simply
+             false. Say what actually happened and offer the way out. -->
+        <div class="shelf-empty">
+          <p>No books marked {shelfFilter === 'to-read' ? 'To Read' : shelfFilter === 'reading' ? 'Reading' : 'Finished'}.</p>
+          <p>That's what the {shelfFilter === 'to-read' ? 'To Read' : shelfFilter === 'reading' ? 'Reading' : 'Finished'} tab shows — your other books are still here.</p>
+          <button class="shelf-clear-filter" onclick={() => setFilter('all')}>Show all books</button>
+        </div>
       {:else if books.length === 0}
         <div class="shelf-empty">
           <p>Your bookshelf is empty.</p>
@@ -604,6 +704,9 @@
       <div class="reader-toolbar">
         <button class="back-btn" onclick={closeBook}>← Back</button>
         <span class="reader-title">{selectedBook.doc.title}</span>
+        <span class="read-pct" title="How far through this book you are">
+          {atEnd ? 'Finished' : `${readingPct}% read`}
+        </span>
         <div class="rate-group" role="group" aria-label="Rate this book">
           {#each [1, 2, 3, 4, 5] as n}
             <button
@@ -615,6 +718,18 @@
             >{selectedBook.rating != null && n <= selectedBook.rating ? '★' : '☆'}</button>
           {/each}
         </div>
+        {#if readSections.length > 1}
+          <button
+            class="toc-btn"
+            class:active={tocOpen}
+            onclick={() => (tocOpen = !tocOpen)}
+            title="Table of contents"
+            aria-label="Table of contents"
+            aria-expanded={tocOpen}
+          >
+            Contents
+          </button>
+        {/if}
         <button class="finish-btn" onclick={finishBook}>Mark Finished</button>
         <button
           class="notes-btn"
@@ -638,6 +753,29 @@
           />
         {/if}
       </div>
+      {#if tocOpen}
+        <!-- 6.1 — Contents. Sections already exist for read-aloud; exposing
+             them here turns a single undifferentiated scroll into
+             navigable structure, with live progress alongside. -->
+        <div class="toc-panel" role="dialog" aria-label="Table of contents">
+          <div class="toc-head">
+            <span>Contents</span>
+            <span class="toc-progress">{readingPct}% read</span>
+          </div>
+          <div class="toc-list">
+            {#each readSections as s, i}
+              <button
+                class="toc-item"
+                class:active={readSectionIdx === i}
+                onclick={() => jumpToSection(s.id)}
+                title={`Jump to ${s.title}`}
+              >
+                <span class="toc-item-title">{s.title}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <div class="reader-controls" role="toolbar" aria-label="Reading controls">
         <label class="ctl">
           <span class="ctl-label">Font</span>
@@ -672,7 +810,15 @@
           hasBottom={showNotes}
         >
           {#snippet top()}
-        <div class="reader-content" bind:this={scrollEl} onscroll={handleScroll}>
+        <div
+          class="reader-content"
+          bind:this={scrollEl}
+          onscroll={handleScroll}
+          tabindex="0"
+          onkeydown={handleReaderKeys}
+          role="application"
+          aria-label="Book text — arrow keys, Page Up/Down, Home and End scroll"
+        >
           {#each readSections.slice(0, renderedCount) as section, i (section.id)}
             <ReaderProse
               html={sectionHtml[i] ?? ""}
@@ -898,6 +1044,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    /* Anchors the Contents dropdown to the toolbar, not the viewport. */
+    position: relative;
   }
 
   .reader-toolbar {
@@ -1143,6 +1291,99 @@
     font-weight: var(--font-weight-semibold);
   }
 
+  /* 6.1 — live reading progress, visible without opening anything. */
+  .read-pct {
+    flex-shrink: 0;
+    font-size: var(--font-size-xs, 11px);
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 6.1 — Contents toggle, styled like the other toolbar buttons. */
+  .toc-btn {
+    padding: 3px 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-xs, 11px);
+    cursor: pointer;
+  }
+  .toc-btn:hover,
+  .toc-btn.active {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+  }
+
+  .toc-panel {
+    position: absolute;
+    top: 100%;
+    left: 12px;
+    z-index: 30;
+    width: min(300px, 70vw);
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-base);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+
+  .toc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-size: var(--font-size-xs, 11px);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+  }
+
+  .toc-progress {
+    font-variant-numeric: tabular-nums;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .toc-list {
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .toc-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm, 13px);
+    cursor: pointer;
+  }
+
+  .toc-item:hover {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+  }
+
+  .toc-item.active {
+    color: var(--accent-primary);
+    background: var(--surface-overlay);
+  }
+
+  .toc-item-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .rate-group {
     display: flex;
     gap: 2px;
@@ -1173,6 +1414,22 @@
     min-width: 0;
     overflow-y: auto;
     padding: var(--space-6);
+  }
+
+  /* 6.6 — provide the fixed-theme backgrounds here so sections flow
+     without visible seams. */
+  :global(.theme-light) .reader-content { background: #faf9f6; }
+  :global(.theme-sepia) .reader-content { background: #f4ecd8; }
+  :global(.theme-dark) .reader-content { background: #1a1917; }
+
+  /* 6.2 — focusable so arrow/page keys work; the ring shows it has focus
+     without changing layout when it doesn't. */
+  .reader-content:focus {
+    outline: none;
+  }
+  .reader-content:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: -2px;
   }
 
   /* One compact control row: font, size, measure, theme. Wraps on mobile. */

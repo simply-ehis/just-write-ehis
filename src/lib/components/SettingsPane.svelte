@@ -1374,6 +1374,14 @@
       </div>
 
     {:else if activeCategory === "skills"}
+      <div class="settings-section">
+        <h3>Skill Nudges</h3>
+        <div class="setting-row">
+          <label for="setting-skill-nudges-enabled">Show Skill Nudges</label>
+          <input id="setting-skill-nudges-enabled" type="checkbox" bind:checked={$settings.skillNudgesEnabled} />
+        </div>
+        <p class="setting-desc">Occasional tips about unused features (e.g., Node Map, Composer). Disable to stop the strip entirely.</p>
+      </div>
       <div class="settings-embed">
         <LazyWorkspace loader={() => import("./SkillsPage.svelte")} label="Tips" />
       </div>

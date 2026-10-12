@@ -4,6 +4,7 @@
   import { currentDoc, openTabs, currentWorkspace, showSettings } from "$lib/stores/app";
   import { openSettingsAt } from "$lib/stores/settings";
   import { smartTasks, openTasks, addTask, toggleTask, removeTask } from "$lib/stores/uiState";
+  import { showToast } from "$lib/stores/notifications";
   import Icon from "$lib/components/Icon.svelte";
   import { domainError, warnOnce } from "$lib/errors";
 
@@ -99,6 +100,23 @@
       suggestedDocs = merged;
     } catch {
       suggestedDocs = [];
+    }
+  }
+
+  // 6.12 — allow dismissing individual suggestions and manual refresh.
+  let dismissedSuggestions = $state<Set<string>>(new Set());
+
+  function dismissSuggestion(id: string) {
+    dismissedSuggestions.add(id);
+    suggestedDocs = suggestedDocs.filter((d) => d.id !== id);
+  }
+
+  async function loadSuggestionsFromApi() {
+    try {
+      const counts = await api.dashboardWorkspaceCounts();
+      await loadSuggestions(counts);
+    } catch {
+      showToast("Couldn't refresh suggestions", "error");
     }
   }
 
@@ -259,9 +277,18 @@
     <!-- Recent Documents -->
     <section class="home-section">
       <h2>Recent Documents</h2>
-      {#if recentDocs.length === 0}
-        <p class="empty">No documents yet. Start writing!</p>
-      {:else}
+{#if recentDocs.length === 0}
+          <p class="empty">No documents yet. Start writing!</p>
+          <button class="home-cta" onclick={() => {
+            $currentWorkspace = 'write';
+            void api.docCreate('Untitled', 'write', '').then(doc => {
+              $currentDoc = doc;
+              $openTabs = [doc, ...$openTabs];
+            }).catch(e => domainError("Home", "couldn't create document", e));
+          }}>
+            <Icon name="pencil" size={16} /> New Document
+          </button>
+        {:else}
         <ul class="recent-list">
           {#each recentDocs as [id, title, updatedAt]}
             <li>
@@ -348,14 +375,25 @@
     <!-- Smart suggestions (activity-ranked) -->
     {#if suggestedDocs.length > 0}
       <section class="home-section">
-        <h2>Pick Up Where You Left Off</h2>
+        <div class="section-header">
+          <h2>Pick Up Where You Left Off</h2>
+          <div class="section-actions">
+            <button class="refresh-btn" onclick={loadSuggestionsFromApi} title="Refresh suggestions" aria-label="Refresh suggestions">
+              <Icon name="refresh" size={14} />
+            </button>
+          </div>
+        </div>
         <ul class="recent-list">
           {#each suggestedDocs as doc}
-            <li>
+            <li class="suggestion-item">
               <button class="recent-item" onclick={() => openPinned(doc)}>
                 <span class="ws-icon"><Icon name={workspaceIcons[doc.workspace] ?? "files"} size={15} /></span>
                 <span class="recent-title">{doc.title}</span>
                 <span class="recent-date">{workspaceLabel(doc.workspace)}</span>
+              </button>
+              <span class="suggestion-reason">Suggested based on your recent activity in {workspaceLabel(doc.workspace)}</span>
+              <button class="suggestion-dismiss" onclick={() => dismissSuggestion(doc.id)} title="Dismiss this suggestion" aria-label="Dismiss this suggestion">
+                <Icon name="x" size={12} />
               </button>
             </li>
           {/each}
@@ -537,6 +575,25 @@
     font-style: italic;
   }
 
+  .home-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 8px 16px;
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--accent-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .home-cta:hover {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+  }
+
   .recent-list {
     list-style: none;
     margin: 0;
@@ -562,6 +619,79 @@
 
   .recent-item:hover {
     background: var(--surface-overlay);
+  }
+
+  /* 6.12 — smart suggestions with reason labels, dismiss, and refresh. */
+  .suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  .suggestion-item:hover {
+    background: var(--surface-overlay);
+  }
+
+  .suggestion-reason {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-left: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .suggestion-dismiss {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .suggestion-dismiss:hover {
+    background: var(--surface-overlay);
+    color: var(--accent-semantic-red);
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .section-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .refresh-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .refresh-btn:hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
   }
 
   .recent-date {

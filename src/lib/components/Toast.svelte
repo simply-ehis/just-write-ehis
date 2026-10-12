@@ -13,11 +13,24 @@
 
 <div class="toast-stack">
   {#each $toasts as toast (toast.id)}
-    <button class="toast toast-{toast.kind}" onclick={() => dismissToast(toast.id)} aria-label="Dismiss notification">
-      <span class="toast-icon">{iconFor(toast.kind)}</span>
+    <div class="toast toast-{toast.kind}" role="status">
+      <span class="toast-icon" aria-hidden="true">{iconFor(toast.kind)}</span>
       <span class="toast-msg">{toast.message}</span>
-      <span class="toast-close" aria-hidden="true">&times;</span>
-    </button>
+      {#if toast.action}
+        <button
+          class="toast-action"
+          onclick={() => {
+            toast.action?.run();
+            dismissToast(toast.id);
+          }}
+        >
+          {toast.action.label}
+        </button>
+      {/if}
+      <button class="toast-close" onclick={() => dismissToast(toast.id)} aria-label="Dismiss notification">
+        &times;
+      </button>
+    </div>
   {/each}
 </div>
 
@@ -46,7 +59,6 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     pointer-events: auto;
     animation: slideIn 0.2s ease-out;
-    cursor: pointer;
     text-align: left;
     width: 100%;
   }
@@ -65,10 +77,31 @@
 
   .toast-msg { flex: 1; }
 
+  /* Inline action (undo/retry) — a real button so it stays clickable
+     independently of the toast's own dismiss affordance. */
+  .toast-action {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-overlay);
+    color: var(--accent-primary);
+    cursor: pointer;
+  }
+  .toast-action:hover { border-color: var(--accent-primary); }
+
   .toast-close {
     font-size: 16px;
     opacity: 0.4;
     flex-shrink: 0;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
   }
   .toast:hover .toast-close { opacity: 1; }
 

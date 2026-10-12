@@ -109,6 +109,7 @@ export interface AppSettings {
   keybindings: Record<string, string>;
   featuresUsed: string[];
   dismissedNudges: string[];
+  skillNudgesEnabled: boolean;
   aiPersona: string;
   templates: { name: string; content: string; workspace: string }[];
 
@@ -238,6 +239,7 @@ const defaultSettings: AppSettings = {
   },
   featuresUsed: [],
   dismissedNudges: [],
+  skillNudgesEnabled: true,
   aiPersona: "",
   templates: [],
   hasOnboarded: false,

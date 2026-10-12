@@ -1,11 +1,30 @@
 <script lang="ts">
   import { api, isBrowserPreview } from "$lib/api";
-  import { currentDoc, currentWorkspace } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, openTabs } from "$lib/stores/app";
   import { saveState } from "$lib/stores/saveState";
   import Icon from "$lib/components/Icon.svelte";
   import RhythmHeatmap from "$lib/components/RhythmHeatmap.svelte";
   import { settings } from "$lib/stores/settings";
   import { warnOnce } from "$lib/errors";
+  import { showToast } from "$lib/stores/notifications";
+
+  function openStats() {
+    window.dispatchEvent(new CustomEvent("open-stats"));
+  }
+
+  function handleStatsKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openStats();
+    }
+  }
+
+  function handleWorkspaceKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      $currentWorkspace = 'write';
+    }
+  }
 
   const browserVoice = isBrowserPreview();
   let wordCount = $derived($currentDoc?.word_count ?? 0);
@@ -13,6 +32,7 @@
   let streak = $state<[number, number] | null>(null);
   let todayWords = $state(0);
   let rhythm = $state<[number, number][]>([]);
+  let statsTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function loadStats() {
     try {
@@ -33,9 +53,19 @@
     }
   }
 
+  function scheduleLoadStats() {
+    if (statsTimer) clearTimeout(statsTimer);
+    statsTimer = setTimeout(loadStats, 800);
+  }
+
   $effect(() => {
-    void [$currentDoc?.id, $currentDoc?.word_count, $saveState];
-    loadStats();
+    void [$currentDoc?.id, $currentDoc?.word_count];
+    scheduleLoadStats();
+  });
+
+  $effect(() => {
+    $saveState;
+    scheduleLoadStats();
   });
 
   /** Today's activity by hour as a tiny sparkline path (64x18). */
@@ -60,7 +90,7 @@
     <Icon name="plus" size={12} />
     <span>Capture</span>
   </button>
-  <div class="item" title="Words in current document">
+  <div class="item" title="Words in current document — click for stats" role="button" tabindex="0" onclick={openStats} onkeydown={handleStatsKeydown}>
     <Icon name="pencil" size={12} />
     <span>{wordCount.toLocaleString()} words</span>
   </div>
@@ -81,7 +111,7 @@
   {/if}
   <div class="spacer"></div>
   {#if streak}
-    <div class="item streak" title="Writing streak (days in a row)">
+    <div class="item streak" title="Writing streak (days in a row) — click for stats" role="button" tabindex="0" onclick={openStats} onkeydown={handleStatsKeydown}>
       <Icon name="star" size={12} />
       <span>{streak[0]} day streak</span>
       {#if rhythm.some(([, c]) => c > 0)}
@@ -99,11 +129,11 @@
     </div>
   {/if}
   {#if stats}
-    <div class="item" title="Total stats">
+    <div class="item" title="Total stats — click for details" role="button" tabindex="0" onclick={openStats} onkeydown={handleStatsKeydown}>
       <span>{stats.totalDocs} docs | {stats.totalWords.toLocaleString()} words</span>
     </div>
   {/if}
-  <div class="item">
+  <div class="item" role="button" tabindex="0" onclick={() => $currentWorkspace = 'write'} onkeydown={handleWorkspaceKeydown} title="Switch workspace">
     <span>{$currentWorkspace}</span>
   </div>
   <div class="item">

@@ -1,23 +1,25 @@
 <script lang="ts">
   import { settings } from "$lib/stores/settings";
-  import { currentDoc } from "$lib/stores/app";
+  import { currentDoc, currentWorkspace, aiPanelOpen } from "$lib/stores/app";
   import { api } from "$lib/api";
   import { dismissNudge } from "$lib/features";
+  import { showToast } from "$lib/stores/notifications";
 
   interface Nudge {
     id: string;
     feature: string;
     message: string;
     shortcut?: string;
+    action?: () => void;
   }
 
   const allNudges: Nudge[] = [
-    { id: "nodemap", feature: "map", message: "Try the Node Map to see your doc connections", shortcut: "M" },
-    { id: "composer", feature: "composer", message: "Composer mode can rewrite and transform your prose", shortcut: "AI Panel" },
-    { id: "structurize", feature: "structurize", message: "Structurize turns raw notes into structured docs with {directives}" },
-    { id: "ghost", feature: "ghost", message: "Ghost mode autocompletes as you type — enable in Settings" },
-    { id: "commandpalette", feature: "palette", message: "Command Palette gives you every action at your fingertips", shortcut: "Ctrl+K" },
-    { id: "export", feature: "export", message: "Export any doc — Markdown, HTML, Word, eBook, or PDF" },
+    { id: "nodemap", feature: "map", message: "Try the Node Map to see your doc connections", shortcut: "M", action: () => { $currentWorkspace = 'map'; } },
+    { id: "composer", feature: "composer", message: "Composer mode can rewrite and transform your prose", shortcut: "AI Panel", action: () => { $currentWorkspace = 'write'; $aiPanelOpen = true; } },
+    { id: "structurize", feature: "structurize", message: "Structurize turns raw notes into structured docs with {directives}", action: () => { $currentWorkspace = 'write'; $aiPanelOpen = true; window.dispatchEvent(new CustomEvent("set-mode", { detail: { mode: "structurize" } })); } },
+    { id: "ghost", feature: "ghost", message: "Ghost mode autocompletes as you type — enable in Settings", action: () => { $settings.ghostEnabled = true; showToast("Ghost mode enabled — start typing to see suggestions", "info"); } },
+    { id: "commandpalette", feature: "palette", message: "Command Palette gives you every action at your fingertips", shortcut: "Ctrl+K", action: () => window.dispatchEvent(new CustomEvent("open-command-palette")) },
+    { id: "export", feature: "export", message: "Export any doc — Markdown, HTML, Word, eBook, or PDF", action: () => { $currentWorkspace = 'write'; window.dispatchEvent(new CustomEvent("open-export")); } },
   ];
 
   let currentNudge = $state<Nudge | null>(null);
@@ -25,6 +27,10 @@
   let craftNudge = $state<Nudge | null>(null);
 
   $effect(() => {
+    if (!$settings.skillNudgesEnabled) {
+      currentNudge = null;
+      return;
+    }
     const used = $settings.featuresUsed;
     const dismissed = $settings.dismissedNudges;
     const available = allNudges.filter(
@@ -69,18 +75,18 @@
 
   function dismiss(id: string) {
     dismissNudge(id);
-    nudgeIdx++;
+    // 6.10 — stop advancing on dismiss; user dismissed this one, don't auto-advance
   }
 </script>
 
 {#if currentNudge}
   <div class="skill-nudge">
-    <span class="nudge-text">
+    <button class="nudge-text" onclick={currentNudge.action} title={currentNudge.action ? "Open this feature" : undefined}>
       {currentNudge.message}
       {#if currentNudge.shortcut}
         <span class="nudge-shortcut">{currentNudge.shortcut}</span>
       {/if}
-    </span>
+    </button>
     <button class="nudge-dismiss" onclick={() => dismiss(currentNudge!.id)}>&times;</button>
   </div>
 {/if}
@@ -104,6 +110,22 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .nudge-text:hover {
+    color: var(--text-primary);
+  }
+  .nudge-text:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 
   .nudge-shortcut {

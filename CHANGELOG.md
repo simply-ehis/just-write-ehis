@@ -2,13 +2,14 @@
 
 ## Unreleased (UX polish: trust bugs + Capture discoverability + voice, plan filed)
 
-Plan: `docs/PLANS/2026-10-09-ux-polish.md` (Phases 1–7; Phases 1–5 are
+Plan: `docs/PLANS/2026-10-09-ux-polish.md` (Phases 1–7; Phases 1–6 are
 DONE). Gates for Phases 1–3: svelte-check 0/0, vite build clean,
 onboard-flow + ws-toggles + shell-nav (desktop+mobile) + tabs-functional
 + e2e-browser + smoke + widget-invariants + acl-parity (174/174) +
 settings-validate all pass. Phase 4 gates all green; the only failure
 (test:themes) is a pre-existing esbuild "no loader for .woff/.woff2"
-unrelated to these changes. Phase 5 keeps the same suite green.
+unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
+(all 12 items) gates all green.
 
 ### Changed
 - **Inbox is now labeled Capture** (workspace id stays `inbox` — no data
@@ -151,6 +152,41 @@ unrelated to these changes. Phase 5 keeps the same suite green.
   while first-message previews resolve, instead of a bare "Loading…"
   over 30 sequential IPC calls (5.10).
 - **New `arrow-down` icon** for the scroll-to-bottom button.
+
+### Reader, Home, StatusBar, auto-actions (Phase 6)
+- **Reader gets a table of contents and live progress** (6.1): sections
+  (already used for TTS) now power a Contents dropdown with click-to-jump
+  and a live "% read" chip. Keyboard scrolling added (arrows, Page Up/Down,
+  Home/End) with a focusable content area (6.2). The shelf filter empty
+  state now tells the truth: "No books marked Reading" instead of the
+  misleading "Your bookshelf is empty" (6.3).
+- **Mark Finished gets confirm + undo** (6.4): the button now requires
+  explicit confirmation, and a toast with "Undo" reverts the status back to
+  reading. The `to-read`→`reading` flip on open is now wrapped in try/catch
+  with a toast on failure.
+- **Reader tabs re-read the document** (6.5): clicking a Reader tab now
+  re-opens the book and restores the saved position instead of doing
+  nothing.
+- **ReaderProse seams removed** (6.6): fixed themes no longer render
+  sections as separate cards with visible borders in sepia/dark modes.
+- **HomePane gets a New Document CTA** (6.7): the empty state now shows a
+  "New Document" button that creates and opens a doc in one click.
+- **Home tasks get undo** (6.8): completing a task shows a toast with an
+  "Undo" button instead of vanishing silently.
+- **StatusBar becomes clickable** (6.9): word count, streak, and stats
+  items open the stats panel; the workspace label switches to Write on
+  click. Stats refresh debounced to 800ms to avoid hammering the API.
+- **Skill Nudges tamed** (6.10): new `skillNudgesEnabled` setting in
+  Settings → Tips toggles the strip globally; dismissing a nudge no longer
+  auto-advances to the next; the message text is clickable and opens the
+  relevant feature; the strip is hidden in Zen mode.
+- **Plugin Manager relabeled as roadmap** (6.11): a notice banner now
+  explains the panel is a preview of planned integrations; toggles and
+  installs are not yet functional.
+- **Smart suggestions get reasons, dismiss, and refresh** (6.12): each
+  "Pick Up Where You Left Off" card now shows why it was suggested (e.g.,
+  "Based on your activity in Novel Studio"), has a dismiss button, and the
+  section has a refresh button to regenerate suggestions.
 
 ## Unreleased (sidecar slice 4: zero TCP ports + single-flight ensure)
 
