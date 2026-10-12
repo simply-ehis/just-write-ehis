@@ -1,7 +1,11 @@
 import { mount } from "svelte";
 // Eager: the default editor weight only. Display type + other editor
 // families arrive around first paint (below) so they never tax it.
-import "@fontsource/jetbrains-mono/400.css";
+// Latin-only subsets: cyrillic/greek/vietnamese/symbols are never used
+// here, and pulling the all-subsets entry would emit ~14 font files per
+// weight. latin covers A–Z English; latin-ext adds accented characters.
+import "@fontsource/jetbrains-mono/latin-400.css";
+import "@fontsource/jetbrains-mono/latin-ext-400.css";
 import "./app.css";
 import { ensureEditorFont } from "$lib/editorTheme";
 
@@ -37,9 +41,12 @@ window.addEventListener("vite:preloadError", (e) => {
 async function bootstrap() {
   if (brutalistAtBoot) {
     await Promise.all([
-      import("@fontsource/archivo-black/400.css"),
-      import("@fontsource/space-mono/400.css"),
-      import("@fontsource/space-mono/700.css"),
+      import("@fontsource/archivo-black/latin-400.css"),
+      import("@fontsource/archivo-black/latin-ext-400.css"),
+      import("@fontsource/space-mono/latin-400.css"),
+      import("@fontsource/space-mono/latin-ext-400.css"),
+      import("@fontsource/space-mono/latin-700.css"),
+      import("@fontsource/space-mono/latin-ext-700.css"),
     ]);
   }
   const isWidget = new URLSearchParams(window.location.search).get("widget") === "1";
@@ -51,7 +58,10 @@ async function bootstrap() {
   });
   // Post-paint: bold weight + the saved editor family (usually the eager
   // default — a no-op then) so neither blocks first paint.
-  void import("@fontsource/jetbrains-mono/700.css");
+  void Promise.all([
+    import("@fontsource/jetbrains-mono/latin-700.css"),
+    import("@fontsource/jetbrains-mono/latin-ext-700.css"),
+  ]);
   ensureEditorFont(storedSetting("fontFamily"));
 }
 

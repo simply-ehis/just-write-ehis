@@ -136,12 +136,29 @@ export type EditorFont = (typeof EDITOR_FONTS)[number];
 const loadedEditorFonts = new Set<string>(["JetBrains Mono"]);
 
 export const LAZY_FONT_LOADERS: Record<string, () => Promise<unknown>> = {
+  // Latin-only subsets (see main.ts): the all-subsets entries would emit
+  // ~14 font files per weight for scripts this app never renders.
   "Fira Code": () =>
-    Promise.all([import("@fontsource/fira-code/400.css"), import("@fontsource/fira-code/700.css")]),
+    Promise.all([
+      import("@fontsource/fira-code/latin-400.css"),
+      import("@fontsource/fira-code/latin-ext-400.css"),
+      import("@fontsource/fira-code/latin-700.css"),
+      import("@fontsource/fira-code/latin-ext-700.css"),
+    ]),
   "Source Code Pro": () =>
-    Promise.all([import("@fontsource/source-code-pro/400.css"), import("@fontsource/source-code-pro/700.css")]),
+    Promise.all([
+      import("@fontsource/source-code-pro/latin-400.css"),
+      import("@fontsource/source-code-pro/latin-ext-400.css"),
+      import("@fontsource/source-code-pro/latin-700.css"),
+      import("@fontsource/source-code-pro/latin-ext-700.css"),
+    ]),
   "IBM Plex Mono": () =>
-    Promise.all([import("@fontsource/ibm-plex-mono/400.css"), import("@fontsource/ibm-plex-mono/700.css")]),
+    Promise.all([
+      import("@fontsource/ibm-plex-mono/latin-400.css"),
+      import("@fontsource/ibm-plex-mono/latin-ext-400.css"),
+      import("@fontsource/ibm-plex-mono/latin-700.css"),
+      import("@fontsource/ibm-plex-mono/latin-ext-700.css"),
+    ]),
 };
 
 export function ensureEditorFont(family: string): void {
@@ -165,9 +182,12 @@ export function ensureBrutalistFonts(): void {
   if (brutalistFontsLoaded) return;
   brutalistFontsLoaded = true;
   void Promise.all([
-    import("@fontsource/archivo-black/400.css"),
-    import("@fontsource/space-mono/400.css"),
-    import("@fontsource/space-mono/700.css"),
+    import("@fontsource/archivo-black/latin-400.css"),
+    import("@fontsource/archivo-black/latin-ext-400.css"),
+    import("@fontsource/space-mono/latin-400.css"),
+    import("@fontsource/space-mono/latin-ext-400.css"),
+    import("@fontsource/space-mono/latin-700.css"),
+    import("@fontsource/space-mono/latin-ext-700.css"),
   ]).catch(() => {
     brutalistFontsLoaded = false;
   });
