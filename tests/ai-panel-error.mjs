@@ -47,6 +47,9 @@ if (dom.window.Range) {
   if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = emptyRect;
 }
 if (dom.window.Element && !dom.window.Element.prototype.getClientRects) dom.window.Element.prototype.getClientRects = function () { return []; };
+// jsdom does not implement Element.scrollTo; WebView2/Chromium do. Shim it so
+// the auto-scroll path is exercised instead of throwing.
+if (dom.window.Element && typeof dom.window.Element.prototype.scrollTo !== "function") dom.window.Element.prototype.scrollTo = function () {};
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 globalThis.window.innerWidth = 1280;
 globalThis.window.innerHeight = 800;

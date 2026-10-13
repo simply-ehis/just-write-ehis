@@ -19,8 +19,17 @@ with the site.
 
 ## One-time setup (maintainer)
 
-1. **Signing keypair** — done (rotated 2026-09-29 with a fresh password;
-   no releases ever shipped under any older key, so nothing trusts them).
+1. **Signing keypair** — currently `3FF086625EED8646` (rotated 2026-09-29 with
+   a fresh password). **This rotation is not safe for existing installs yet.**
+   The key that actually signed the published v0.2.1 installer is
+   `1C2875FB2CC4040E` (verified from the release signature:
+   `Just Write ehis_0.2.1_x64-setup.exe`, timestamp 2026-09-27 09:31 UTC) —
+   *not* the key at the `v0.2.1` tag, which is `1C2ACD78E48FDD60`. The updater
+   verifies each download against the pubkey compiled into the **running**
+   binary, so every shipped install currently trusts `1C2875FB2CC4040E` and
+   will **reject** anything signed with today's key. Until a bridge release
+   ships, cutting a normal release silently bricks self-update for the entire
+   installed base. See "Rotating the signing key" below.
    The private key lives at the repo root as `just-write-ehis.key`
    (gitignored, never commit it) and its password in
    `just-write-ehis.key.password` (also gitignored — back both up
@@ -31,8 +40,9 @@ with the site.
    and MUST unset machine-level `TAURI_SIGNING_PRIVATE_KEY_PATH` (it points
    at another project's key and makes signing fail). Passwordless keys are
    avoided: the signer CLI prompts on the Windows console for them and
-   hangs headless builds. (Superseded keys are backed up outside the repo;
-   delete them once the first signed build succeeds.)
+   hangs headless builds. (Superseded keys are backed up outside the repo —
+   **keep `1C2875FB2CC4040E` until the bridge release below has shipped and
+   the installed base has moved past it**; only then is it safe to delete.)
 2. **Public key** — set in `src-tauri/tauri.conf.json` →
    `plugins.updater.pubkey`. Matches the root key file.
 3. **`plugins.updater.endpoints`** — set to the private repo's release
@@ -48,6 +58,32 @@ with the site.
    Gotcha: the `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` var must be present
    and correct — an absent/empty one makes tauri-cli stop for an
    interactive password prompt and hang headless builds forever.
+
+## Rotating the signing key (bridge release)
+
+The updater checks a download against the pubkey **baked into the binary that
+is already running** — not against anything on disk or server-side. So a key
+rotation is a two-release operation, and skipping the first half breaks every
+install in the field.
+
+To move from key `OLD` to key `NEW`:
+
+1. **Bridge release.** Set `plugins.updater.pubkey` = `NEW`, then sign the
+   build with `OLD`. Existing installs trust `OLD`, so they accept it; the
+   binary they receive carries `NEW`, so from then on they trust `NEW`.
+2. **Normal release.** Every release after the bridge is signed with `NEW`
+   as usual.
+
+Signing the bridge with `NEW` is the failure mode to avoid: the old install
+base rejects it, and there is no in-app recovery — users must uninstall and
+reinstall by hand.
+
+Current state (as of 2026-10-13): `pubkey` is already `NEW`
+(`3FF086625EED8646`) but the installed base trusts `OLD`
+(`1C2875FB2CC4040E`). The next release must therefore be **signed with
+`1C2875FB2CC4040E`** to act as the bridge. If that private key is lost, no
+existing install can ever self-update again and the only remedy is a manual
+reinstall.
 
 ## Per-release flow
 

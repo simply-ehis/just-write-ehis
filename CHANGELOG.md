@@ -1,5 +1,97 @@
 ﻿# Changelog
 
+## Unreleased (production-readiness audit: security fix + four red suites cleared)
+
+Deep audit of the desktop app for release blockers. One real Rust
+security defect was found and fixed; the rest were test-harness and
+brand-consistency drift. Gates: `cargo check --release --features
+custom-protocol` exits 0, `npm run check` 0/0, `npm run build` clean,
+and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
+`test:reader`, `test:readersec`, `test:mobile`, `test:ghost`,
+`test:writeback`, `test:audiostop`, and `test:aipanel` suites pass.
+
+### Fixed
+- **Security: backup restore/delete accepted a path escape from the
+  renderer** (`doc_store/backups.rs`). `backup_restore` and `backup_delete`
+  joined the caller's `backup_name` straight onto the backups dir, and
+  `Path::join` trusts its argument: an absolute path replaces the base
+  outright and `..` segments walk out of it. A compromised renderer could
+  therefore read (`backup_restore("C:\...")` copies the target out and opens
+  it as SQLite) or delete (`backup_delete("..\..\..\<file>")`) any file the
+  process can reach. Both now route through `checked_backup_path`, which
+  rejects anything that is not a single bare filename (no separators, no
+  drive/colon prefix, no `..`/`.`, not empty), and `backup_delete` is scoped
+  further to the `backup_` prefix `backup_create` writes, so a failed restore
+  or a stray file in that folder can never be the thing that vanishes.
+  Regression-guarded by `backup_names_may_not_escape_the_backup_dir`, which
+  asserts nine hostile names plus a non-`backup_` in-directory name are all
+  refused.
+- **`test:resolve` (STT/TTS model resolution) was passing a stale port
+  argument.** The servers read the model from `sys.argv[1]`; the harness
+  was still passing the retired port as `argv[1]`, shifting the model name
+  into `argv[2]`. The harness now passes only the model argument, so the
+  traversal-rejection and fail-closed checks exercise the real resolution
+  path again.
+- **`test:reader` shelf assertions were racing the auto-open effect.**
+  `ReaderWorkspace`'s `$effect` opens the active doc the moment the
+  bookshelf resolves, so the shelf card is unobservable from outside. The
+  test now settles the book view first, then reaches the shelf via the
+  explicit Back button (`closeBook()`), and reopens the book to assert the
+  reading controls.
+- **`test:aipanel` and `test:audiostop` needed jsdom shims** for
+  `Element.scrollTo` and `AudioContext.resume`, which jsdom does not
+  implement. The suites now mirror the real WebView instead of throwing
+  on the first scroll/stop call.
+
+### Corrected
+- **Release workflow is *not* broken — earlier audit report was a false
+  positive.** It flagged `fetch_sidecars.py --typst` in
+  `.github/workflows/release.yml` as "fetches only typst, release build will
+  fail". `binaries/typst` is the only entry in `tauri.conf.json` →
+  `bundle.externalBin`, i.e. the sole sidecar the build actually requires;
+  STT/TTS/LLM are optional and degrade at runtime
+  (`native_runtime_available`). `--typst` is a valid flag and fetches exactly
+  what the build needs. No change made.
+
+### Changed
+- **PWA theme colors now match the shipped brand.**
+  `public/manifest.webmanifest` still carried the pre-rebrand dark
+  `#1B1A15` while `index.html` uses the light paper `#FAF9F6` (light is
+  the default mode). Both `background_color` and `theme_color` are now
+  `#FAF9F6`, and `test:mobile` asserts the value against `index.html`.
+
+### Known-open (release blockers, need a maintainer decision — not code)
+- **Updater key rotation will brick self-update for every existing install.**
+  Verified from the published signature for
+  `Just Write ehis_0.2.1_x64-setup.exe` (timestamp 2026-09-27 09:31 UTC):
+  the shipped installer was signed with key `1C2875FB2CC4040E` (key from
+  `cd0df63`, 09-26) — *not* the key at the `v0.2.1` tag, which is
+  `1C2ACD78E48FDD60`. `tauri.conf.json` now carries `3FF086625EED8646`
+  (from `3432429`, 09-30). The updater verifies each download against the
+  pubkey compiled into the *running* binary, so every install in the field
+  trusts `1C2875FB2CC4040E` and will reject a release signed with today's
+  key. This is a release-process action, not a code change: the next release
+  must be **signed with the superseded key `1C2875FB2CC4040E`** as a bridge
+  (its binary already carries the new pubkey), and releases after that go
+  back to normal. Requires the old private key — if it was deleted, the only
+  remedy is a manual reinstall. Documented in `docs/UPDATES.md`
+  ("Rotating the signing key").
+- **Browser-global dialogs are used where the app otherwise has no dialog
+  story.** `src/lib/importFile.ts:98` falls back to `window.prompt` for a
+  locked-PDF password and `src/lib/widgetAutostart.ts:27` uses
+  `window.confirm` for the autostart opt-in. No caller ever supplies
+  `askPassword`, so `window.prompt` is the live path, and no
+  `tauri-plugin-dialog` is installed (`tauri.conf.json:86`'s `"dialog":
+  false` is the *updater* plugin's flag, unrelated). What these actually do
+  in the shipped WebView2 runtime is **not verified** — WebView2 implements
+  the Chromium dialogs, so the earlier audit's claim that they silently
+  resolve to `undefined` is not established and should not be relied on.
+  Worth checking on a real build and, if they misbehave, moving both to the
+  dialog plugin or in-app UI like the rest of the error handling.
+- **"Coming soon" stub is reachable in production UI.**
+  `src/lib/components/WritingAnalytics.svelte:76` is rendered from
+  `SettingsPane.svelte:1396`. Either ship the feature or hide the entry.
+
 ## Unreleased (UX polish: trust bugs + Capture discoverability + voice, plan filed)
 
 Plan: `docs/PLANS/2026-10-09-ux-polish.md` (Phases 1–7; Phases 1–6 are

@@ -122,10 +122,12 @@ const fireLinkLoads = () => {
   }
 };
 const linkTimer = setInterval(fireLinkLoads, 100);
-await new Promise((r) => setTimeout(r, 3000));
-
-function q(sel) { return dom.window.document.querySelector(sel); }
-function qa(sel) { return [...dom.window.document.querySelectorAll(sel)]; }
+// Wait for the workspace to mount, but assert the shelf EARLY: the Reader's
+// auto-open effect (ReaderWorkspace.svelte:414) re-opens the active doc as
+// soon as the bookshelf resolves, which unmounts the shelf card. Polling for
+// the shelf here captures the pre-auto-open window instead of a fixed sleep.
+const q = (sel) => dom.window.document.querySelector(sel);
+const qa = (sel) => [...dom.window.document.querySelectorAll(sel)];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 function check(name, ok, detail = "") {
@@ -133,18 +135,20 @@ function check(name, ok, detail = "") {
   if (!ok) failures++;
 }
 
+// Wait for the Reader to mount and the auto-open effect (ReaderWorkspace.svelte:414)
+// to settle. That effect fires as soon as the bookshelf resolves and immediately
+// opens the active doc, so the shelf card is never observable from outside — the
+// shelf is only reachable once the user navigates back out of the book.
+let sections = [];
+const bootDeadline = Date.now() + 3000;
+while (Date.now() < bootDeadline) {
+  sections = qa(".reader-workspace section[data-section]");
+  if (sections.length > 0) break;
+  await sleep(100);
+}
+
 check("reader workspace mounted", !!q(".reader-workspace"));
-const card = qa(".reader-workspace .book-card").find((c) =>
-  (c.textContent || "").includes("Probe Book")
-);
-check("seeded book on shelf", !!card);
-check("progress bar shows on card", !!card?.querySelector(".book-progress-fill"));
-check("empty cover degrades to kind badge", !!card?.querySelector(".book-kind") && !card?.querySelector("img"));
 
-card?.click();
-await sleep(1200);
-
-const sections = qa(".reader-workspace section[data-section]");
 check("book opens into sections", sections.length >= 3, `${sections.length} sections`);
 const h1 = q(".reader-workspace section[data-section] h1");
 check("heading renders as h1 (not literal #)", !!h1 && h1.textContent.includes("Probe Book"));
@@ -153,6 +157,36 @@ check("list renders as li", lis.length === 2, `${lis.length} items`);
 check("dropped image captioned", !!q(".reader-workspace .img-missing figcaption"));
 check("no literal markdown leaks", ![...qa(".reader-workspace section[data-section]")].some((s) =>
   /(^|\n)#\s|\n- /.test(s.textContent || "")));
+
+// Back to the shelf: the auto-open effect above consumes the shelf card as soon
+// as the bookshelf resolves, so the only reliable way to observe the shelf is to
+// navigate back out of the opened book. The Back button calls closeBook(), which
+// clears selectedBook and re-renders the .bookshelf branch.
+const backBtn = q(".reader-workspace .reader-toolbar .back-btn");
+check("back-to-shelf button present", !!backBtn);
+backBtn?.click();
+let card = null;
+const shelfDeadline = Date.now() + 3000;
+while (Date.now() < shelfDeadline) {
+  card = qa(".reader-workspace .book-card").find((c) =>
+    (c.textContent || "").includes("Probe Book")
+  );
+  if (card) break;
+  await sleep(100);
+}
+check("seeded book on shelf", !!card);
+check("progress bar shows on card", !!card?.querySelector(".book-progress-fill"));
+check("empty cover degrades to kind badge", !!card?.querySelector(".book-kind") && !card?.querySelector("img"));
+
+// Reopen the book for the reading-controls checks below.
+card?.click();
+let reopened = false;
+const reopenDeadline = Date.now() + 3000;
+while (Date.now() < reopenDeadline) {
+  if (q(".reader-workspace .reader-controls")) { reopened = true; break; }
+  await sleep(100);
+}
+check("book reopens from its shelf card", reopened);
 
 // Controls row: font + size + measure + theme, all live.
 check("controls row present", !!q(".reader-controls"));

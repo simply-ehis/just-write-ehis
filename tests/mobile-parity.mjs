@@ -39,7 +39,7 @@ const read = (rel) => readFile(join(root, rel), "utf8");
   check("mobile shell clears the notch inset", /\.app-shell\.mobile\s*\{\s*padding-top:\s*env\(safe-area-inset-top/.test(appCss));
   check("bottom bar honors side + bottom insets", /env\(safe-area-inset-left/.test(bottomBar) && /env\(safe-area-inset-right/.test(bottomBar) && /bottom:\s*calc\(56px \+ env\(safe-area-inset-bottom/.test(bottomBar));
   check("viewport-fit=cover for notched displays", /viewport-fit=cover/.test(indexHtml));
-  check("theme-color matches manifest", /theme-color" content="#1B1A15"/.test(indexHtml));
+  check("theme-color matches manifest", /theme-color" content="#FAF9F6"/.test(indexHtml));
   check("wide dialogs clamp to the viewport", /min\(640px, 100vw\)/.test(versionHistory) && /min\(480px, 94vw\)/.test(vaultRename) && /min\(480px, 94vw\)/.test(templatePicker));
   check("format strip scrolls instead of clipping", /@media \(max-width: 480px\)[\s\S]*?\.format-toolbar \{[\s\S]*?overflow-x: auto/.test(formatToolbar));
   check("BottomBar exposes the Inspector on phones", /id: "outline", label: "Outline"/.test(bottomBar) && /\$inspectorOpen = !\$inspectorOpen/.test(bottomBar));

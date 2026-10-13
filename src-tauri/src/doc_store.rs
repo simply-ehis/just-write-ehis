@@ -3534,4 +3534,38 @@ mod save_path_tests {
         assert!(!db.backup_list().unwrap().iter().any(|(n, _, _)| n == &file_name));
         let _ = std::fs::remove_file(&restored);
     }
+
+    /// A renderer-supplied backup name must never escape the backup directory.
+    /// Regression guard: `backup_restore`/`backup_delete` used to `join` the
+    /// raw name, so `..`/absolute paths reached arbitrary files.
+    #[test]
+    fn backup_names_may_not_escape_the_backup_dir() {
+        let db = test_db("backup_escape");
+        for hostile in [
+            "../escaped.db",
+            "../../escaped.db",
+            "..\\escaped.db",
+            "/etc/passwd",
+            "C:\\Windows\\win.ini",
+            "sub/dir/escaped.db",
+            "",
+            "..",
+            ".",
+        ] {
+            assert!(
+                db.backup_restore(hostile).is_err(),
+                "restore accepted hostile name {hostile:?}"
+            );
+            assert!(
+                db.backup_delete(hostile).is_err(),
+                "delete accepted hostile name {hostile:?}"
+            );
+        }
+
+        // In-directory but not a backup: delete must refuse, restore may not.
+        assert!(
+            db.backup_delete("notes.txt").is_err(),
+            "delete accepted a non-backup_ file that never escapes the directory"
+        );
+    }
 }

@@ -45,30 +45,30 @@ orig_argv = list(sys.argv)
 
 try:
     # ── STT ──
-    sys.argv = ["stt_server.py", "8093", ""]
+    sys.argv = ["stt_server.py", ""]
     check("stt empty -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
-    sys.argv = ["stt_server.py", "8093", "moonshine-v2-q6"]
+    sys.argv = ["stt_server.py", "moonshine-v2-q6"]
     check("stt legacy -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
-    sys.argv = ["stt_server.py", "8093", "moonshine-base"]
+    sys.argv = ["stt_server.py", "moonshine-base"]
     check("stt old default alias -> bundled", stt["_resolve_model"]() == stt["DEFAULT_GGUF"])
 
     for evil in ["../evil.gguf", "..\\evil.gguf", "models/../../etc/passwd",
                  "C:/vault/../secret/x.gguf"]:
-        sys.argv = ["stt_server.py", "8093", evil]
+        sys.argv = ["stt_server.py", evil]
         try:
             stt["_resolve_model"]()
             check(f"stt traversal rejected ({evil})", False, "resolved instead of raising")
         except RuntimeError:
             check(f"stt traversal rejected ({evil})", True)
 
-    sys.argv = ["stt_server.py", "8093", "C:/definitely/missing/model.gguf"]
+    sys.argv = ["stt_server.py", "C:/definitely/missing/model.gguf"]
     try:
         stt["_resolve_model"]()
         check("stt missing absolute errors", False, "fell back silently")
     except RuntimeError:
         check("stt missing absolute errors", True)
 
-    sys.argv = ["stt_server.py", "8093", "no-such-model.gguf"]
+    sys.argv = ["stt_server.py", "no-such-model.gguf"]
     try:
         stt["_resolve_model"]()
         check("stt missing bare name errors", False, "fell back silently")
@@ -80,10 +80,10 @@ try:
     with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as f:
         onnx = f.name
     try:
-        sys.argv = ["stt_server.py", "8093", gguf]
+        sys.argv = ["stt_server.py", gguf]
         check("stt explicit existing gguf accepted",
               stt["_resolve_model"]() == os.path.realpath(gguf))
-        sys.argv = ["stt_server.py", "8093", onnx]
+        sys.argv = ["stt_server.py", onnx]
         try:
             stt["_resolve_model"]()
             check("stt explicit non-gguf rejected", False, "accepted")
@@ -94,20 +94,20 @@ try:
         os.unlink(onnx)
 
     # ── TTS ──
-    sys.argv = ["tts_server.py", "8094", ""]
+    sys.argv = ["tts_server.py", ""]
     check("tts empty -> vendored", tts["_model_dir"]() == tts["DEFAULT_MODEL_DIR"])
-    sys.argv = ["tts_server.py", "8094", "hexgrad/Kokoro-82M"]
+    sys.argv = ["tts_server.py", "hexgrad/Kokoro-82M"]
     check("tts legacy -> vendored", tts["_model_dir"]() == tts["DEFAULT_MODEL_DIR"])
 
     for evil in ["../evil", "..\\evil"]:
-        sys.argv = ["tts_server.py", "8094", evil]
+        sys.argv = ["tts_server.py", evil]
         try:
             tts["_model_dir"]()
             check(f"tts traversal rejected ({evil})", False, "resolved instead of raising")
         except RuntimeError:
             check(f"tts traversal rejected ({evil})", True)
 
-    sys.argv = ["tts_server.py", "8094", "C:/definitely/missing/bundle"]
+    sys.argv = ["tts_server.py", "C:/definitely/missing/bundle"]
     try:
         tts["_model_dir"]()
         check("tts missing dir errors", False, "fell back silently")
@@ -115,7 +115,7 @@ try:
         check("tts missing dir errors", True)
 
     with tempfile.TemporaryDirectory() as d:
-        sys.argv = ["tts_server.py", "8094", d]
+        sys.argv = ["tts_server.py", d]
         check("tts explicit existing dir accepted",
               tts["_model_dir"]() == os.path.realpath(d))
         engine = tts_full._TtsEngine()

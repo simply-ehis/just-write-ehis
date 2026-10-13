@@ -32,6 +32,10 @@ const sources = [];
 let pendingDecode = null;
 globalThis.atob = (s) => Buffer.from(s, "base64").toString("binary");
 globalThis.AudioContext = class {
+  // jsdom has no real AudioContext; audio.ts calls resume() before playback.
+  resume() {
+    return Promise.resolve();
+  }
   decodeAudioData(_buf, ok) {
     pendingDecode = ok;
   }

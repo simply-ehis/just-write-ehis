@@ -86,6 +86,35 @@
         Ok(backups)
     }
 
+    /// Join a renderer-supplied backup name onto the backup dir, but only
+    /// after proving it is a bare filename.
+    ///
+    /// `Path::join` trusts whatever it is handed: an absolute path replaces the
+    /// base outright, and `..` segments walk out of it. `backup_restore` and
+    /// `backup_delete` take this name straight from the renderer, so without
+    /// this check a compromised renderer could read or delete any file the
+    /// process can reach — `backup_delete("../../../something-else")` included.
+    fn checked_backup_path(
+        backup_dir: &std::path::Path,
+        backup_name: &str,
+    ) -> Result<std::path::PathBuf, String> {
+        let name = std::path::Path::new(backup_name);
+        let is_bare_filename = name.file_name().is_some_and(|f| f == name.as_os_str());
+        // Separator/drive checks are belt-and-braces on top of the
+        // single-component test: on Unix `C:\x\y` IS one component, so
+        // `file_name` alone would wave it through and pin behaviour to the
+        // platform. Backups are always `backup_<timestamp>.<ext>`, so nothing
+        // legitimate carries these.
+        let looks_like_a_path = backup_name.contains(['/', '\\', ':']);
+        if backup_name.is_empty() || !is_bare_filename || looks_like_a_path {
+            return Err(format!(
+                "Invalid backup name {:?}: expected a bare filename such as backup_20260101_000000.db",
+                backup_name
+            ));
+        }
+        Ok(backup_dir.join(name))
+    }
+
     /// Restore a backup into a NEW database file, leaving the live DB alone.
     ///
     /// Backups were write-only: backup_create + backup_list existed, but there
@@ -99,7 +128,7 @@
             .unwrap_or_default()
             .join("writing-app")
             .join("backups");
-        let backup_path = backup_dir.join(backup_name);
+        let backup_path = Self::checked_backup_path(&backup_dir, backup_name)?;
         if !backup_path.is_file() {
             return Err(format!("Backup not found: {}", backup_name));
         }
@@ -121,11 +150,21 @@
     /// Delete a backup. Without this, backups accumulated forever — each a
     /// full-DB copy — with no way to reclaim the space.
     pub fn backup_delete(&self, backup_name: &str) -> Result<(), String> {
+        // Restore is a read, so it accepts any name that stays inside the
+        // directory. Delete is destructive and irreversible, so it is scoped
+        // further to the exact shape `backup_create` writes: a failed restore
+        // or a stray file in that folder can never be the thing that vanishes.
+        if !backup_name.starts_with("backup_") {
+            return Err(format!(
+                "Invalid backup name {:?}: only files named backup_* can be deleted",
+                backup_name
+            ));
+        }
         let backup_dir = dirs::data_local_dir()
             .unwrap_or_default()
             .join("writing-app")
             .join("backups");
-        let path = backup_dir.join(backup_name);
+        let path = Self::checked_backup_path(&backup_dir, backup_name)?;
         if !path.is_file() {
             return Err(format!("Backup not found: {}", backup_name));
         }
