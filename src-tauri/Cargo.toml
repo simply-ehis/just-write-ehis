@@ -48,3 +48,11 @@ zip = "8.6.0"
 [target."cfg(target_os = \"windows\")".dependencies]
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-single-instance = "2.4.5"
+# Already in the tree transitively (0.61.3); only feature flags are added here.
+# Used for the sidecar Job Object, which kills child processes if this one dies
+# without running its Drop impls (crash, kill, power loss).
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+] }

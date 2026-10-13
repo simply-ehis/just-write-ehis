@@ -161,6 +161,7 @@ impl ManagedSidecar {
         let child = command
             .spawn()
             .map_err(|e| format!("Failed to start {} sidecar ({}): {}", start_label, program, e))?;
+        die_with_us(&child);
         guard.replace(child);
         Ok(())
     }
@@ -185,6 +186,64 @@ impl Drop for ManagedSidecar {
         }
     }
 }
+
+/// Put a sidecar in a Job Object that kills it if this process dies without
+/// cleaning up.
+///
+/// `stop()` and `Drop` already terminate children, but neither runs when the
+/// app dies hard -- crash, kill, or power loss -- and the sidecars would then
+/// survive as orphans, holding their ports and memory until the user hunts
+/// them down. A job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` ties their
+/// lifetime to ours instead: when our handle closes, Windows kills them.
+///
+/// Entirely best-effort and never fatal. The normal stop/Drop path still
+/// applies, so failing to create or join the job must not stop a sidecar from
+/// starting.
+#[cfg(windows)]
+fn die_with_us(child: &Child) {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    // Held as the raw handle value rather than a HANDLE: HANDLE wraps a raw
+    // pointer, which is neither Send nor Sync and so cannot sit in a static.
+    // A Windows handle is usable from any thread in the process, so carrying
+    // the value is what matters.
+    static JOB: std::sync::OnceLock<Option<isize>> = std::sync::OnceLock::new();
+    let Some(job) = JOB.get_or_init(|| unsafe {
+        let handle = CreateJobObjectW(None, None).ok()?;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let applied = SetInformationJobObject(
+            handle,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if applied.is_err() {
+            let _ = windows::Win32::Foundation::CloseHandle(handle);
+            return None;
+        }
+        Some(handle.0 as isize)
+    }) else {
+        return;
+    };
+
+    // The handle belongs to std's Child. AssignProcessToJobObject takes its
+    // own reference to the process; it does not take ownership of the handle.
+    let proc = HANDLE(child.as_raw_handle() as *mut _);
+    let job = HANDLE(*job as *mut _);
+    unsafe {
+        let _ = AssignProcessToJobObject(job, proc);
+    }
+}
+
+#[cfg(not(windows))]
+fn die_with_us(_child: &Child) {}
 
 /// Model override travels as child-process argv: keep it a bare name so a
 /// crafted value can't redirect the sidecar's model resolution elsewhere.
@@ -846,6 +905,36 @@ mod managed_tests {
         assert!(!m.is_running());
         // Second stop is a safe no-op.
         m.stop().expect("second stop");
+    }
+
+    /// A spawned sidecar must actually be in the kill-on-close job, so it
+    /// cannot outlive a hard exit of the app (crash/kill/power loss), where
+    /// neither `stop()` nor `Drop` ever runs.
+    #[cfg(windows)]
+    #[test]
+    fn spawned_sidecar_joins_the_kill_on_close_job() {
+        use std::os::windows::io::AsRawHandle;
+        use windows::core::BOOL;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::JobObjects::IsProcessInJob;
+
+        let m = ManagedSidecar::new("test");
+        let dir = std::env::temp_dir().to_string_lossy().to_string();
+        let (prog, args) = long_lived();
+        m.start(&prog, &args, &dir, "TEST").expect("spawn");
+        assert!(m.is_running());
+
+        let guard = m.process.lock().expect("lock");
+        let child = guard.as_ref().expect("child is tracked");
+        let proc = HANDLE(child.as_raw_handle() as *mut _);
+        let mut in_job = BOOL::default();
+        unsafe {
+            IsProcessInJob(proc, None, &mut in_job).expect("IsProcessInJob failed");
+        }
+        drop(guard);
+
+        assert!(in_job.as_bool(), "sidecar was never assigned to the kill-on-close job");
+        m.stop().expect("stop");
     }
 
     /// Model overrides ride as child argv: bare names pass, anything that

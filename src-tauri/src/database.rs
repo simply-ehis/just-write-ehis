@@ -19,6 +19,27 @@ pub struct Database {
   pub db_path: Mutex<Option<std::path::PathBuf>>,
 }
 
+/// Rolls an open transaction back on drop, unless disarmed after COMMIT.
+///
+/// SQLite does not roll back an open transaction when a statement inside it
+/// fails: it stays open, holding its locks, until an explicit ROLLBACK or
+/// COMMIT. The migration body propagates every failure with `?`, and lib.rs
+/// deliberately keeps this same connection alive (read-only) after a failed
+/// migration, so without this guard the transaction would stay open for the
+/// life of the process.
+struct RollbackGuard<'a> {
+    conn: &'a Connection,
+    committed: bool,
+}
+
+impl Drop for RollbackGuard<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self.conn.execute_batch("ROLLBACK;");
+        }
+    }
+}
+
 impl Database {
 pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
   Self {
@@ -83,6 +104,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         // cannot run inside a transaction ("Safety level may not be changed
         // inside a transaction").
         conn.execute_batch("BEGIN;")?;
+        let mut rollback_guard = RollbackGuard { conn: &conn, committed: false };
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS docs (
@@ -382,9 +404,11 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         }
 
         // COMMIT is the last statement of the migration batch. If any statement
-        // failed, the `?` above returns early and the transaction rolls back,
-        // leaving the schema exactly as it was.
+        // failed, the `?` above returned early and RollbackGuard dropped, so the
+        // transaction was rolled back rather than left open on the connection
+        // this app keeps alive in read-only mode.
         conn.execute_batch("COMMIT;")?;
+        rollback_guard.committed = true;
 
         Ok(())
     }
@@ -422,7 +446,15 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
             chrono::Local::now().format("%Y%m%d_%H%M%S")
         );
         let dest = backup_dir.join(name);
-        std::fs::copy(&path, &dest).map_err(|e| {
+        // VACUUM INTO, not fs::copy. The DB runs in WAL mode, so the newest
+        // committed transactions live in the -wal sidecar: copying the .db file
+        // alone yields an older, torn snapshot -- precisely the state a
+        // pre-migration safety net must never be in. VACUUM INTO reads through
+        // SQLite and writes one consistent, self-contained file. This is the
+        // same primitive backup_create uses.
+        let quoted = dest.to_string_lossy().replace('\'', "''");
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute_batch(&format!("VACUUM INTO '{}';", quoted)).map_err(|e| {
             rusqlite::Error::SqliteFailure(
                 rusqlite::ffi::Error::new(1),
                 Some(format!("backup copy: {}", e)),

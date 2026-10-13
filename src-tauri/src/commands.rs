@@ -592,20 +592,40 @@ fn friendly_http_status(status: u16) -> String {
     }
 }
 
+/// Build the authenticated chat-completions POST shared by every AI command.
+///
+/// The endpoint arrives from the renderer (`AiGenerateRequest.provider`), so a
+/// stored key is attached only when `may_send_key` allows it -- the same rule
+/// `provider_probe` already applies. Without it, a compromised webview could
+/// aim the stored key at a host it controls and read it straight out of the
+/// response, sidestepping the webview CSP that would otherwise block that
+/// fetch. A key is never silently dropped: a non-allowlisted host gets a
+/// message that says why, rather than a misleading 401 downstream.
 fn authed_post(
     client: &reqwest::Client,
     endpoint: &str,
     body: &serde_json::Value,
     api_key: &Option<String>,
-) -> reqwest::RequestBuilder {
+) -> Result<reqwest::RequestBuilder, String> {
     let mut req_builder = client
         .post(format!("{}/chat/completions", endpoint))
         .header("Content-Type", "application/json")
         .json(body);
     if let Some(key) = api_key.as_ref().filter(|k| !k.is_empty()) {
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
+        let parsed = reqwest::Url::parse(endpoint)
+            .map_err(|_| format!("Provider endpoint {:?} is not a valid URL.", endpoint))?;
+        if may_send_key(&parsed) {
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", key));
+        } else {
+            return Err(format!(
+                "Your API key was not sent to {:?}: keys only go to a known provider, \
+                 localhost, or a private-network host. Point the provider at one of those, \
+                 or use a keyless local setup such as Ollama.",
+                parsed.host_str().unwrap_or(endpoint)
+            ));
+        }
     }
-    req_builder
+    Ok(req_builder)
 }
 
 /// ONE non-streaming chat-completions call shared by ai_generate and
@@ -634,7 +654,7 @@ async fn post_chat_completions(
     let mut attempts = 0;
     let resp = loop {
         attempts += 1;
-        let resp = authed_post(&client, endpoint, &body, api_key)
+        let resp = authed_post(&client, endpoint, &body, api_key)?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -1036,7 +1056,7 @@ pub async fn ai_generate_stream(
     let mut attempts = 0;
     let mut resp = loop {
         attempts += 1;
-        let resp = authed_post(&client, &endpoint, &body, &request.api_key)
+        let resp = authed_post(&client, &endpoint, &body, &request.api_key)?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -1053,6 +1073,12 @@ pub async fn ai_generate_stream(
     }
 
     // `chunk()` needs no extra stream traits; split SSE frames manually.
+    //
+    // Bounded on purpose: after complete frames are drained, whatever remains
+    // is one incomplete frame. A broken or hostile stream that never sends a
+    // newline would otherwise grow this buffer for the life of the response.
+    // 1 MiB is far above any real completion delta.
+    const MAX_SSE_FRAME_BYTES: usize = 1024 * 1024;
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
         buf.extend_from_slice(&chunk);
@@ -1069,6 +1095,9 @@ pub async fn ai_generate_stream(
                     on_event.send(token.to_string()).map_err(|e| e.to_string())?;
                 }
             }
+        }
+        if buf.len() > MAX_SSE_FRAME_BYTES {
+            return Err("AI endpoint sent an oversized stream frame; stopped reading it.".into());
         }
     }
 

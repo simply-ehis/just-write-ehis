@@ -97,7 +97,15 @@ export async function readImportFile(
     if (e instanceof PasswordNeededError) {
       const ask = opts?.askPassword ?? ((name) => window.prompt(`Password for "${name}":`));
       const password = ask(file.name);
-      if (password == null) throw new Error("Import cancelled — the PDF stayed locked.");
+      if (password == null) {
+        // Reached both on a genuine cancel and when no prompt could be shown
+        // at all, so the message has to be actionable either way rather than
+        // assuming the user backed out.
+        throw new Error(
+          `No password was supplied for "${file.name}", so it stayed locked. ` +
+            `Try a copy without password protection, or import it as plain text.`,
+        );
+      }
       const book = await parseBookFile(file.name, data, worker, { password });
       if (!book.text.trim()) throw new Error("No text could be extracted.");
       return {

@@ -199,10 +199,34 @@ fn resolve_in_vault(vault: &std::path::Path, stored: &str) -> Result<std::path::
     let joined = if raw.is_absolute() { raw.to_path_buf() } else { vault.join(raw) };
     let normalized = normalize_lexically(&joined);
     let root = normalize_lexically(vault);
-    if normalized.starts_with(&root) {
-        Ok(normalized)
-    } else {
-        Err(format!("Refusing to touch a path outside the vault: {}", stored))
+    if !normalized.starts_with(&root) {
+        return Err(format!("Refusing to touch a path outside the vault: {}", stored));
+    }
+
+    // The lexical pass cannot see through a symlink, so `link/doc.md` inside
+    // the vault with `link` pointing elsewhere would pass above. Re-check
+    // against the real filesystem: canonicalize the vault root and the deepest
+    // ancestor of the target that exists -- the target itself may legitimately
+    // not exist yet, since a create is a valid write -- and require one to stay
+    // under the other.
+    if let (Ok(real_root), Some(ancestor)) = (std::fs::canonicalize(&root), deepest_existing(&normalized)) {
+        if let Ok(real_ancestor) = std::fs::canonicalize(&ancestor) {
+            if !real_ancestor.starts_with(&real_root) {
+                return Err(format!("Refusing to touch a path outside the vault: {}", stored));
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+/// Deepest ancestor of `path` that exists on disk, inclusive of `path` itself.
+fn deepest_existing(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut probe = path;
+    loop {
+        if probe.exists() {
+            return Some(probe.to_path_buf());
+        }
+        probe = probe.parent()?;
     }
 }
 
@@ -214,8 +238,46 @@ fn write_to_disk(path: &std::path::Path, content: &str) -> Result<(), String> {
     }
     let temp = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
     std::fs::write(&temp, content.as_bytes()).map_err(|e| format!("Failed to write temp: {}", e))?;
+    // Stamp before the rename, which is what the watcher observes.
+    stamp_self_write(path);
     std::fs::rename(&temp, path).map_err(|e| format!("Failed to rename temp: {}", e))?;
     Ok(())
+}
+
+/// Paths this process just wrote, keyed for comparison, with the write time.
+///
+/// The vault watcher sees our own writes. Left unfiltered, an external edit
+/// bounces back as a `file-changed` the app emitted about itself, which the
+/// frontend then reloads -- an echo, and on a tight autosave loop a noisy one.
+static SELF_WRITES: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// How long a self-write stamp suppresses a watcher event. Long enough to
+/// cover the rename landing plus notify's own delivery latency.
+const SELF_WRITE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Comparable identity for a path: lexically normalized, separators unified,
+/// and case-folded on case-insensitive filesystems, so a path we built and the
+/// one notify reports for the same file land on the same key.
+fn path_key(path: &std::path::Path) -> String {
+    let normalized = normalize_lexically(path).to_string_lossy().replace('\\', "/");
+    if cfg!(windows) { normalized.to_ascii_lowercase() } else { normalized }
+}
+
+fn stamp_self_write(path: &std::path::Path) {
+    if let Ok(mut writes) = SELF_WRITES.lock() {
+        writes.retain(|(_, at)| at.elapsed() < SELF_WRITE_TTL);
+        writes.push((path_key(path), std::time::Instant::now()));
+    }
+}
+
+/// True when this process wrote `path` moments ago, so the watcher event is
+/// our own echo rather than an edit made outside the app.
+fn is_self_write(path: &std::path::Path) -> bool {
+    let Ok(mut writes) = SELF_WRITES.lock() else { return false };
+    writes.retain(|(_, at)| at.elapsed() < SELF_WRITE_TTL);
+    let key = path_key(path);
+    writes.iter().any(|(k, _)| *k == key)
 }
 
 fn compute_content_hash(content: &str) -> String {
@@ -2403,7 +2465,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) => {
                         for path in event.paths {
-                            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                            if path.extension().and_then(|e| e.to_str()) == Some("md")
+                                && !is_self_write(&path)
+                            {
                                 let _ = handle.emit("file-changed", path.to_string_lossy().to_string());
                             }
                         }
@@ -3533,6 +3597,51 @@ mod save_path_tests {
         db.backup_delete(&file_name).unwrap();
         assert!(!db.backup_list().unwrap().iter().any(|(n, _, _)| n == &file_name));
         let _ = std::fs::remove_file(&restored);
+    }
+
+    /// A path this process just wrote must be suppressed by the watcher; any
+    /// other path must not be. Guards the echo filter that stops the app from
+    /// emitting `file-changed` about its own writes.
+    #[test]
+    fn self_writes_suppress_their_own_watcher_events() {
+        let written = std::path::PathBuf::from("vault/notes/a.md");
+        let other = std::path::PathBuf::from("vault/notes/b.md");
+
+        assert!(!is_self_write(&written), "a path we never wrote must not be suppressed");
+
+        stamp_self_write(&written);
+        assert!(is_self_write(&written), "our own write must be suppressed");
+        assert!(!is_self_write(&other), "a different file must still report as external");
+    }
+
+    /// A symlink inside the vault pointing outside it must be refused.
+    /// `normalize_lexically` cannot see through a link, so this exercises the
+    /// canonicalize re-check that closes the gap. Skipped where symlink
+    /// creation is not permitted (Windows needs elevation or developer mode).
+    #[cfg(windows)]
+    #[test]
+    fn symlink_escape_is_refused() {
+        let vault = std::env::temp_dir().join(format!("jwe_vault_{}", Uuid::new_v4()));
+        let outside = std::env::temp_dir().join(format!("jwe_outside_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let link = vault.join("link");
+        if std::os::windows::fs::symlink_dir(&outside, &link).is_err() {
+            let _ = std::fs::remove_dir_all(&vault);
+            let _ = std::fs::remove_dir_all(&outside);
+            return; // no privilege to create the symlink; nothing to prove here
+        }
+
+        let err = resolve_in_vault(&vault, "link/secret.md")
+            .expect_err("a symlink pointing out of the vault must be refused");
+        assert!(err.contains("outside the vault"), "unexpected refusal: {err}");
+
+        // An ordinary in-vault path must still resolve, symlink or not.
+        assert!(resolve_in_vault(&vault, "notes/a.md").is_ok());
+
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     /// A renderer-supplied backup name must never escape the backup directory.

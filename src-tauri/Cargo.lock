@@ -2456,6 +2456,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+ "windows",
  "zerocopy",
  "zip 8.6.0",
 ]

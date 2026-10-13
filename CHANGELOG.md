@@ -44,6 +44,12 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   on the first scroll/stop call.
 
 ### Corrected
+- **Migration failure is not silent.** The audit listed "silent setup failure"
+  in `lib.rs`. Verified against the code: `initialize()` failing sets read-only
+  and `lib.rs` logs it, and every write then returns a clear error that the
+  UI surfaces through `domainError`/`saveFailed`. The user finds out on the
+  first save rather than at boot, which is a banner worth adding some day, but
+  nothing fails quietly and there is no bug here. No change made.
 - **Release workflow is *not* broken — earlier audit report was a false
   positive.** It flagged `fetch_sidecars.py --typst` in
   `.github/workflows/release.yml` as "fetches only typst, release build will
@@ -59,6 +65,71 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   `#1B1A15` while `index.html` uses the light paper `#FAF9F6` (light is
   the default mode). Both `background_color` and `theme_color` are now
   `#FAF9F6`, and `test:mobile` asserts the value against `index.html`.
+
+### Fixed (second pass — audit follow-ups)
+- **A failed migration no longer leaves its transaction open.**
+  `database.rs` wrapped the migration in `BEGIN`/`COMMIT` and relied on a
+  comment claiming SQLite would roll back on failure. It does not: a failed
+  statement leaves the transaction open, holding its locks, until an explicit
+  ROLLBACK. Because `lib.rs` deliberately keeps that same connection alive in
+  read-only mode, the transaction stayed open for the life of the process. A
+  `RollbackGuard` now issues ROLLBACK on drop unless COMMIT succeeded.
+- **The pre-migration backup is now a consistent snapshot.**
+  `backup_before_migration` copied the `.db` with `fs::copy`, but the database
+  runs in WAL mode, so the newest committed transactions live in the `-wal`
+  sidecar and never reached the copy — the safety net before a migration was
+  an older, torn snapshot. It now uses `VACUUM INTO`, the same primitive
+  `backup_create` already uses.
+- **The AI API key is no longer sent to an arbitrary renderer-chosen host.**
+  `authed_post` posted to `AiGenerateRequest.provider` with the stored key
+  attached, unconditionally. `provider_probe` already guarded exactly this and
+  documented the threat (a compromised webview aims the stored key at a host
+  it controls and reads it from the response, bypassing the webview CSP that
+  would block the same fetch). The generate and stream paths now apply the same
+  `may_send_key` rule, and a blocked host gets an explanation instead of a
+  misleading 401. Note: keys go only to known providers, `localhost`, or a
+  private-network host — a custom public endpoint now needs to be reachable on
+  one of those to authenticate.
+- **The file watcher no longer echoes the app's own writes.** Every save fired
+  `file-changed` for the file the app had just written, so an external edit
+  bounced straight back as a self-triggered reload. `write_to_disk` now stamps
+  the path and the watcher skips its own writes for the next few seconds
+  (paths compared after normalization, so the watcher's spelling and ours
+  still match). Regression-guarded by
+  `self_writes_suppress_their_own_watcher_events`.
+- **Streamed AI responses can no longer exhaust memory.** The SSE reader
+  buffered chunks with no bound, so a broken or hostile endpoint that never
+  sent a newline grew the buffer for the life of the response. A frame larger
+  than 1 MiB now aborts the stream with a clear error.
+- **A symlink inside the vault no longer escapes it.**
+  `resolve_in_vault` checked containment lexically, which cannot see through a
+  link: `link/secret.md` with `link` pointing outside the vault passed. The
+  real filesystem is now checked too — the vault root and the deepest existing
+  ancestor of the target are canonicalized and required to nest. Verified by
+  `symlink_escape_is_refused`, which fails against the old code and passes
+  against the new.
+- **An unanswered autostart prompt no longer locks the user out.**
+  `promptWidgetAutostart` read `window.confirm` as a boolean and burned its
+  one-shot flag; a WebView that declined to show the dialog returns
+  `undefined`, which was taken as "no" — the user was silently opted out and
+  never asked again. An answer that is not a real boolean is now left
+  unconsumed.
+- **A locked-PDF import failure now explains what to do.** The error claimed
+  the import was "cancelled" whether or not a prompt ever appeared, and
+  carried a mojibake dash. It now says no password was supplied and suggests
+  an unencrypted copy or plain-text import.
+- **Sidecars no longer outlive a hard crash.** `stop()` and `Drop` terminated
+  children, but neither runs when the app dies without unwinding — crash, kill,
+  power loss — leaving the local LLM/STT/TTS servers orphaned, holding their
+  ports and memory. Each spawn now joins a Job Object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, so Windows kills them the moment our
+  handle closes. Best-effort by design: if the job cannot be created the
+  sidecar still starts and the old stop/Drop path still applies. Verified by
+  `spawned_sidecar_joins_the_kill_on_close_job`, which asks Windows directly
+  whether the child is in the job.
+- **Removed the "Detailed analytics coming soon" promise.** The panel already
+  shows real figures (documents, total words, today, day streak); only the
+  unshipped promise went.
 
 ### Known-open (release blockers, need a maintainer decision — not code)
 - **Updater key rotation will brick self-update for every existing install.**
@@ -76,21 +147,15 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   back to normal. Requires the old private key — if it was deleted, the only
   remedy is a manual reinstall. Documented in `docs/UPDATES.md`
   ("Rotating the signing key").
-- **Browser-global dialogs are used where the app otherwise has no dialog
-  story.** `src/lib/importFile.ts:98` falls back to `window.prompt` for a
-  locked-PDF password and `src/lib/widgetAutostart.ts:27` uses
-  `window.confirm` for the autostart opt-in. No caller ever supplies
-  `askPassword`, so `window.prompt` is the live path, and no
-  `tauri-plugin-dialog` is installed (`tauri.conf.json:86`'s `"dialog":
-  false` is the *updater* plugin's flag, unrelated). What these actually do
-  in the shipped WebView2 runtime is **not verified** — WebView2 implements
-  the Chromium dialogs, so the earlier audit's claim that they silently
-  resolve to `undefined` is not established and should not be relied on.
-  Worth checking on a real build and, if they misbehave, moving both to the
-  dialog plugin or in-app UI like the rest of the error handling.
-- **"Coming soon" stub is reachable in production UI.**
-  `src/lib/components/WritingAnalytics.svelte:76` is rendered from
-  `SettingsPane.svelte:1396`. Either ship the feature or hide the entry.
+- **Browser-global dialogs: hardened, runtime behaviour still unverified.**
+  `widgetAutostart.ts` no longer burns its one-shot prompt on an unanswered
+  `confirm`, and `importFile.ts` reports a locked-PDF failure honestly, so
+  neither is damaged by a missing dialog any more. But the underlying question
+  stands: no `tauri-plugin-dialog` is installed, and both flows still rely on
+  `window.confirm`/`window.prompt` (`tauri.conf.json:86`'s `"dialog": false`
+  is the *updater* plugin's flag, unrelated). Whether WebView2 actually renders
+  these was never checked on a real build. If they misbehave, move both to the
+  dialog plugin or in-app UI.
 
 ## Unreleased (UX polish: trust bugs + Capture discoverability + voice, plan filed)
 

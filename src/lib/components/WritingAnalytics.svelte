@@ -72,8 +72,7 @@
             </div>
           </div>
           <div class="analytics-hint">
-            <p>Track your writing progress over time.</p>
-            <p>Detailed analytics coming soon.</p>
+            <p>Your writing so far, counted from every document in this vault.</p>
           </div>
         {/if}
       </div>
