@@ -1,5 +1,30 @@
 ﻿# Changelog
 
+## Unreleased (sidecar console silenced, logs visible)
+
+**Visible terminal on model load eliminated.** Every sidecar spawn (LLM, STT,
+TTS, memory, typst, python probe) now uses `CREATE_NO_WINDOW` on Windows, so
+no console window can flash. Added DETACHED_PROCESS was tested and rejected —
+the STT/TTS/memory sidecars are PyInstaller onefile builds whose bootloader
+spawns a second process; with DETACHED_PROCESS that grandchild allocates a
+fresh **visible** console, reopening the exact bug. Measured and documented in
+`procutil.rs`.
+
+**Sidecar stderr/stdout redirected to an app log folder.** Each sidecar's
+output now lands in `%LOCALAPPDATA%\com.just-write-ehis.app\logs\` as
+`<name>.log` (e.g. `llm.log`, `stt.log`, `tts.log`, `memory.log`) instead of
+vanishing into a hidden console. Files rotate at 4 MB (`<name>.old.log`).
+The folder is created eagerly at startup so it exists to inspect *before* the
+first model loads. When the folder cannot be created (unit tests, path
+resolution failure) streams fall back to the null device — never to a console.
+
+**Python probe stdin closed.** The `--version` probe now opens stdin to the
+null device, so a future DETACHED_PROCESS upgrade cannot inherit an invalid
+handle.
+
+Files changed: `src-tauri/src/procutil.rs` (new), `sidecar.rs`, `ipc.rs`,
+`lib.rs`, `commands.rs`.
+
 ## Unreleased (bundled LLM reached over a socket nobody was listening on)
 
 Writers saw `llm socket connect failed: ... (os error 10061)` when a feature

@@ -25,7 +25,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
-use crate::procutil::{hide_console, terminate_child};
+use crate::procutil::{hide_console, sidecar_stderr, terminate_child};
 
 type PendingMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
 
@@ -81,8 +81,9 @@ impl IpcSidecar {
         }
     }
 
-    /// Spawn with stdin/stdout piped (stderr inherited for logs). A live
-    /// child is left alone; a dead handle is reaped and respawned.
+    /// Spawn with stdin/stdout piped (stderr to the sidecar log file —
+    /// never inherited, which would strand it in a hidden console). A
+    /// live child is left alone; a dead handle is reaped and respawned.
     pub fn start_with_env(
         &self,
         program: &str,
@@ -108,7 +109,7 @@ impl IpcSidecar {
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
+            .stderr(sidecar_stderr(self.name));
         command.env_remove("PYTHONHOME");
         command.env_remove("PYTHONPATH");
         command.env("PYTHONNOUSERSITE", "1");

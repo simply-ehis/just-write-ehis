@@ -2582,6 +2582,7 @@ fn run_python_probe(python: &str) -> Result<String, String> {
     let mut probe = std::process::Command::new(python);
     probe
         .arg("--version")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     crate::procutil::hide_console(&mut probe);

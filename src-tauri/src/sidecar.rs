@@ -1,11 +1,11 @@
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::ipc::{IpcSidecar, SockClient};
-use crate::procutil::{hide_console, terminate_child};
+use crate::procutil::{hide_console, sidecar_stdio, terminate_child};
 
 // ── Shared process management ──────────────────────────────────────
 //
@@ -157,6 +157,16 @@ impl ManagedSidecar {
         for (key, value) in envs {
             command.env(key, value);
         }
+        // Nothing is left to inherit: stdout/stderr go to the log folder
+        // (or the null device) so a model server's output can never reach
+        // a console, and stdin is closed because the LLM issues no
+        // commands on it. Output that used to vanish into a hidden
+        // console is now readable where the user can find it.
+        let (log_out, log_err) = sidecar_stdio(self.name);
+        command
+            .stdin(Stdio::null())
+            .stdout(log_out)
+            .stderr(log_err);
         hide_console(&mut command);
         let child = command
             .spawn()

@@ -143,6 +143,13 @@ pub fn run() {
                     }
                 }
             }
+            // Sidecar output lands here rather than in a console — which
+            // CREATE_NO_WINDOW keeps hidden from the user in any case.
+            // Created eagerly so the folder exists to look in before the
+            // first model is ever loaded.
+            if let Ok(dir) = app.path().app_log_dir() {
+                crate::procutil::set_log_dir(dir);
+            }
             app.manage(sidecar::SttManager::new());
             app.manage(sidecar::TtsManager::new());
             app.manage(sidecar::LlmManager::new(app.path().resource_dir().ok()));
