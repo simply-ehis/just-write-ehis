@@ -1432,6 +1432,8 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     border-radius: var(--radius-md);
     background: var(--surface-raised);
     border: 1px solid var(--border-subtle);
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
   }
 
   .message.user {
@@ -1736,8 +1738,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     font-size: 13px;
     line-height: 1.6;
     overflow-y: auto;
+    overflow-x: hidden;
     max-height: 400px;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
   }
 
   .ghost-view {
@@ -1856,8 +1861,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     font-size: 13px;
     line-height: 1.6;
     overflow-y: auto;
+    overflow-x: hidden;
     max-height: 400px;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
   }
 
   .action-btn.dismiss {

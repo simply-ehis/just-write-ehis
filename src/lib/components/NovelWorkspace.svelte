@@ -25,6 +25,9 @@
   let castHits = $state<EntityHit[]>([]);
   let castBackfilling = $state(false);
 
+  /** Board sidebar collapsed state (vertical split like AI panel). */
+  let boardSidebarCollapsed = $state(false);
+
   /** Cover ref from the current project's frontmatter (EPUB import art). */
   let projectCover = $derived.by(() => {
     const current = projects.find((p) => p.id === projectId);
@@ -755,7 +758,7 @@
       <button class:active={viewMode === 'board'} onclick={() => viewMode = 'board'}>Beat Board</button>
       <button class:active={viewMode === 'bible'} onclick={() => viewMode = 'bible'}>Story Bible</button>
       <button class:active={viewMode === 'cast'} onclick={() => { viewMode = 'cast'; loadCast(); }}>Cast & Places</button>
-      <button onclick={() => (boardCollapsed = !boardCollapsed)} title={boardCollapsed ? "Show board" : "Focus editor — hide board"} aria-pressed={boardCollapsed}>{boardCollapsed ? "Show board" : "Focus editor"}</button>
+      <button onclick={() => (boardSidebarCollapsed = !boardSidebarCollapsed)} title={boardSidebarCollapsed ? "Show board" : "Focus editor — hide board"} aria-pressed={boardSidebarCollapsed}>{boardSidebarCollapsed ? "Show board" : "Focus editor"}</button>
       <button class="import-btn" onclick={() => importInput?.click()} title="Import novel (.epub .pdf .docx .md .txt .fountain)" aria-label="Import novel" disabled={importing}>Import</button>
       {#if importing}
         <span class="import-progress" aria-live="polite">{importProgress || "Importing…"}</span>
@@ -812,18 +815,19 @@
     <div class="novel-main">
       <DockSplit
         storageKey="jwe-split-novel"
-        topLabel="Beat board height"
+        topLabel="Beat board width"
         hasBottom={!!selectedBeat}
-        topCompact={boardCollapsed && !!selectedBeat}
+        direction="horizontal"
+        topCompact={boardSidebarCollapsed && !!selectedBeat}
       >
         {#snippet top()}
-      {#if boardCollapsed && selectedBeat}
+      {#if boardSidebarCollapsed && selectedBeat}
         <div class="board-collapsed-note">
-          <span>Board hidden — editor has full height.</span>
-          <button class="new-project-btn" onclick={() => (boardCollapsed = false)}>Show board</button>
+          <span>Board hidden — editor has full width.</span>
+          <button class="new-project-btn" onclick={() => (boardSidebarCollapsed = false)}>Show board</button>
         </div>
       {/if}
-      {#if viewMode === 'board' && !boardCollapsed}
+      {#if viewMode === 'board' && !boardSidebarCollapsed}
       {#if projectLoadError && !loading}
         <WorkspaceError message={`Novel — couldn't load project: ${projectLoadError}`} onRetry={() => loadProject()} />
       {/if}
@@ -1367,19 +1371,21 @@
 
   .beat-board {
     display: flex;
+    flex-direction: column;
     gap: var(--space-4);
     padding: var(--space-4);
-    overflow-x: auto;
     overflow-y: auto;
-    flex: 1 1 auto;
-    min-height: 0;
+    overflow-x: hidden;
+    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
   }
 
   .act-column {
-    min-width: 300px;
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    min-width: 0;
   }
 
   .act-header {

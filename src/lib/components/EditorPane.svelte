@@ -1319,7 +1319,8 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
 
   .editor-container {
     flex: 1;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
     transition: padding 0.2s ease, margin 0.2s ease;
   }
