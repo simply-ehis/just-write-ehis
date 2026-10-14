@@ -4,7 +4,7 @@ READ-WHEN: changing widget routing, window capabilities, docking behavior, tray 
 KEY-FILES: src/WidgetApp.svelte, src/lib/widgetBridge.ts, src/lib/components/LazyWorkspace.svelte, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json
 INVARIANTS: one Tauri process; main/widget only; setup_file_watcher runs once from main; no widget DB/watcher/sidecar/RAG initializer; no secrets hydrated into the widget
 GOTCHAS: hidden does not mean destroyed; storage events synchronize non-secret settings; files deep-links to Library; native timing/RSS remain unmeasured
-UPDATED: 2026-10-09
+UPDATED: 2026-10-14
 
 # Companion widget
 
@@ -24,7 +24,9 @@ Main close is intercepted and converted to hide. `widget-open-doc` and `widget-o
 
 ## Capability boundary
 
-`capabilities/default.json` includes both `main` and `widget` for core IPC and explicit window operations. `main-window.json` receives the full application command set plus updater/process controls and the autostart permission; `widget-window.json` receives only the existing document/log/save workflow through dedicated `widget_doc_get`, `widget_doc_save`, and `widget_atomic_save` commands plus `app_lock_configured`. Those commands reject locked documents in Rust. The widget never receives general secret read/write or PIN verification permission; it sends unlock attempts to the main window, which verifies them authoritatively. The widget does not load a workspace or document until the session gate is unlocked. Its document list uses the existing locked-filtering `doc_search_full` command before storing any document state.
+`capabilities/default.json` includes both `main` and `widget` for core IPC and explicit window operations. `main-window.json` receives the full application command set plus updater/process controls and the autostart permission. `widget-window.json` receives the `widget` set, which carries 162 of the 174 application commands — the same workspace surface `main` has, because the Settings picker offers the widget any workspace and a narrower set fails silently: the workspace mounts, then each action inside it is denied by the window ACL. Twelve commands are withheld — `secret_get`/`secret_set`, `backup_{create,list,restore,delete,prune}`, `vault_rename_{preview,execute}`, `autostart_launch`, `provider_probe`, `sidecar_python_probe` — being credential access and whole-vault administration. The companion holds no secrets (`isWidgetRoute()` strips the API key and skips the keychain entirely) and exposes no Settings surface, so those would widen its attack surface for no feature it can use. Updater and process-exit remain main-window only. `widget-invariants.mjs` asserts this boundary as an exact match against `main` minus that exclusion list.
+
+Write still routes through the dedicated `widget_doc_get`, `widget_doc_save`, and `widget_atomic_save` commands under companion mode, and those reject locked documents in Rust. The widget never receives secret read/write or PIN verification permission; it sends unlock attempts to the main window, which verifies them authoritatively. The widget does not load a workspace or document until the session gate is unlocked. Its document list uses the existing locked-filtering `doc_search_full` command before storing any document state.
 
 ## Verification status
 
@@ -35,7 +37,9 @@ Passed without a native build:
 - `npm run test:widget`: all static lifecycle/capability/no-command checks passed.
 - `npm run test:widget-proof`: source and OS proxy checks passed.
 - `npm run test:source`: lock/widget-adjacent stores and sidecar contracts passed.
-- `src-tauri/target` remains absent.
+- `src-tauri/target` was absent for that pass (it has since been populated).
 - Source-level lock gate and workspace deferral are wired; native two-window lock behavior remains pending.
+
+Native release build (2026-10-14): `npx tauri build --bundles nsis` exits 0 and produces `src-tauri/target/release/bundle/nsis/Just Write ehis_0.2.1_x64-setup.exe` plus its updater `.sig`. The Windows overlay rebuilt the three sidecar runtimes first and bundled `sidecars/bin/**/*`, and `npm run test:assets` passes. `cargo test --release --lib` 136 passed, `npm run check` 0/0, all 16 JS suites pass.
 
 Skipped by request: demo recording/GIF and native `tauri build --debug` / live two-window timing matrix. Native transparent-window behavior, OS autostart registration, dock persistence, and RSS/cold-open measurements remain pending a future build-approved verification pass.
