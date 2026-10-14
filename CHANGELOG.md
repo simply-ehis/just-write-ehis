@@ -1,5 +1,43 @@
 ﻿# Changelog
 
+## Unreleased (companion widget can now host every workspace)
+
+The widget window's ACL and its workspace picker disagreed.
+`SettingsPane` offered all 12 workspaces for "Widget workspace", but
+`widget-window.json` granted only 9 commands, so every workspace other than
+Write mounted and then had essentially every action denied by the window ACL.
+Write worked only because it is the one surface that switches to the `widget_*`
+command variants. Denials were not loud: the workspace rendered, then each
+action failed.
+
+Measured against the real `api.ts` mappings before the fix: novel denied 20 of
+23 commands, reader 7 of 8, script 7 of 8, canvas 6 of 8, and `home` — the
+fallback value for an unrecognized setting — 9 of 11.
+
+### Changed
+- **`permissions/widget.toml` now carries 162 of the 174 app commands** — the
+  same surface as `main`, minus 12 credential and whole-vault admin commands:
+  `secret_get`/`secret_set`, the five `backup_*`, both `vault_rename_*`,
+  `autostart_launch`, `provider_probe`, `sidecar_python_probe`. Those stay
+  withheld because the companion holds no secrets (`isWidgetRoute()` strips the
+  API key and skips the keychain entirely) and has no Settings surface, so
+  granting them would widen its attack surface for no feature it can use.
+  Updater and process-exit remain main-window only. `get_vault_path` and
+  `sidecars_dir` *are* granted — they look privileged but are reachable from
+  workspaces (FileBrowser, read-aloud audio).
+
+### Tests
+- `widget-invariants.mjs` now asserts the widget carries exactly main's
+  workspace surface minus the exclusion list, as an **exact** match rather than
+  a subset: missing silently breaks a workspace, and extra re-opens the surface
+  the exclusion list exists to keep closed. A further check asserts every
+  excluded command is a real registered one, so a typo in that list cannot
+  quietly widen the widget. Verified the assertion bites — removing one
+  permission from `widget.toml` reports 161/162 and exits non-zero.
+
+Gates: `cargo test --release --lib` 136 passed, `npm run check` 0/0, 16/16 JS
+suites, NSIS build exit 0.
+
 ## Unreleased (production-readiness audit: security fix + four red suites cleared)
 
 Deep audit of the desktop app for release blockers. One real Rust

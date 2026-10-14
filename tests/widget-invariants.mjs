@@ -81,6 +81,27 @@ for (const permission of ["core:window:allow-show", "core:window:allow-hide", "c
 }
 check("widget command set is narrow", !capability.permissions.includes("updater:default") && !capability.permissions.includes("process:default") && widgetCapability.permissions.includes("widget") && !widgetCapability.permissions.includes("main") && !widgetCapability.permissions.includes("process:allow-exit") && !widgetPermissions.includes("allow-app-lock-verify"));
 check("main keeps updater and process controls", mainCapability.windows.includes("main") && mainCapability.permissions.includes("main") && mainCapability.permissions.includes("updater:default") && mainCapability.permissions.includes("process:default"));
+// The widget can host ANY workspace the user picks (SettingsPane offers all of
+// them), so it must carry every app command the main window does except the
+// credential and whole-vault admin set. A narrower widget set does not fail
+// loudly: the workspace mounts, then every action inside it is denied by the
+// window ACL. Asserted as an exact match rather than a subset because drift in
+// EITHER direction is a defect -- missing silently breaks a workspace, extra
+// re-opens the surface this exclusion list exists to keep closed.
+const WIDGET_EXCLUDED_COMMANDS = [
+  "secret_get", "secret_set",
+  "backup_create", "backup_list", "backup_restore", "backup_delete", "backup_prune",
+  "vault_rename_preview", "vault_rename_execute",
+  "autostart_launch", "provider_probe", "sidecar_python_probe",
+];
+const allowEntries = (toml) => [...toml.matchAll(/"allow-([a-z0-9_-]+)"/g)].map((m) => m[1].replaceAll("-", "_"));
+const mainGranted = allowEntries(mainPermissions);
+const widgetGranted = allowEntries(widgetPermissions);
+const expectedWidget = mainGranted.filter((c) => !WIDGET_EXCLUDED_COMMANDS.includes(c)).sort();
+const actualWidget = [...widgetGranted].sort();
+check("widget carries main's workspace surface minus the credential/admin set", JSON.stringify(expectedWidget) === JSON.stringify(actualWidget), `${actualWidget.length}/${expectedWidget.length}`);
+check("widget still withholds credentials and vault admin", WIDGET_EXCLUDED_COMMANDS.every((c) => !widgetGranted.includes(c)));
+check("every withheld command is a real registered command", WIDGET_EXCLUDED_COMMANDS.every((c) => mainGranted.includes(c)));
 check("query route avoids static full app", main.includes('get("widget") === "1"') && main.includes('import("./WidgetApp.svelte")') && main.includes('import("./App.svelte")'));
 check("minimal widget shell", widget.includes("LazyWorkspace") && !widget.includes("Sidebar") && !widget.includes("TabBar") && !widget.includes("InspectorPanel") && !widget.includes("CommandPalette") && !widget.includes("QuickCaptureInput"));
 check("all canonical workspace surfaces are lazy", ["HomePane", "LogsWorkspace", "EditorPane", "InboxWorkspace", "NodeMapWorkspace", "CanvasWorkspace", "NovelWorkspace", "ScriptWorkspace", "ProjectsWorkspace", "ReaderWorkspace", "LibraryWorkspace"].every((name) => widget.includes(name)) && appStores.includes('export type WorkspaceId'));
