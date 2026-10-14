@@ -16,6 +16,7 @@
   import LazyWorkspace from "./LazyWorkspace.svelte";
   import {
     ensureLlm,
+    ensureLlmFor,
     ensureStt,
     ensureTts,
     llmError,
@@ -251,13 +252,32 @@
   let slotResults = $state<{ small?: ProviderTestResult; main?: ProviderTestResult }>({});
   let memoryFactCount = $state<number | null>(null);
 
+  const failedProbe = (error: string): ProviderTestResult => ({
+    ok: false,
+    latencyMs: 0,
+    models: [],
+    modelFound: false,
+    error,
+  });
+
   async function testSlot(slot: "small" | "main") {
     testingSlot = slot;
     try {
       const endpoint = slot === "small" ? $settings.smallModelEndpoint : $settings.mainModelEndpoint;
       const model = slot === "small" ? $settings.smallModelName : $settings.mainModelName;
+      // The small slot's default address IS the bundled LLM's private socket,
+      // so bring that sidecar up before probing it — otherwise the probe
+      // reports a server nobody started. No-op for remote endpoints/preview.
+      if (!(await ensureLlmFor(endpoint))) {
+        slotResults = { ...slotResults, [slot]: failedProbe($llmError || "Bundled LLM unavailable — start it in Settings → AI & Providers.") };
+        return;
+      }
       // Desktop probes via Rust (key attached, no CSP block); preview fetches directly.
       slotResults = { ...slotResults, [slot]: await api.providerProbe(endpoint, model, $settings.apiKey || undefined) };
+    } catch (error) {
+      // A thrown probe must land in the result row, not vanish as an
+      // unhandled rejection — `slotResultText` has no result to render yet.
+      slotResults = { ...slotResults, [slot]: failedProbe(error instanceof Error ? error.message : String(error)) };
     } finally {
       testingSlot = null;
     }

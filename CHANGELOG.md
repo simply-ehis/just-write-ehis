@@ -1,5 +1,53 @@
 ﻿# Changelog
 
+## Unreleased (bundled LLM reached over a socket nobody was listening on)
+
+Writers saw `llm socket connect failed: ... (os error 10061)` when a feature
+routed to the bundled LLM. That model does not bind TCP: `llama-server` sits on
+a per-launch private AF_UNIX socket (`jwe-llm-<uuid>.sock`) that only has a
+listener once something starts it, and the renderer starts it lazily through
+`ensureLlm()`. Four backend commands ignored that - `ai_generate`,
+`ai_generate_stream`, `ai_structurize` and `provider_probe` all recognise the
+local sentinel endpoint (`http://127.0.0.1:8093/v1`) and talk to that socket
+directly, with no ensure and no start.
+
+The default small slot *is* the sentinel, so the exposure was the default
+configuration. `ensureLlm()` guarded only 3 of roughly 7 entry points; AI-panel
+chat, composer, structurize, both slot probes and ghost's fallback did not.
+
+Ghost was also wrong by construction. Its documented fallback - "fall through to
+the small slot when the local LLM fails" - lands on the same server that had
+just refused the request whenever the small slot is left on its default, so a
+failed (or switched-off) local model guaranteed a second raw error.
+
+### Fixed
+- **Sentinel-routed requests ensure readiness first.** All four backend commands
+  call `LlmManager::ensure_ready()`, which starts the sidecar when it is down,
+  polls until `/health` reports ok (30s cap), fails fast if the child dies, and
+  reuses the renderer's last start parameters so a fallback boots the configured
+  model and context length rather than the defaults.
+- **Frontend guards mirror that routing.** `ensureLlmFor(endpoint)` is a no-op
+  for remote providers and browser preview, and now wraps AI-panel chat,
+  composer, structurize, the ghost-slot probe and the Settings slot probe.
+- **Ghost no longer falls back onto itself.** A sentinel small slot reports
+  unavailable instead of reconnecting to a dead socket; a genuinely remote small
+  slot still serves as the fallback.
+- **Raw errno can no longer reach the UI.** `LlmManager::friendly()` rewrites
+  connect failures into a message naming the next step, and `testSlot` records
+  probe failures in the result row instead of dropping them as an unhandled
+  rejection.
+- **`LlmManager::start()` is idempotent** - a second start no longer unlinks the
+  socket a live `llama-server` is already bound to.
+
+### Tests
+- `tests/ghost-routing.mjs` (new, wired into `test:source`) drives the real
+  module graph against a recording `api` stub: the circular fallback reaches no
+  backend, a failed local start reaches neither backend, and a remote small slot
+  still does.
+- `ensure-poll.mjs` gains the sentinel detection checks plus a Rust parity check
+  that `commands.rs` still recognises the same two host literals.
+- Two Rust tests pin the friendly-error mapping and its pass-through case.
+
 ## Unreleased (companion widget can now host every workspace)
 
 The widget window's ACL and its workspace picker disagreed.

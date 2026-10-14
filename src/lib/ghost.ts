@@ -6,12 +6,15 @@
  * ROUTING (canonical — enforced here, not at call sites):
  *   ghost → the bundled local LLM when settings.llmEnabled (over its
  *   private AF_UNIX socket — no TCP port), else → the SMALL slot
- *   (smallModelEndpoint/smallModelName, no API key).
+ *   (smallModelEndpoint/smallModelName, no API key). The small slot's
+ *   DEFAULT address is that same bundled LLM, so when it resolves to the
+ *   sentinel there is no distinct fallback: a failed or disabled local
+ *   server reports unavailable instead of reconnecting to the same socket.
  * Ghost NEVER touches the main slot: callers pass no provider config at
  * all (there is no config parameter), so main-slot values cannot leak in.
  */
-import { api } from "$lib/api";
-import { ensureLlm } from "$lib/stores/audio";
+import { api, isBrowserPreview } from "$lib/api";
+import { ensureLlm, isLocalLlmSentinel } from "$lib/stores/audio";
 import { settings } from "$lib/stores/settings";
 import { get, writable } from "svelte/store";
 
@@ -75,10 +78,24 @@ export async function requestGhostContinuation(
         });
         return out;
       }
-      // Fall through to the small slot when the local LLM fails.
+      // Fall through to the small slot when the local LLM fails — unless
+      // that slot is this same server (guard immediately below).
     }
 
     const s = get(settings);
+    // Circular fallback: the small slot's default IS the bundled LLM, so
+    // after a failed start (or with it switched off) this would reconnect to
+    // the very socket that just refused us. Report unavailable instead of
+    // firing a request we know cannot be served. Browser preview keeps its
+    // simulated ai_generate path, which has no local socket at all.
+    if (!isBrowserPreview() && isLocalLlmSentinel(s.smallModelEndpoint)) {
+      recordStatus({
+        state: "unavailable",
+        latencyMs: Date.now() - t0,
+        detail: "Bundled LLM unavailable — start it in Settings → AI & Providers.",
+      });
+      return null;
+    }
     const response = await api.aiGenerate({
       prompt: `Continue this text naturally. Do not repeat what came before. Write only the continuation, no quotes or explanation:\n\n${lastSentence}`,
       system_prompt:

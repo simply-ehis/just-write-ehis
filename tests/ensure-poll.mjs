@@ -4,7 +4,9 @@
  *  - flaky health (fails twice, then ok) still boots;
  *  - never-healthy hits the cap and reports failure (no hang);
  *  - already-running short-circuits without starting;
- *  - progress ticks name the sidecar with elapsed seconds.
+ *  - progress ticks name the sidecar with elapsed seconds;
+ *  - the local-sentinel guard (isLocalLlmSentinel / ensureLlmFor) that keeps
+ *    a default small-slot request off a socket nobody is listening on.
  *
  * audio.ts uses the $lib alias, so it is bundled first (same esbuild
  * pattern as e2e-browser.mjs / ai-error-probe.mjs).
@@ -22,7 +24,7 @@ globalThis.localStorage = {
   removeItem: (key) => memory.delete(key),
 };
 const esbuild = await import("esbuild");
-const { mkdir, rm } = await import("node:fs/promises");
+const { mkdir, rm, readFile } = await import("node:fs/promises");
 const outdir = join(root, "tests", ".tmp-ensure-poll");
 await mkdir(outdir, { recursive: true });
 const outfile = join(outdir, "audio.mjs");
@@ -149,6 +151,39 @@ check("TTS server is ready before lazy model load", audio.ttsModelReady({ ready:
 check("TTS incomplete bundle is not ready", !audio.ttsModelReady({ ready: false, model_loaded: false }));
 check("STT health requires a loaded runtime", !audio.sttModelReady({ ready: false, model_loaded: false }));
 check("LLM health accepts native ok status", audio.llmModelReady({ status: "ok" }));
+
+// ── Local-sentinel guard ───────────────────────────────────────────
+// The default small slot IS the bundled LLM's private-socket address, so a
+// request routed there with nobody listening fails as raw `os error 10061`.
+// The whole fix hangs on this detection matching Rust exactly.
+check("sentinel: loopback default", audio.isLocalLlmSentinel("http://127.0.0.1:8093/v1"));
+check("sentinel: localhost variant", audio.isLocalLlmSentinel("http://localhost:8093/v1"));
+check("sentinel: trailing slashes trim like Rust", audio.isLocalLlmSentinel("http://127.0.0.1:8093/v1///"));
+check("sentinel: surrounding whitespace trims", audio.isLocalLlmSentinel("  http://localhost:8093/v1  "));
+check("sentinel: other loopback port is remote", !audio.isLocalLlmSentinel("http://127.0.0.1:11434/v1"));
+check("sentinel: main slot is remote", !audio.isLocalLlmSentinel("https://api.openai.com/v1"));
+check("sentinel: absent endpoint is remote", !audio.isLocalLlmSentinel(undefined) && !audio.isLocalLlmSentinel(""));
+
+// Rust parity: if the two host literals drift apart, one side starts
+// treating a request as remote that the other routes over the socket.
+{
+  const source = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
+  const at = source.indexOf("fn is_local_llm_sentinel");
+  const body = source.slice(at, at + 400);
+  check(
+    "sentinel host pair matches Rust",
+    at > 0 && body.includes('"http://127.0.0.1:8093/v1"') && body.includes('"http://localhost:8093/v1"'),
+    at > 0 ? "commands.rs" : "definition not found",
+  );
+}
+
+// A request that never reaches the socket must not stall on a sidecar start.
+{
+  const t0 = Date.now();
+  const ok = await audio.ensureLlmFor("https://api.openai.com/v1");
+  const elapsed = Date.now() - t0;
+  check("remote provider short-circuits the local ensure", ok === true && elapsed < 1000, `${elapsed}ms`);
+}
 
 // ensureSidecar: an unhealthy model is not reported as usable.
 {

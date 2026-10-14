@@ -145,7 +145,7 @@ pub fn run() {
             }
             app.manage(sidecar::SttManager::new());
             app.manage(sidecar::TtsManager::new());
-            app.manage(sidecar::LlmManager::new());
+            app.manage(sidecar::LlmManager::new(app.path().resource_dir().ok()));
             let memory_dir = app_dir.join("ai-memory");
             std::fs::create_dir_all(&memory_dir)
                 .map_err(|e| format!("Failed to create AI memory directory {:?}: {}", memory_dir, e))?;

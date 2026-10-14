@@ -276,6 +276,9 @@ pub struct SttHealth {
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(120);
 const MEDIA_TIMEOUT: Duration = Duration::from_secs(180);
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
+/// Budget for a backend-initiated cold start (model load before the first
+/// bind). Fail-fast on a dead child short-circuits this well before it elapses.
+const START_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl SttManager {
     pub fn new() -> Self {
@@ -653,6 +656,20 @@ pub struct LlmManager {
     /// before each spawn so a stale file from a crashed run can't block
     /// the bind.
     sock_path: std::path::PathBuf,
+    /// Packaged resource root, captured at startup so a backend-initiated
+    /// start resolves sidecars exactly like the renderer's `llm_start`.
+    resource_dir: Option<std::path::PathBuf>,
+    /// What the renderer last asked to run. `ensure_ready` reuses it so a
+    /// fallback start picks the configured model/ctx, not the defaults.
+    start_params: Mutex<Option<StartParams>>,
+}
+
+/// Renderer-supplied start arguments, remembered across `llm_start` calls.
+#[derive(Clone, Debug)]
+pub struct StartParams {
+    pub sidecars_dir: String,
+    pub model: Option<String>,
+    pub ctx_size: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -663,11 +680,13 @@ pub struct LlmHealth {
 }
 
 impl LlmManager {
-    pub fn new() -> Self {
+    pub fn new(resource_dir: Option<std::path::PathBuf>) -> Self {
         Self {
             proc: ManagedSidecar::new("llm"),
             auth_token: uuid::Uuid::new_v4().to_string(),
             sock_path: std::env::temp_dir().join(format!("jwe-llm-{}.sock", uuid::Uuid::new_v4())),
+            resource_dir,
+            start_params: Mutex::new(None),
         }
     }
 
@@ -676,6 +695,12 @@ impl LlmManager {
     }
 
     pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>, ctx_size: Option<u32>) -> Result<(), String> {
+        // Idempotent: a second start must not unlink the socket a live
+        // llama-server is already bound to (that would strand every later
+        // connect while the child keeps running).
+        if self.is_running() {
+            return Ok(());
+        }
         let sidecars = std::path::PathBuf::from(sidecars_dir);
         // fetch_sidecars.py lands the server under models/; fall back to the
         // sidecars root so older/manual layouts keep working. Raw portable
@@ -742,12 +767,22 @@ impl LlmManager {
         ];
         let server_dir = server_exe.parent().unwrap_or(&sidecars);
         let server_dir_text = server_dir.to_string_lossy().to_string();
-        self.proc.start(
+        let result = self.proc.start(
             &server_exe.to_string_lossy(),
             &args,
             &server_dir_text,
             "LLM",
-        )
+        );
+        if result.is_ok() {
+            // Remember the renderer's choice so a later backend-initiated
+            // `ensure_ready` boots the same model/ctx, not the defaults.
+            *self.start_params.lock().unwrap_or_else(|e| e.into_inner()) = Some(StartParams {
+                sidecars_dir: sidecars_dir.to_string(),
+                model: model_path.map(|m| m.to_string()),
+                ctx_size,
+            });
+        }
+        result
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -762,7 +797,11 @@ impl LlmManager {
     }
 
     pub async fn health(&self) -> Result<LlmHealth, String> {
-        let value = self.sock_client().get_json("/health", HEALTH_TIMEOUT).await?;
+        let value = self
+            .sock_client()
+            .get_json("/health", HEALTH_TIMEOUT)
+            .await
+            .map_err(Self::friendly)?;
         serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
@@ -779,7 +818,8 @@ impl LlmManager {
                 }),
                 MEDIA_TIMEOUT,
             )
-            .await?;
+            .await
+            .map_err(Self::friendly)?;
         value
             .get("content")
             .and_then(|c| c.as_str())
@@ -805,7 +845,8 @@ impl LlmManager {
                 }),
                 MEDIA_TIMEOUT,
             )
-            .await?;
+            .await
+            .map_err(Self::friendly)?;
         value["choices"][0]["message"]["content"]
             .as_str()
             .map(|s| s.to_string())
@@ -815,7 +856,11 @@ impl LlmManager {
     /// OpenAI-compatible /v1/models over the socket (Settings Test
     /// buttons route the sentinel endpoint here).
     pub async fn list_models(&self) -> Result<Vec<String>, String> {
-        let value = self.sock_client().get_json("/v1/models", CONTROL_TIMEOUT).await?;
+        let value = self
+            .sock_client()
+            .get_json("/v1/models", CONTROL_TIMEOUT)
+            .await
+            .map_err(Self::friendly)?;
         Ok(value
             .get("data")
             .and_then(|d| d.as_array())
@@ -825,6 +870,70 @@ impl LlmManager {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// Raw connect failures are `os error 10061` text a writer cannot act
+    /// on. `ensure_ready` keeps them from happening; this maps any that
+    /// still escape so the UI always offers a next step.
+    fn friendly(error: String) -> String {
+        if error.starts_with("llm socket connect failed") {
+            "Bundled LLM is not running — start it from the AI panel's LLM toggle, or pick an HTTP provider in Settings → AI & Providers."
+                .to_string()
+        } else {
+            error
+        }
+    }
+
+    async fn is_healthy(&self) -> bool {
+        matches!(self.health().await, Ok(h) if h.status.eq_ignore_ascii_case("ok"))
+    }
+
+    /// Bring the bundled LLM to a serving state before a request Rust will
+    /// route to its private socket. The renderer normally does this via
+    /// `ensureLlm()`; this is the safety net for any path that reaches the
+    /// socket without that guard, so a cold sidecar can never surface as a
+    /// bare `os error 10061`. Concurrency-safe: `ManagedSidecar::start`
+    /// holds the child lock and no-ops when a live child already exists.
+    pub async fn ensure_ready(&self) -> Result<(), String> {
+        if self.is_healthy().await {
+            return Ok(());
+        }
+        if !self.is_running() {
+            let remembered = self
+                .start_params
+                .lock()
+                .map_err(|e| e.to_string())?
+                .clone();
+            let (sidecars_dir, model, ctx_size) = match remembered {
+                Some(params) => (params.sidecars_dir, params.model, params.ctx_size),
+                // Never started by the renderer: resolve the same directory
+                // `llm_start` would have been handed and use the defaults.
+                None => (
+                    crate::commands::resolve_sidecars_dir(self.resource_dir.clone())?,
+                    None,
+                    None,
+                ),
+            };
+            self.start(&sidecars_dir, model.as_deref(), ctx_size)?;
+        }
+        // llama-server binds only after the model is loaded, so poll for
+        // readiness instead of racing the first request against that load.
+        let deadline = std::time::Instant::now() + START_READY_TIMEOUT;
+        loop {
+            if self.is_healthy().await {
+                return Ok(());
+            }
+            if !self.is_running() {
+                return Err(
+                    "Bundled LLM exited during startup — fetch its model with sidecars/fetch_sidecars.py (see docs/MODELS.md)."
+                        .to_string(),
+                );
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("Bundled LLM is still loading — try again in a moment.".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
     }
 }
 
@@ -946,5 +1055,27 @@ mod managed_tests {
         assert!(check_model_name("../evil").is_err());
         assert!(check_model_name("sub/dir").is_err());
         assert!(check_model_name("C:\\models\\x").is_err());
+    }
+
+    /// The raw errno a writer sees when a sentinel-routed request reaches a
+    /// socket nobody is listening on must never escape to the UI.
+    #[test]
+    fn socket_connect_error_becomes_an_actionable_message() {
+        let raw = "llm socket connect failed: No connection could be made because the target machine actively refused it. (os error 10061)".to_string();
+        let friendly = LlmManager::friendly(raw);
+        assert!(
+            !friendly.contains("os error") && !friendly.contains("llm socket"),
+            "raw transport error leaked: {friendly}"
+        );
+        assert!(friendly.contains("Bundled LLM is not running"), "{friendly}");
+        assert!(friendly.contains("LLM toggle"), "must name a next step: {friendly}");
+    }
+
+    /// Only connect failures are rewritten — model/fetch hints stay verbatim.
+    #[test]
+    fn unrelated_llm_errors_pass_through_untouched() {
+        let raw = "LLM model not found: C:\\sidecars\\models\\missing.gguf".to_string();
+        assert_eq!(LlmManager::friendly(raw.clone()), raw);
+        assert_eq!(LlmManager::friendly("bad health response: x".to_string()), "bad health response: x");
     }
 }

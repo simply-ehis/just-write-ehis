@@ -13,7 +13,7 @@
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
-  import { ensureLlm, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
+  import { ensureLlm, ensureLlmFor, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
   import Icon from "$lib/components/Icon.svelte";
 
   /**
@@ -44,6 +44,18 @@
       provider: $settings.mainModelEndpoint || undefined,
       model: $settings.mainModelName || undefined,
     };
+  }
+
+  /**
+   * Rust routes the bundled LLM's sentinel address over a private socket that
+   * only listens once the sidecar is up. Bring it up before a request that
+   * would land there, and throw something reportable if it won't come up —
+   * otherwise the writer sees a raw `os error 10061`. A no-op for remote
+   * providers and browser preview, so those paths behave exactly as before.
+   */
+  async function ensureSlotReady(provider: string | undefined): Promise<void> {
+    if (await ensureLlmFor(provider)) return;
+    throw new Error($llmError || "Bundled LLM is unavailable — start it from the AI panel's LLM toggle.");
   }
 
   // 5.4 — which model the panel will actually call, shown in the context chip
@@ -314,6 +326,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         ghostProbe = { running: false, text: `${Date.now() - startedAt}ms · ${text}` };
         return;
       }
+      await ensureSlotReady($settings.smallModelEndpoint);
       const result = await api.providerProbe($settings.smallModelEndpoint, $settings.smallModelName, $settings.apiKey || undefined);
       ghostProbe = {
         running: false,
@@ -502,6 +515,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         structurizeText = await api.memoryRedact(structurizeInput);
       }
       const slot = mainSlot();
+      await ensureSlotReady(slot.provider);
       const response = await api.aiStructurize({
         text: structurizeText,
         workspace: $currentWorkspace,
@@ -633,6 +647,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       let streamed = "";
       abortController = new AbortController();
       const slot = mainSlot();
+      await ensureSlotReady(slot.provider);
       const full = await api.aiGenerateStream(
         {
           prompt: prepared.prompt,
@@ -701,6 +716,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       );
       if (prepared.notices.length > 0) contextNotice = prepared.notices.join(" · ");
       const slot = mainSlot();
+      await ensureSlotReady(slot.provider);
       await api.aiGenerateStream(
         {
           prompt: prepared.prompt,

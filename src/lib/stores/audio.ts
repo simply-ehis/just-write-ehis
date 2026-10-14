@@ -3,7 +3,7 @@
  * Lazy-loads sidecars on first tap (A7.6).
  */
 import { writable, derived } from 'svelte/store';
-import { api } from '$lib/api';
+import { api, isBrowserPreview } from '$lib/api';
 import { get } from 'svelte/store';
 import { settings } from './settings';
 import { showToast } from './notifications';
@@ -393,6 +393,34 @@ export async function ensureLlm(): Promise<boolean> {
   });
   if (ok) markUsed("llm");
   return ok;
+}
+
+/**
+ * True when `endpoint` is the bundled LLM's sentinel address — the one Rust
+ * routes over its private AF_UNIX socket instead of HTTP. Mirrors
+ * `is_local_llm_sentinel` in commands.rs (which also tolerates a trailing
+ * slash). The default small slot IS this address, which is why a default
+ * small-slot request can reach a sidecar nobody started.
+ */
+export function isLocalLlmSentinel(endpoint: string | null | undefined): boolean {
+  const trimmed = (endpoint ?? "").trim().replace(/\/+$/, "");
+  return trimmed === "http://127.0.0.1:8093/v1" || trimmed === "http://localhost:8093/v1";
+}
+
+/**
+ * Guard for any request Rust will route to the bundled LLM's socket: that
+ * socket only has a listener once the sidecar is up, so connecting cold fails
+ * with a raw `os error 10061` the writer can't act on.
+ *
+ * Returns false only when the local server needed to be up and could not be
+ * brought up — callers report that instead of firing the request. Remote
+ * providers and browser preview return true: there is no local socket to
+ * ensure there (preview keeps its own backend path untouched).
+ */
+export async function ensureLlmFor(endpoint: string | null | undefined): Promise<boolean> {
+  if (!isLocalLlmSentinel(endpoint)) return true;
+  if (isBrowserPreview()) return true;
+  return ensureLlm();
 }
 
 /** Stop the llama.cpp server sidecar (e.g. when LLM is toggled off). Best-effort. */

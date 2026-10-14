@@ -696,6 +696,7 @@ pub async fn ai_generate(
     messages.push(serde_json::json!({"role": "user", "content": request.prompt}));
 
     if is_local_llm_sentinel(&endpoint) {
+        llm.ensure_ready().await?;
         let content = llm
             .chat_completion(messages, request.max_tokens.unwrap_or(2048), 0.7)
             .await?;
@@ -838,6 +839,7 @@ pub async fn provider_probe(
     // The bundled local LLM no longer binds TCP — its /models lives on the
     // private AF_UNIX socket owned by LlmManager. Route the sentinel here.
     if is_local_llm_sentinel(base) {
+        llm.ensure_ready().await?;
         let models = llm.list_models().await?;
         return Ok(ProviderProbeResponse { models });
     }
@@ -1031,6 +1033,7 @@ pub async fn ai_generate_stream(
     // deferred). The 350M model completes in one shot fast enough that a
     // single emitted chunk preserves the UX contract.
     if is_local_llm_sentinel(&endpoint) {
+        llm.ensure_ready().await?;
         let text = llm
             .chat_completion(messages, request.max_tokens.unwrap_or(2048), 0.7)
             .await?;
@@ -1148,6 +1151,7 @@ Output the final transformed document. Use markdown where appropriate."#
     ];
 
     if is_local_llm_sentinel(&endpoint) {
+        llm.ensure_ready().await?;
         let result = llm.chat_completion(messages, 4096, 0.7).await?;
         return Ok(StructurizeResponse { result, tokens_used: None });
     }
@@ -2460,7 +2464,7 @@ fn resolve_sidecars_dir_in(
     ))
 }
 
-fn resolve_sidecars_dir(resource_dir: Option<std::path::PathBuf>) -> Result<String, String> {
+pub(crate) fn resolve_sidecars_dir(resource_dir: Option<std::path::PathBuf>) -> Result<String, String> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()));

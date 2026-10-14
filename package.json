@@ -50,6 +50,7 @@
     "test:sidecar": "node tests/sidecar-validate.mjs",
     "test:sidecarauth": "node tests/sidecar-auth.mjs",
     "test:ensure": "node tests/ensure-poll.mjs",
+    "test:ghostrouting": "node tests/ghost-routing.mjs",
     "test:aclerrors": "node tests/acl-errors-unit.mjs",
     "test:aclparity": "node tests/acl-parity.mjs",
     "test:providerprobe": "node tests/provider-probe-unit.mjs",
@@ -76,7 +77,7 @@
     "test:parity": "node tests/backend-parity.mjs",
     "test:csp": "node tests/csp-desktop.mjs",
     "test:support": "node tests/support-unit.mjs",
-    "test:source": "npm run test:settings && npm run test:ensure && npm run test:aclerrors && npm run test:aclparity && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:sidecarauth && npm run test:writeback && npm run test:window && npm run test:bootgate && npm run test:ghostwindow && npm run test:pathguard && npm run test:parity && npm run test:csp && npm run test:support"
+    "test:source": "npm run test:settings && npm run test:ensure && npm run test:ghostrouting && npm run test:aclerrors && npm run test:aclparity && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:sidecarauth && npm run test:writeback && npm run test:window && npm run test:bootgate && npm run test:ghostwindow && npm run test:pathguard && npm run test:parity && npm run test:csp && npm run test:support"
   },
   "dependencies": {
     "@codemirror/commands": "^6.7.0",
