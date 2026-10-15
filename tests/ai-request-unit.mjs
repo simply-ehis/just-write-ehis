@@ -31,6 +31,14 @@ check("ECONNREFUSED maps to unreachable", friendlyEndpointError("ECONNREFUSED bo
 check("network maps to unreachable", friendlyEndpointError("network error").includes("Can't reach"));
 check("Failed to fetch maps to unreachable", friendlyEndpointError("Failed to fetch").includes("Can't reach"));
 check("node fetch failed maps to unreachable", friendlyEndpointError("fetch failed").includes("Can't reach"));
+// The Rust side owns every real request, and reqwest reports transport
+// failures as "error sending request for url (...)". Before this case the
+// raw reqwest string leaked straight to the user.
+check(
+  "reqwest error sending request maps to unreachable",
+  friendlyEndpointError("error sending request for url (http://127.0.0.1:8093/v1/chat/completions)").includes("Can't reach")
+);
+check("reqwest connection reset maps to unreachable", friendlyEndpointError("connection reset by peer").includes("Can't reach"));
 check("empty-choices passes through", friendlyEndpointError("AI endpoint returned an empty response.").includes("empty response"));
 check("unknown errors pass through", friendlyEndpointError("weird xyz").includes("weird xyz"));
 

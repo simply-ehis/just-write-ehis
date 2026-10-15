@@ -23,9 +23,17 @@ export function friendlyEndpointError(msg: unknown): string {
     lower.includes("econnrefused") ||
     lower.includes("network") ||
     lower.includes("fetch failed") ||
-    lower.includes("failed to fetch")
+    lower.includes("failed to fetch") ||
+    // reqwest (the Rust side, which owns every real request) reports
+    // transport failures as "error sending request for url (...)". Without
+    // this branch a dead endpoint surfaces the raw reqwest string instead
+    // of the actionable message.
+    lower.includes("error sending request") ||
+    // Connection reset / broken pipe when a sidecar dies mid-stream.
+    lower.includes("connection reset") ||
+    lower.includes("broken pipe")
   ) {
-    return "Can't reach AI server — is it running?";
+    return "Can't reach AI server - is it running?";
   }
   return text;
 }

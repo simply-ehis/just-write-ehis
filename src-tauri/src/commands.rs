@@ -559,16 +559,33 @@ pub fn conversation_get_messages(db: State<'_, Database>, conversation_id: Strin
     db.conversation_get_messages(&conversation_id)
 }
 
-/// Default model slot: the shared Ollama-compatible endpoint + model.
+/// The bundled local LLM sentinel. It looks like an HTTP URL but is never
+/// dialled over TCP: `LlmManager` owns a private AF_UNIX socket for it, and
+/// `is_local_llm_sentinel` routes those requests through the manager.
+pub const LOCAL_LLM_SENTINEL: &str = "http://127.0.0.1:8093/v1";
+
+/// Default model name for the bundled slot. Mirrors `smallModelName` in
+/// `src/lib/stores/settings.ts`.
+pub const LOCAL_LLM_MODEL: &str = "lfm2.5-350m";
+
+/// Default model slot: the bundled local endpoint + model.
 /// ONE definition — ai_generate, ai_generate_stream, and ai_structurize
 /// all resolve through here instead of repeating the fallback pair.
+///
+/// The fallback is deliberately the bundled sentinel, NOT the retired
+/// Ollama pair. That server no longer binds TCP on 8093 (it lives on an
+/// AF_UNIX socket), so falling back to `localhost:11434` meant a caller
+/// that omitted `provider` got a connection-refused from a port nothing
+/// listens on, surfaced as an unmapped "error sending request for url".
+/// Falling back to the sentinel keeps the request inside LlmManager,
+/// where `ensure_ready` starts the model if it is not up yet.
 fn resolve_slot(provider: Option<String>, model: Option<String>) -> (String, String) {
     let endpoint = provider
         .filter(|p| !p.trim().is_empty())
-        .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+        .unwrap_or_else(|| LOCAL_LLM_SENTINEL.to_string());
     let model = model
         .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| "llama3.2".to_string());
+        .unwrap_or_else(|| LOCAL_LLM_MODEL.to_string());
     (endpoint, model)
 }
 
@@ -3014,15 +3031,32 @@ mod ai_slot_tests {
     #[test]
     fn resolve_slot_defaults() {
         let (e, m) = resolve_slot(None, None);
-        assert_eq!(e, "http://localhost:11434/v1");
-        assert_eq!(m, "llama3.2");
+        assert_eq!(e, LOCAL_LLM_SENTINEL);
+        assert_eq!(m, LOCAL_LLM_MODEL);
     }
 
     #[test]
     fn resolve_slot_blank_means_default() {
         let (e, m) = resolve_slot(Some("  ".to_string()), Some("".to_string()));
-        assert_eq!(e, "http://localhost:11434/v1");
-        assert_eq!(m, "llama3.2");
+        assert_eq!(e, LOCAL_LLM_SENTINEL);
+        assert_eq!(m, LOCAL_LLM_MODEL);
+    }
+
+    /// The whole point of the sentinel fallback: a caller that omits the
+    /// provider must land inside LlmManager, NOT on a TCP port the bundled
+    /// server stopped binding. If this regresses, a missing provider turns
+    /// into a connection-refused against a dead port.
+    #[test]
+    fn resolve_slot_default_is_routable_not_a_dead_port() {
+        let (e, _) = resolve_slot(None, None);
+        assert!(
+            is_local_llm_sentinel(&e),
+            "default endpoint must be the bundled sentinel so LlmManager handles it: {e}"
+        );
+        assert_ne!(
+            e, "http://localhost:11434/v1",
+            "must not fall back to the retired Ollama TCP endpoint"
+        );
     }
 
     #[test]
