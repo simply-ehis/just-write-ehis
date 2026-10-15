@@ -1,30 +1,38 @@
-"""AI memory sidecar (vendored harness, adapted).
+"""AI memory sidecar - file-based long-term memory over a private pipe.
 
-Wraps `harness/memory.py` (vendored from small-model-harness, see
-harness/ATTRIBUTION.md) over a private stdio JSON-line pipe. No TCP port,
-no HTTP: one JSON request object per line on stdin, one response line on
+Wraps harness/memory_files.py (file-per-topic store; secret redaction from
+harness/memory.py) over a private stdio JSON-line pipe. No TCP port, no
+HTTP: one JSON request object per line on stdin, one response line on
 stdout, diagnostics on stderr (stdout is reserved for frames).
 
-Request:  {"id": 1, "method": "health"|"learn"|"recall"|"redact"|"clear",
-           "params": {...}}
+Request:  {"id": 1, "method": ..., "params": {...}}
 Response: {"id": 1, "ok": true, "result": {...}}
         or {"id": 1, "ok": false, "error": "..."}.
 
-Methods (params → result):
-  health  {}                  → {"status": "ok", "facts": N}
-  learn   {text}              → {"stored": N}     (extract + store facts)
-  recall  {q}                 → {"facts": "..."}  (prompt-ready block or "")
-  redact  {text}              → {"text": "..."}   (secrets scrubbed)
-  clear   {}                  → {"facts": 0}
+Methods (params -> result):
+  health    {}                 -> {"status": "ok", "files": N}
+  learn     {text, topics?}    -> {"stored": N, "skipped": "..."}
+  recall    {q, prefetch?}    -> {"facts": "<profile + listing>"}
+  read      {name}             -> {"name": ..., "text": "<file body>"}
+  listing   {}                 -> {"files": [{name, summary}, ...]}
+  forget    {text}             -> {"removed": N}
+  redact    {text}             -> {"text": "..."}
+  clear     {}                 -> {"files_removed": N}
 
-The launcher sets JWE_MEMORY_TOKEN (still required at startup: the pipe
-is private, but the contract keeps old/new builds interchangeable).
+recall deliberately returns the profile plus a directory listing, NOT every
+fact: the listing is metadata only, and read is how a file gets opened. Pass
+prefetch=true for the bundled model, which has no tool calling, so the
+sidecar keyword-matches and inlines the relevant file instead.
 
-Persistence: facts JSON at argv[1]/memory.json (default: this script's
-working dir).
+The launcher sets JWE_MEMORY_TOKEN (still required at startup: the pipe is
+private, but the contract keeps old/new builds interchangeable).
 
-Stdlib only — no new requirements.
+Persistence: one small .md file per topic under argv[1] (default: this
+script working dir), plus profile.md.
+
+Stdlib only - no new requirements.
 """
+
 
 import json
 import os
@@ -33,90 +41,53 @@ import sys
 HERE = os.environ.get("JWE_SIDECARS_DIR") or os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from harness.memory import SessionMemory, redact_secrets  # noqa: E402
+from harness.memory import redact_secrets  # noqa: E402
+from harness.memory_files import MemoryStore  # noqa: E402
 
-DATA_FILENAME = "memory.json"
 AUTH_TOKEN = os.environ.get("JWE_MEMORY_TOKEN", "")
-
-
-class MemoryStore:
-    """SessionMemory plus JSON persistence across sidecar restarts."""
-
-    def __init__(self, data_dir: str):
-        self.data_dir = data_dir
-        self.path = os.path.join(data_dir, DATA_FILENAME)
-        self.mem = SessionMemory()
-        self.load()
-
-    def load(self) -> None:
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                records = json.load(f)
-        except (OSError, ValueError):
-            return
-        for rec in records:
-            try:
-                fact = self.mem.remember(
-                    rec["text"], kind=rec.get("kind", "other")
-                )
-                if fact is None:
-                    continue
-                # Restore scoring state without re-deriving importance.
-                fact.importance = float(rec.get("importance", fact.importance))
-                fact.created_at = float(rec.get("created_at", fact.created_at))
-                fact.last_used_at = float(rec.get("last_used_at", fact.last_used_at))
-                fact.use_count = int(rec.get("use_count", 0))
-            except (KeyError, TypeError, ValueError):
-                continue
-        # Keep ids unique across restarts.
-        if self.mem._facts:
-            self.mem._next_id = max(f.id for f in self.mem._facts) + 1
-
-    def save(self) -> None:
-        try:
-            os.makedirs(self.data_dir, exist_ok=True)
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(
-                    [
-                        {
-                            "id": fact.id,
-                            "text": fact.text,
-                            "kind": fact.kind,
-                            "importance": fact.importance,
-                            "created_at": fact.created_at,
-                            "last_used_at": fact.last_used_at,
-                            "use_count": fact.use_count,
-                        }
-                        for fact in self.mem.facts
-                    ],
-                    f,
-                )
-            os.replace(tmp, self.path)
-        except OSError as e:
-            print(f"[memory] save failed: {e}", file=sys.stderr, flush=True)
 
 
 STORE: MemoryStore | None = None
 
 
 def _dispatch(method: str, params: dict) -> dict:
+    """Dispatch a sidecar request.
+
+    `recall` now returns the *context block* (profile + directory listing)
+    rather than a flat dump of every fact: the listing tells the model what
+    exists, and `read` is how it opens one. That keeps a small model's
+    context budget spent on the conversation instead of on memory.
+    """
     if method == "health":
-        return {"status": "ok", "facts": len(STORE.mem) if STORE else 0}
+        return {"status": "ok", "files": len(STORE.listing()) if STORE else 0}
     if STORE is None:
         raise RuntimeError("store not ready")
     if method == "learn":
-        stored = STORE.mem.learn_from_user_text(str(params.get("text", "")))
-        STORE.save()
-        return {"stored": len(stored)}
+        return STORE.learn(str(params.get("text", "")), params.get("topics"))
     if method == "recall":
-        return {"facts": STORE.mem.build_memory_prompt(str(params.get("q", "")))}
+        q = str(params.get("q", ""))
+        block = STORE.context_block(q)
+        # The bundled model cannot call tools, so pre-open the one or two
+        # files whose topic overlaps the query instead of trusting it to
+        # ask. Providers with tool support use the listing alone.
+        extra = []
+        if params.get("prefetch"):
+            for name in STORE.matching(q):
+                body = STORE.read(name).strip()
+                if body:
+                    extra.append(f"--- {name}.md ---\n{body}")
+        facts = "\n\n".join([block] + extra)
+        return {"facts": facts, "files": len(STORE.listing())}
+    if method == "read":
+        return {"name": str(params.get("name", "")), "text": STORE.read(str(params.get("name", "")))}
+    if method == "forget":
+        return STORE.forget(str(params.get("text", "")))
+    if method == "listing":
+        return {"files": [f.to_dict() for f in STORE.listing()]}
     if method == "redact":
         return {"text": redact_secrets(str(params.get("text", "")))}
     if method == "clear":
-        STORE.mem.clear()
-        STORE.save()
-        return {"facts": 0}
+        return STORE.clear()
     raise ValueError(f"unknown method: {method}")
 
 
@@ -134,7 +105,7 @@ def main():
     sys.stdout = sys.stderr  # keep stdout pure frames; prints become logs
     STORE = MemoryStore(data_dir)
     print(
-        f"[memory] stdio sidecar ready ({len(STORE.mem)} facts loaded)",
+        f"[memory] stdio sidecar ready ({len(STORE.listing())} topic files in {data_dir})",
         flush=True,
     )
     for line in sys.stdin:

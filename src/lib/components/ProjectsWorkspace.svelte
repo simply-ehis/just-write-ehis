@@ -242,8 +242,9 @@
 
       <DockSplit
         storageKey="jwe-split-projects"
-        topLabel="Project board height"
+        topLabel="Project board width"
         hasBottom={!!editingDoc}
+        direction="horizontal"
       >
         {#snippet top()}
       {#if viewMode === 'dashboard'}

@@ -4,7 +4,9 @@
   import { currentDoc, currentWorkspace, openTabs } from '$lib/stores/app';
   import { downloadConvertOutput } from '$lib/download';
   import { showToast } from '$lib/stores/notifications';
-  import EditorPane from './EditorPane.svelte';
+  // No EditorPane import here: the docked editor arrives via DocDetail,
+  // which mounts its own. Importing it directly pulled the whole
+  // CodeMirror chunk into this workspace's lazy chunk for nothing.
   import DocDetail from './DocDetail.svelte';
   import DeleteButton from './DeleteButton.svelte';
   import DockSplit from './DockSplit.svelte';
@@ -116,7 +118,6 @@
   let compileTypst = $state(true);
   let compiling = $state(false);
   let loading = $state(false);
-  let boardCollapsed = $state(false);
   let importing = $state(false);
   let importProgress = $state("");
   let importCancelled = $state(false);

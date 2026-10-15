@@ -9,6 +9,7 @@
   import { showToast } from "$lib/stores/notifications";
   import { warnOnce } from "$lib/errors";
   import { ensureHarness } from "$lib/memorySidecar";
+  import { redactSecrets } from "$lib/secretScrub";
   import { friendlyEndpointError, rateLimited } from "$lib/aiRequest";
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
@@ -94,9 +95,31 @@
   }
 
   /**
+   * Redact secrets, never block on it.
+   *
+   * This used to throw when the memory sidecar was down, which made a
+   * sidecar with no useful function a hard dependency on every AI feature
+   * — the writer lost chat entirely rather than lose privacy. Now the
+   * sidecar is the preferred implementation and the local scrub in
+   * `secretScrub` is the floor, so a credential is still never sent out
+   * raw, but a dead sidecar can never take the panel offline.
+   */
+  async function scrub(text: string, notices: string[]): Promise<string> {
+    if (!$settings.scrubSecrets || !text) return text;
+    if (!isBrowserPreview()) {
+      try {
+        if (await ensureHarness()) return await api.memoryRedact(text);
+      } catch {
+        /* fall through to the local scrub */
+      }
+      notices.push("secret scrubber ran locally — memory sidecar unavailable");
+    }
+    return redactSecrets(text);
+  }
+
+  /**
    * Memory + scrub gate for outgoing prompts (non-blank mode only).
-   * Recall enhances; scrubbing fails closed — a missing sidecar blocks
-   * the call instead of leaking secrets.
+   * Recall enhances; scrubbing is now always available.
    */
   async function preparePrompt(
     prompt: string,
@@ -115,20 +138,8 @@
         notices.push(`memory recall unavailable (${e instanceof Error ? e.message : e})`);
       }
     }
-    if ($settings.scrubSecrets) {
-      // No sidecar on the web: blocking chat here would punish users who
-      // enabled scrubbing on desktop, so warn once and send as-is.
-      if (isBrowserPreview()) {
-        notices.push("secret scrubbing needs the desktop app — sent as-is");
-      } else {
-        const ok = await ensureHarness();
-        if (!ok) {
-          throw new Error("Secret scrubbing is on but the memory sidecar isn't running.");
-        }
-        nextPrompt = await api.memoryRedact(nextPrompt);
-        nextSystem = await api.memoryRedact(nextSystem);
-      }
-    }
+    nextPrompt = await scrub(nextPrompt, notices);
+    nextSystem = await scrub(nextSystem, notices);
     return { prompt: nextPrompt, system: nextSystem, notices };
   }
 
@@ -508,12 +519,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     structurizeAccepted = false;
     contextNotice = "";
     try {
-      let structurizeText = structurizeInput;
-      if ($settings.scrubSecrets) {
-        const ok = await ensureHarness();
-        if (!ok) throw new Error("Secret scrubbing is on but the memory sidecar isn't running.");
-        structurizeText = await api.memoryRedact(structurizeInput);
-      }
+      let structurizeText = await scrub(structurizeInput, []);
       const slot = mainSlot();
       await ensureSlotReady(slot.provider);
       const response = await api.aiStructurize({

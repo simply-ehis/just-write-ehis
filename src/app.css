@@ -581,16 +581,20 @@ input:focus, textarea:focus, select:focus {
   margin-left: auto;
 }
 
-/* Editor-first: docked editors grow, boards/lists cap above them. */
+/* Editor-first: docked editors grow, boards/lists cap beside them.
+   Novel/Inbox/Projects all split HORIZONTALLY now (tools as a left
+   sidebar, editor on the right), so the dock is sized by width and
+   divided with a left border — the old min-height/border-top form
+   left a hairline seam across the top of a full-height editor. */
 .beat-dock,
 .inbox-dock,
 .project-dock {
   flex: 1 1 auto;
-  min-height: 260px;
+  min-width: 340px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border-subtle);
+  border-left: 1px solid var(--border-subtle);
   background: var(--surface-base);
 }
 
@@ -599,7 +603,7 @@ input:focus, textarea:focus, select:focus {
 .inbox-dock:has(.doc-detail.collapsed),
 .project-dock:has(.doc-detail.collapsed) {
   flex: 0 0 auto;
-  min-height: 0;
+  min-width: 0;
 }
 
 .ds-bottom:has(.doc-detail.collapsed) {

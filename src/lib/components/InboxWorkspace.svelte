@@ -213,9 +213,10 @@
 
   <DockSplit
     storageKey="jwe-split-inbox"
-    topLabel="Capture list height"
+    topLabel="Capture list width"
     hasBottom={!!viewing}
     topCompact={listCollapsed && !!viewing}
+    direction="horizontal"
   >
     {#snippet top()}
   <div class="inbox-list" class:collapsed-list={listCollapsed && viewing}>
