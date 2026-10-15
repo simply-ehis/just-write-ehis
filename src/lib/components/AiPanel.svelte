@@ -14,7 +14,7 @@
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
-  import { ensureLlm, ensureLlmFor, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
+  import { ensureLlm, ensureLlmFor, isLocalLlmSentinel, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
   import Icon from "$lib/components/Icon.svelte";
 
   /**
@@ -67,6 +67,24 @@
     const kind = $settings.useSmallAsMain ? "Light model" : "Main model";
     return `${kind} · ${name}`;
   });
+
+  /**
+   * How many tokens this slot may spend on an answer.
+   *
+   * The bundled 350M model sustains roughly 8 tokens/sec here, so the old
+   * flat 2048 asked for ~4 minutes of generation against a 120s stream
+   * timeout — it could never finish, which is why the LLM looked like it
+   * "failed at first, worked, then failed again": every long reply timed
+   * out while the server kept burning CPU for minutes afterwards.
+   *
+   * Budget it so the answer can actually land: ~960 tokens is what the
+   * timeout allows, and 768 leaves headroom for prompt eval time.
+   * Remote providers keep the full length — they stream far faster and
+   * the budget costs nothing there.
+   */
+  function maxTokensFor(provider: string | undefined, remote = 2048): number {
+    return isLocalLlmSentinel(provider) ? 768 : remote;
+  }
 
   function cancelGeneration() {
     // Keep the aborted controller until the stream settles (nulled in the
@@ -527,6 +545,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
         workspace: $currentWorkspace,
         provider: slot.provider,
         model: slot.model,
+        max_tokens: maxTokensFor(slot.provider, 2048),
         api_key: $settings.apiKey || undefined,
       });
       // Cancelled mid-flight: drop the result instead of committing it.
@@ -661,7 +680,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           mode,
           provider: slot.provider,
           model: slot.model,
-          max_tokens: mode === "composer" ? 4096 : 2048,
+          max_tokens: mode === "composer" ? maxTokensFor(slot.provider, 4096) : maxTokensFor(slot.provider),
           api_key: $settings.apiKey || undefined,
         },
         (token) => {
@@ -730,7 +749,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
           mode: "composer",
           provider: slot.provider,
           model: slot.model,
-          max_tokens: 4096,
+          max_tokens: maxTokensFor(slot.provider, 4096),
           api_key: $settings.apiKey || undefined,
         },
         (token) => {

@@ -317,6 +317,9 @@ export interface StructurizeRequest {
   workspace: string;
   provider?: string;
   model?: string;
+  /** Rust reads `max_tokens` and defaults to 2048; the panel lowers it for
+   *  the bundled model so the answer fits inside the stream timeout. */
+  max_tokens?: number;
   api_key?: string;
 }
 
