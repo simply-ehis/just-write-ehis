@@ -620,6 +620,23 @@ import { waitForBackendReady } from "$lib/bootGate";
       } catch (e) {
         console.warn("Activity decay check failed:", e);
       }
+
+      // ONE deliberate warm-up of the editor chunk.
+      //
+      // CodeMirror is a shared 610 KB chunk behind EditorPane, which every
+      // doc workspace reaches (Novel/Inbox/Projects via DocDetail, Write
+      // and Logs directly). Four independent lazy entry points meant the
+      // fetch + parse + compile + mount all landed on the same frame as
+      // the workspace switch, which is what stalled the main thread and
+      // made LazyWorkspace time out at 9s.
+      //
+      // Importing it once here — during idle, after boot — moves that
+      // cost off the click. It stays out of the critical path: nothing
+      // waits on it, it is a cache warm, and a failure is non-fatal
+      // because the workspace can still fetch it on demand.
+      void import("$lib/components/EditorPane.svelte").catch((e) => {
+        console.warn("Editor chunk warm-up failed (will lazy-load on demand):", e);
+      });
     };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(() => runPostBoot(), { timeout: 8000 });
