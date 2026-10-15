@@ -1488,7 +1488,7 @@ input:focus, textarea:focus, select:focus {
   --glass-bg-hover: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.1);
   --glass-border-strong: rgba(255, 255, 255, 0.18);
-  --glass-blur: 24px;
+  --glass-blur: 14px;
   --glass-radius: 16px;
   --glass-radius-sm: 12px;
   --glass-shadow: 0 12px 48px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.3);
@@ -1564,8 +1564,8 @@ input:focus, textarea:focus, select:focus {
 /* Glass — frosted panels */
 [data-theme="glass"] .sidebar {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-right: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
 }
@@ -1573,8 +1573,8 @@ input:focus, textarea:focus, select:focus {
 [data-theme="glass"] .ai-panel,
 [data-theme="glass"] .inspector-panel {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-left: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
 }
@@ -1582,31 +1582,29 @@ input:focus, textarea:focus, select:focus {
 [data-theme="glass"] .tab-bar {
   border-bottom: 1px solid var(--glass-border);
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  box-shadow: var(--glass-shadow-sm);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
+/* No backdrop-filter: this bar sits directly under .tab-bar, which
+   already has one. Two stacked backdrop layers mean the lower one
+   re-samples an already-composited surface every frame — the exact
+   pattern that froze the window. The border alone reads the same. */
 [data-theme="glass"] .breadcrumb-bar {
   border-bottom: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
 }
 
 [data-theme="glass"] .status-bar {
   border-top: 1px solid var(--glass-border);
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3), var(--glass-inset);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
+/* No backdrop-filter here either — it stacks on .sidebar's, which
+   already blurs the same pixels. See .breadcrumb-bar. */
 [data-theme="glass"] .sidebar-footer {
   border-top: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
 }
 
 /* Glass — tabs */
@@ -1674,8 +1672,8 @@ input:focus, textarea:focus, select:focus {
   color: var(--ink);
   border: 1px solid var(--glass-border-strong);
   border-radius: 999px !important;
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   box-shadow: var(--glass-inset), var(--glass-highlight);
   transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
@@ -1744,8 +1742,8 @@ input:focus, textarea:focus, select:focus {
 [data-theme="glass"] .inbox-dock,
 [data-theme="glass"] .project-dock {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius) !important;
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
@@ -1805,8 +1803,8 @@ input:focus, textarea:focus, select:focus {
 /* Glass — cards and elevated surfaces */
 [data-theme="glass"] .card {
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius) !important;
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
@@ -1830,8 +1828,8 @@ input:focus, textarea:focus, select:focus {
 [data-theme="glass"][data-mode="dark"] .qc-panel,
 [data-theme="glass"][data-mode="dark"] .version-panel {
   background: rgba(18, 20, 18, 0.78);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border-strong);
   border-radius: var(--glass-radius) !important;
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
@@ -1842,8 +1840,8 @@ input:focus, textarea:focus, select:focus {
 [data-theme="glass"][data-mode="light"] .qc-panel,
 [data-theme="glass"][data-mode="light"] .version-panel {
   background: rgba(250, 249, 243, 0.82);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border-strong);
   border-radius: var(--glass-radius) !important;
   box-shadow: var(--glass-shadow), var(--glass-inset), var(--glass-highlight);
