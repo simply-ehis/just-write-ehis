@@ -3273,9 +3273,10 @@ pub fn llm_start(
     sidecars_dir: String,
     model: Option<String>,
     ctx_size: Option<u32>,
+    quantization: Option<String>,
 ) -> Result<(), String> {
     require_sidecar_paths(&sidecars_dir)?;
-    llm.start(&sidecars_dir, model.as_deref(), ctx_size)
+    llm.start(&sidecars_dir, model.as_deref(), ctx_size, quantization.as_deref())
 }
 
 #[tauri::command]

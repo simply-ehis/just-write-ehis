@@ -7,6 +7,7 @@ import { api, isBrowserPreview } from '$lib/api';
 import { get } from 'svelte/store';
 import { settings } from './settings';
 import { showToast } from './notifications';
+import { validateModelForTask, getLlmMetadata, type LlmQuantization } from '$lib/modelRegistry';
 
 // ── STT state ───────────────────────────────────────────────────
 export const sttRunning = writable(false);
@@ -239,11 +240,22 @@ export function sttModelReady(health: { ready?: boolean; model_loaded: boolean }
 
 /** Start the Moonshine sidecar (lazy, first tap). */
 export async function ensureStt(): Promise<boolean> {
+  const s = get(settings);
+  if (s.sttModel && s.sttModel.trim()) {
+    const validation = validateModelForTask(s.sttModel.trim(), "stt");
+    if (!validation.ok) {
+      sttError.set(validation.error || "Invalid STT model");
+      sttRunning.set(false);
+      sttModelLoaded.set(false);
+      return false;
+    }
+  }
+  
   const ok = await ensureSidecar({
     kind: "Moonshine",
     isRunning: () => api.sttIsRunning(),
     start: async () => {
-      await api.sttStart(await resolvePythonPathProbed(), await getSidecarsDir(), get(settings).sttModel || undefined);
+      await api.sttStart(await resolvePythonPathProbed(), await getSidecarsDir(), s.sttModel || undefined);
     },
     health: () => api.sttHealth(),
     modelReady: sttModelReady,
@@ -297,11 +309,22 @@ export function ttsModelReady(health: { ready?: boolean; model_loaded: boolean }
 
 /** Start the Kokoro sidecar (lazy, first tap). */
 export async function ensureTts(): Promise<boolean> {
+  const s = get(settings);
+  if (s.ttsModel && s.ttsModel.trim()) {
+    const validation = validateModelForTask(s.ttsModel.trim(), "tts");
+    if (!validation.ok) {
+      ttsError.set(validation.error || "Invalid TTS model");
+      ttsRunning.set(false);
+      ttsModelLoaded.set(false);
+      return false;
+    }
+  }
+  
   const ok = await ensureSidecar({
     kind: "Kokoro",
     isRunning: () => api.ttsIsRunning(),
     start: async () => {
-      await api.ttsStart(await resolvePythonPathProbed(), await getSidecarsDir(), get(settings).ttsModel || undefined);
+      await api.ttsStart(await resolvePythonPathProbed(), await getSidecarsDir(), s.ttsModel || undefined);
     },
     health: () => api.ttsHealth(),
     modelReady: ttsModelReady,
@@ -375,12 +398,39 @@ export function llmModelReady(health: { status: string }): boolean {
 
 /** Start the llama.cpp server sidecar (lazy, first ghost autocomplete). */
 export async function ensureLlm(): Promise<boolean> {
+  const s = get(settings);
+  
+  // Validate quantization setting
+  const quant = (s.smallModelQuantization || "q4_k_m") as LlmQuantization;
+  const meta = getLlmMetadata(quant);
+  if (!meta) {
+    llmError.set(`Unknown quantization: ${quant}. Valid: q4_k_m, q5_k_m, q8_0, q2_k, q3_k_m, q6_k`);
+    llmRunning.set(false);
+    llmModelLoaded.set(false);
+    return false;
+  }
+  
+  // Validate model file matches quantization (if user provided explicit model)
+  if (s.llmModel && s.llmModel.trim()) {
+    const validation = validateModelForTask(s.llmModel.trim(), "llm");
+    if (!validation.ok) {
+      llmError.set(validation.error || "Invalid LLM model");
+      llmRunning.set(false);
+      llmModelLoaded.set(false);
+      return false;
+    }
+  }
+  
   const ok = await ensureSidecar({
     kind: "llama",
     isRunning: () => api.llmIsRunning(),
     start: async () => {
-      const s = get(settings);
-      await api.llmStart(await getSidecarsDir(), s.llmModel || undefined, s.smallModelContextLength || undefined);
+      await api.llmStart(
+        await getSidecarsDir(),
+        s.llmModel || undefined,
+        s.smallModelContextLength || undefined,
+        s.smallModelQuantization || undefined,
+      );
     },
     health: () => api.llmHealth(),
     modelReady: llmModelReady,

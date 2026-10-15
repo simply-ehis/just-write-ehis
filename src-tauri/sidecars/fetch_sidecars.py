@@ -50,11 +50,34 @@ LLM_SERVER_URL = (
     "b11047/llama-b11047-bin-win-vulkan-x64.zip"
 )
 LLM_SERVER_DIR = MODELS_DIR / "llama-server"
-LLM_GGUF_URL = (
-    "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/"
-    "LFM2.5-350M-Q4_K_M.gguf"
-)
-LLM_GGUF_PATH = MODELS_DIR / "lfm2.5-350m-q4_k_m.gguf"
+
+# Available quantizations for LFM2.5-350M on HuggingFace LiquidAI/LFM2.5-350M-GGUF
+# Q4_K_M  — balanced, default (~267MB)
+# Q5_K_M  — higher quality (~320MB)
+# Q8_0    — near-fp16 quality (~420MB)
+# Q2_K    — smallest, fastest (~160MB)
+# Q3_K_M  — fast, lower quality (~200MB)
+# Q6_K    — high quality (~380MB)
+LLM_QUANTIZATIONS = {
+    "q4_k_m": "LFM2.5-350M-Q4_K_M.gguf",
+    "q5_k_m": "LFM2.5-350M-Q5_K_M.gguf",
+    "q8_0": "LFM2.5-350M-Q8_0.gguf",
+    "q2_k": "LFM2.5-350M-Q2_K.gguf",
+    "q3_k_m": "LFM2.5-350M-Q3_K_M.gguf",
+    "q6_k": "LFM2.5-350M-Q6_K.gguf",
+}
+DEFAULT_LLM_QUANT = "q4_k_m"
+
+def _llm_gguf_url(quant: str) -> str:
+    fname = LLM_QUANTIZATIONS.get(quant, LLM_QUANTIZATIONS[DEFAULT_LLM_QUANT])
+    return (
+        "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/"
+        f"{fname}"
+    )
+
+def _llm_gguf_path(quant: str) -> Path:
+    fname = LLM_QUANTIZATIONS.get(quant, LLM_QUANTIZATIONS[DEFAULT_LLM_QUANT])
+    return MODELS_DIR / fname.lower()
 
 # Typst CLI - PDF export only. Bundled via Tauri `externalBin` (not the
 # sidecar server list: it is a one-shot compiler, not a listening service).
@@ -259,8 +282,21 @@ def _extract_zip(archive: Path, dest_dir: Path) -> None:
         zf.extractall(dest_dir)
 
 
-def fetch_llm() -> None:
-    """Fetch llama.cpp server binary + LFM 2.5-350M GGUF."""
+def fetch_llm(quant: str = DEFAULT_LLM_QUANT) -> None:
+    """Fetch llama.cpp server binary + LFM 2.5-350M GGUF.
+
+    Args:
+        quant: Quantization to fetch (q4_k_m, q5_k_m, q8_0, q2_k, q3_k_m, q6_k).
+               Defaults to q4_k_m.
+    """
+    quant = quant.lower()
+    if quant not in LLM_QUANTIZATIONS:
+        print(
+            f"[LLM] Unknown quantization '{quant}', falling back to {DEFAULT_LLM_QUANT}",
+            flush=True,
+        )
+        quant = DEFAULT_LLM_QUANT
+
     # 1) llama.cpp server release (contains llama-server.exe + DLLs)
     server_archive = MODELS_DIR / "llama-server.zip"
     _download(LLM_SERVER_URL, server_archive, "LLM-SERVER", SHA256["llm_server"])
@@ -288,10 +324,35 @@ def fetch_llm() -> None:
     # otherwise ride into the app bundle (~150MB of duplicates).
     shutil.rmtree(LLM_SERVER_DIR, ignore_errors=True)
 
-    # 2) LFM 2.5-350M GGUF (Q4_K_M ~267MB)
-    _download(LLM_GGUF_URL, LLM_GGUF_PATH, "LLM-GGUF", SHA256["llm_gguf"])
+    # 2) LFM 2.5-350M GGUF (selected quantization)
+    gguf_url = _llm_gguf_url(quant)
+    gguf_path = _llm_gguf_path(quant)
+    _download(gguf_url, gguf_path, f"LLM-GGUF({quant})", SHA256.get("llm_gguf", ""))
 
-    print("[LLM] Done.", flush=True)
+    # Create model metadata file for the registry
+    _write_model_metadata(quant, gguf_path)
+
+    def _write_model_metadata(quant: str, gguf_path: Path) -> None:
+    """Write model.json metadata for the registry."""
+    import json
+
+    meta = {
+        "name": f"LFM 2.5-350M {quant.upper()}",
+        "type": "llm",
+        "quantization": quant,
+        "architecture": "lfm2",
+        "tags": ["chat", "completion", "writing"],
+        "context_limit": 8192,
+        "recommended_threads": 4,
+        "recommended_gpu_layers": 0,
+        "description": f"LFM 2.5-350M {quant.upper()} quantization",
+        "filename": gguf_path.name,
+        "size_bytes": gguf_path.stat().st_size if gguf_path.exists() else 0,
+    }
+    meta_path = gguf_path.with_suffix(".json")
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    print(f"[LLM] Wrote model metadata → {meta_path}", flush=True)
 
 
 def fetch_typst() -> None:
@@ -354,7 +415,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Fetch sidecar assets")
     ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
     ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle)")
-    ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server + LFM 2.5-350M GGUF)")
+    ap.add_argument(
+        "--llm",
+        nargs="?",
+        const=DEFAULT_LLM_QUANT,
+        default=None,
+        help=f"Fetch LLM (llama.cpp server + LFM 2.5-350M GGUF). Optional quantization: {', '.join(LLM_QUANTIZATIONS.keys())} (default: {DEFAULT_LLM_QUANT})",
+    )
     ap.add_argument("--typst", action="store_true", help=f"Fetch the pinned Typst {TYPST_VERSION} CLI (PDF export)")
     args = ap.parse_args()
 
@@ -372,9 +439,9 @@ def main() -> None:
             fetch_tts()
         except Exception as e:
             failed.append(f"tts: {e}")
-    if args.llm:
+    if args.llm is not None:
         try:
-            fetch_llm()
+            fetch_llm(args.llm)
         except Exception as e:
             failed.append(f"llm: {e}")
     if args.typst:

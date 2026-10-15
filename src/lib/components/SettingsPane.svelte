@@ -961,7 +961,18 @@
             <label for="setting-small-model-ctx">Small Model Context Length</label>
             <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} onblur={() => clampSettingKey("smallModelContextLength")} />
           </div>
-          <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Takes effect on the next sidecar start — restart the small model to apply.</p>
+          <div class="setting-row">
+            <label for="setting-small-model-quant">Small Model Quantization</label>
+            <select id="setting-small-model-quant" bind:value={$settings.smallModelQuantization} onblur={() => clampSettingKey("smallModelQuantization")}>
+              <option value="q4_k_m">Q4_K_M — balanced (default, ~267 MB)</option>
+              <option value="q5_k_m">Q5_K_M — higher quality (~320 MB)</option>
+              <option value="q8_0">Q8_0 — near-fp16 quality (~420 MB)</option>
+              <option value="q2_k">Q2_K — smallest, fastest (~160 MB)</option>
+              <option value="q3_k_m">Q3_K_M — fast, lower quality (~200 MB)</option>
+              <option value="q6_k">Q6_K — high quality (~380 MB)</option>
+            </select>
+          </div>
+          <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Quantization affects quality/speed/size tradeoff. Takes effect on the next sidecar start — restart the small model to apply. Re-download with <code>python src-tauri/sidecars/fetch_sidecars.py --llm q8_0</code> to fetch a different quantization.</p>
         {/if}
         <div class="setting-row">
           <label for="setting-use-small-as-main">Use Small Model as Main</label>

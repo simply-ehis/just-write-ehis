@@ -78,6 +78,8 @@ export interface AppSettings {
   smallModelName: string;
   /** llama-server --ctx-size for the bundled small model (takes effect on next sidecar start). */
   smallModelContextLength: number;
+  /** llama.cpp quantization for the bundled LFM 2.5-350M model. One of: q4_k_m (default), q5_k_m, q8_0, q2_k, q3_k_m, q6_k. */
+  smallModelQuantization: "q4_k_m" | "q5_k_m" | "q8_0" | "q2_k" | "q3_k_m" | "q6_k";
   /** Route the AI panel's main slot (chat/composer/structurize) at the small model. */
   useSmallAsMain: boolean;
   mainModelEndpoint: string;
@@ -197,6 +199,7 @@ const defaultSettings: AppSettings = {
   smallModelEndpoint: "http://127.0.0.1:8093/v1",
   smallModelName: "lfm2.5-350m",
   smallModelContextLength: 8192,
+  smallModelQuantization: "q4_k_m",
   useSmallAsMain: false,
   mainModelEndpoint: "https://api.openai.com/v1",
   mainModelName: "gpt-4o-mini",

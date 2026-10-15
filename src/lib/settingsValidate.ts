@@ -97,6 +97,7 @@ const SCHEMA: Record<string, Rule> = {
   smallModelEndpoint: STR,
   smallModelName: STR,
   smallModelContextLength: INT(1024, 131072),
+  smallModelQuantization: ENUM("q4_k_m", "q5_k_m", "q8_0", "q2_k", "q3_k_m", "q6_k"),
   useSmallAsMain: BOOL,
   mainModelEndpoint: STR,
   mainModelName: STR,

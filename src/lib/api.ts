@@ -868,8 +868,8 @@ export const api = {
     safeInvoke<void>("tts_stop_playback"),
 
   // ── LLM: llama.cpp server (LFM 2.5-350M) ───────────────────────────
-  llmStart: (sidecarsDir: string, model?: string, ctxSize?: number) =>
-    safeInvoke<void>("llm_start", { sidecarsDir, model, ctxSize }),
+  llmStart: (sidecarsDir: string, model?: string, ctxSize?: number, quantization?: string) =>
+    safeInvoke<void>("llm_start", { sidecarsDir, model, ctxSize, quantization }),
 
   llmStop: () =>
     safeInvoke<void>("llm_stop"),

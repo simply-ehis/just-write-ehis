@@ -738,6 +738,7 @@ pub struct StartParams {
     pub sidecars_dir: String,
     pub model: Option<String>,
     pub ctx_size: Option<u32>,
+    pub quantization: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -767,6 +768,7 @@ impl LlmManager {
         sidecars_dir: &str,
         model_path: Option<&str>,
         ctx_size: Option<u32>,
+        quantization: Option<&str>,
     ) -> Result<(), String> {
         // Idempotent: a second start must not unlink the socket a live
         // llama-server is already bound to (that would strand every later
@@ -812,17 +814,44 @@ impl LlmManager {
             .unwrap_or(&sidecars)
             .to_path_buf();
         let models_dir = asset_root.join("models");
-        let model_file =
+
+        // Determine model file: if quantization is specified, use that;
+        // otherwise fall back to the provided model_path or default.
+        let quant = quantization
+            .filter(|q| !q.trim().is_empty())
+            .unwrap_or("q4_k_m");
+        let model_file = if model_path.is_some() {
+            // User explicitly provided a model path — respect it.
             resolve_llm_model_path(model_path, &asset_root, &models_dir).map_err(|error| {
                 format!(
                     "{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).",
                     error
                 )
-            })?;
+            })?
+        } else {
+            // Auto-resolve based on quantization.
+            models_dir.join(format!("lfm2.5-350m-{}.gguf", quant))
+        };
 
         // Unlink a stale socket file from a previous crashed run: llama-
         // server fails to bind if the path already exists.
         let _ = std::fs::remove_file(&self.sock_path);
+
+        // Performance tuning: dynamic threads based on CPU cores,
+        // GPU layers auto-detected (Vulkan on Windows, Metal on macOS, CUDA on Linux).
+        let cpu_cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        // Use ~75% of cores for threads, leave headroom for OS/other processes.
+        let threads = std::cmp::max(1, (cpu_cores as f32 * 0.75).floor() as usize);
+
+        // GPU layers: auto-detect via llama-server --help or assume 0 for safety.
+        // On Windows with Vulkan, we can offload all layers.
+        // For now, default to 0 (CPU-only) but allow override via env.
+        let gpu_layers = std::env::var("JWE_LLM_GPU_LAYERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
 
         // `--api-key` is load-bearing, not decoration: even on a private
         // AF_UNIX socket the key keeps the startup contract explicit and
@@ -841,11 +870,17 @@ impl LlmManager {
             "--ctx-size".to_string(),
             ctx_size.unwrap_or(8192).to_string(),
             "--n-gpu-layers".to_string(),
-            "0".to_string(),
+            gpu_layers.to_string(),
             "--threads".to_string(),
-            "4".to_string(),
+            threads.to_string(),
             "--parallel".to_string(),
             "2".to_string(),
+            "--batch-size".to_string(),
+            "512".to_string(),
+            "--ubatch-size".to_string(),
+            "512".to_string(),
+            "--flash-attn".to_string(),
+            "1".to_string(),
         ];
         let server_dir = server_exe.parent().unwrap_or(&sidecars);
         let server_dir_text = server_dir.to_string_lossy().to_string();
@@ -857,11 +892,12 @@ impl LlmManager {
         );
         if result.is_ok() {
             // Remember the renderer's choice so a later backend-initiated
-            // `ensure_ready` boots the same model/ctx, not the defaults.
+            // `ensure_ready` boots the same model/ctx/quant, not the defaults.
             *self.start_params.lock().unwrap_or_else(|e| e.into_inner()) = Some(StartParams {
                 sidecars_dir: sidecars_dir.to_string(),
                 model: model_path.map(|m| m.to_string()),
                 ctx_size,
+                quantization: quantization.map(|q| q.to_string()),
             });
         }
         result
@@ -987,17 +1023,23 @@ impl LlmManager {
         }
         if !self.is_running() {
             let remembered = self.start_params.lock().map_err(|e| e.to_string())?.clone();
-            let (sidecars_dir, model, ctx_size) = match remembered {
-                Some(params) => (params.sidecars_dir, params.model, params.ctx_size),
+            let (sidecars_dir, model, ctx_size, quantization) = match remembered {
+                Some(params) => (
+                    params.sidecars_dir,
+                    params.model,
+                    params.ctx_size,
+                    params.quantization,
+                ),
                 // Never started by the renderer: resolve the same directory
                 // `llm_start` would have been handed and use the defaults.
                 None => (
                     crate::commands::resolve_sidecars_dir(self.resource_dir.clone())?,
                     None,
                     None,
+                    None,
                 ),
             };
-            self.start(&sidecars_dir, model.as_deref(), ctx_size)?;
+            self.start(&sidecars_dir, model.as_deref(), ctx_size, quantization.as_deref())?;
         }
         // llama-server binds only after the model is loaded, so poll for
         // readiness instead of racing the first request against that load.

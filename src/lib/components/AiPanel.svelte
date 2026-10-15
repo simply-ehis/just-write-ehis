@@ -15,6 +15,7 @@
   import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
   import { ensureLlm, ensureLlmFor, isLocalLlmSentinel, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
+import { detectRepetitionLoop } from "$lib/modelRegistry";
   import Icon from "$lib/components/Icon.svelte";
 
   /**
@@ -701,6 +702,14 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
 
       const aiMsg = await api.conversationAddMessage(conversation.id, "assistant", full);
       messages = messages.map((m) => (m.id === placeholder.id ? aiMsg : m));
+
+      // Loop detection: if the last few assistant messages are nearly identical,
+      // the model may be stuck in a repetition loop. Warn the user.
+      const loopCheck = detectRepetitionLoop(messages);
+      if (loopCheck.hasLoop) {
+        console.warn(`[AiPanel] Repetition loop detected: ${loopCheck.reason}`);
+        showToast(`Model output appears repetitive — consider adjusting prompt or temperature`, "warning");
+      }
 
       // Learn from the exchange for future recall (best-effort).
       if (!blankMode && $settings.aiMemoryEnabled) {
