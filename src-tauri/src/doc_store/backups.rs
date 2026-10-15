@@ -1,7 +1,6 @@
-    use super::*;
+use super::*;
 
-    impl Database {
-
+impl Database {
     pub fn backup_create(&self) -> Result<String, String> {
         // Filesystem work happens OUTSIDE the conn mutex: holding it across
         // directory creation + a full VACUUM copy would stall every other
@@ -15,44 +14,44 @@
         let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
         let backup_path = backup_dir.join(format!("backup_{}.db", timestamp));
 
-// Use VACUUM INTO for backup (SQLite 3.27.0+). The path is ours
-  // (timestamped filename under app-data), but quote it anyway:
-  // a username with an apostrophe would otherwise break the SQL.
-  let quoted = backup_path.to_string_lossy().replace('\'', "''");
+        // Use VACUUM INTO for backup (SQLite 3.27.0+). The path is ours
+        // (timestamped filename under app-data), but quote it anyway:
+        // a username with an apostrophe would otherwise break the SQL.
+        let quoted = backup_path.to_string_lossy().replace('\'', "''");
 
-  // VACUUM INTO copies the entire database. Run it on a SECOND connection
-  // when the backing file is known, so the app's only connection stays free to
-  // serve autosave, search and RAG for the duration; WAL allows a reader
-  // alongside the writer. Previously this ran under `self.conn.lock()`, which
-  // meant one full-database copy stalled every other command.
-  //
-  // A read-only connection cannot VACUUM, so this one is opened read/write;
-  // it is used for this one statement and dropped immediately.
-  let db_file = self.db_path.lock().ok().and_then(|p| p.clone());
-  match db_file {
-    Some(path) => {
-      let backup_conn = rusqlite::Connection::open(&path)
-        .map_err(|e| format!("Couldn't open the database for backup: {}", e))?;
-      // Match the main connection's durability settings so the copy sees a
-      // consistent snapshot rather than waiting on a different WAL state.
-      backup_conn
-        .execute_batch("PRAGMA busy_timeout=5000;")
-        .map_err(|e| e.to_string())?;
-      backup_conn
-        .execute_batch(&format!("VACUUM INTO '{}';", quoted))
-        .map_err(|e| e.to_string())?;
-    }
-    // In-memory (tests): there is no file to reopen, so the locked path is the
-    // only option.
-    None => {
-      let conn = self.conn.lock().map_err(|e| e.to_string())?;
-      conn.execute_batch(&format!("VACUUM INTO '{}';", quoted))
-        .map_err(|e| e.to_string())?;
-    }
-  }
+        // VACUUM INTO copies the entire database. Run it on a SECOND connection
+        // when the backing file is known, so the app's only connection stays free to
+        // serve autosave, search and RAG for the duration; WAL allows a reader
+        // alongside the writer. Previously this ran under `self.conn.lock()`, which
+        // meant one full-database copy stalled every other command.
+        //
+        // A read-only connection cannot VACUUM, so this one is opened read/write;
+        // it is used for this one statement and dropped immediately.
+        let db_file = self.db_path.lock().ok().and_then(|p| p.clone());
+        match db_file {
+            Some(path) => {
+                let backup_conn = rusqlite::Connection::open(&path)
+                    .map_err(|e| format!("Couldn't open the database for backup: {}", e))?;
+                // Match the main connection's durability settings so the copy sees a
+                // consistent snapshot rather than waiting on a different WAL state.
+                backup_conn
+                    .execute_batch("PRAGMA busy_timeout=5000;")
+                    .map_err(|e| e.to_string())?;
+                backup_conn
+                    .execute_batch(&format!("VACUUM INTO '{}';", quoted))
+                    .map_err(|e| e.to_string())?;
+            }
+            // In-memory (tests): there is no file to reopen, so the locked path is the
+            // only option.
+            None => {
+                let conn = self.conn.lock().map_err(|e| e.to_string())?;
+                conn.execute_batch(&format!("VACUUM INTO '{}';", quoted))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
 
-  Ok(backup_path.to_string_lossy().to_string())
-  }
+        Ok(backup_path.to_string_lossy().to_string())
+    }
 
     pub fn backup_list(&self) -> Result<Vec<(String, String, u64)>, String> {
         let backup_dir = dirs::data_local_dir()
@@ -69,10 +68,15 @@
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("db") {
-                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
                 let size = metadata.len();
-                let modified = metadata.modified()
+                let modified = metadata
+                    .modified()
                     .map(|t| {
                         let dt: chrono::DateTime<chrono::Utc> = t.into();
                         dt.format("%Y-%m-%d %H:%M:%S").to_string()
@@ -134,16 +138,20 @@
         }
         // Restore to a sibling file, never over the live DB in place.
         let restored = backup_dir.join(format!("{}.restored", backup_name));
-        std::fs::copy(&backup_path, &restored).map_err(|e| {
-            format!("Failed to restore backup {}: {}", backup_name, e)
-        })?;
+        std::fs::copy(&backup_path, &restored)
+            .map_err(|e| format!("Failed to restore backup {}: {}", backup_name, e))?;
         // Verify the copy is a readable database before handing it back.
         let conn = rusqlite::Connection::open(&restored)
             .map_err(|e| format!("Restored backup is not a readable database: {}", e))?;
         let docs: i64 = conn
             .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
             .map_err(|e| format!("Restored backup failed integrity check: {}", e))?;
-        eprintln!("[backup] restored {} ({} docs) to {}", backup_name, docs, restored.display());
+        eprintln!(
+            "[backup] restored {} ({} docs) to {}",
+            backup_name,
+            docs,
+            restored.display()
+        );
         Ok(restored.to_string_lossy().to_string())
     }
 
@@ -168,9 +176,8 @@
         if !path.is_file() {
             return Err(format!("Backup not found: {}", backup_name));
         }
-        std::fs::remove_file(&path).map_err(|e| {
-            format!("Failed to delete backup {}: {}", backup_name, e)
-        })
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete backup {}: {}", backup_name, e))
     }
 
     /// Prune backups to the newest `keep`, deleting the rest. Called after a
@@ -188,4 +195,3 @@
         Ok(deleted)
     }
 }
-

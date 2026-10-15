@@ -26,11 +26,20 @@ pub struct Doc {
 /// chapter-shaped manuscript survives the round trip.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    Heading { level: u8, spans: Vec<Span> },
+    Heading {
+        level: u8,
+        spans: Vec<Span>,
+    },
     Paragraph(Vec<Span>),
-    List { ordered: bool, items: Vec<Vec<Block>> },
+    List {
+        ordered: bool,
+        items: Vec<Vec<Block>>,
+    },
     Quote(Vec<Block>),
-    Code { lang: Option<String>, text: String },
+    Code {
+        lang: Option<String>,
+        text: String,
+    },
     Rule,
 }
 
@@ -288,9 +297,7 @@ impl Builder {
             Event::TaskListMarker(done) => {
                 self.push_span(Span::Text(if done { "[x] ".into() } else { "[ ] ".into() }))
             }
-            Event::FootnoteReference(name) => {
-                self.push_span(Span::Text(format!("[{}]", name)))
-            }
+            Event::FootnoteReference(name) => self.push_span(Span::Text(format!("[{}]", name))),
             Event::InlineMath(t) | Event::DisplayMath(t) => {
                 self.push_span(Span::Text(t.to_string()))
             }
@@ -326,9 +333,7 @@ impl Builder {
             Tag::CodeBlock(kind) => {
                 self.flush_pending_inline();
                 let lang = match kind {
-                    CodeBlockKind::Fenced(info) if !info.is_empty() => {
-                        Some(info.to_string())
-                    }
+                    CodeBlockKind::Fenced(info) if !info.is_empty() => Some(info.to_string()),
                     _ => None,
                 };
                 self.code = Some((lang, String::new()));
@@ -402,7 +407,10 @@ impl Builder {
                     SpanKind::Strike => Span::Strike(children),
                     SpanKind::Link => {
                         let href = self.pending_href.take().unwrap_or_default();
-                        Span::Link { spans: children, href }
+                        Span::Link {
+                            spans: children,
+                            href,
+                        }
                     }
                 };
                 self.push_span(wrapped);
@@ -485,7 +493,10 @@ mod tests {
         assert_eq!(d.author.as_deref(), Some("Me"));
         assert_eq!(d.date.as_deref(), Some("2026"));
         assert_eq!(d.blocks.len(), 1);
-        assert_eq!(d.blocks[0], Block::Paragraph(vec![Span::Text("Body.".into())]));
+        assert_eq!(
+            d.blocks[0],
+            Block::Paragraph(vec![Span::Text("Body.".into())])
+        );
     }
 
     #[test]
@@ -571,10 +582,13 @@ mod tests {
         assert!(!lists[0].0);
         assert!(lists[1].0);
         assert_eq!(lists[0].1.len(), 2);
-        assert_eq!(spans_to_plain(match &lists[0].1[0][0] {
-            Block::Paragraph(s) => s,
-            other => panic!("expected paragraph in item, got {:?}", other),
-        }), "one");
+        assert_eq!(
+            spans_to_plain(match &lists[0].1[0][0] {
+                Block::Paragraph(s) => s,
+                other => panic!("expected paragraph in item, got {:?}", other),
+            }),
+            "one"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
-    use super::*;
+use super::*;
 
-    impl Database {
+impl Database {
     /// the text being written rather than the text being overwritten.
     /// See `snapshot_create_from`.
     pub fn snapshot_create(&self, doc_id: &str) -> Result<Snapshot, String> {
@@ -69,9 +69,17 @@
             Some(ref prev) => {
                 let diff = word_diff_count(prev, content);
                 if diff >= 0 {
-                    format!("v{} (+{} words)", now.split('T').next().unwrap_or(&now), diff)
+                    format!(
+                        "v{} (+{} words)",
+                        now.split('T').next().unwrap_or(&now),
+                        diff
+                    )
                 } else {
-                    format!("v{} ({} words)", now.split('T').next().unwrap_or(&now), diff)
+                    format!(
+                        "v{} ({} words)",
+                        now.split('T').next().unwrap_or(&now),
+                        diff
+                    )
                 }
             }
             None => format!("v{}", now.split('T').next().unwrap_or(&now)),
@@ -82,7 +90,15 @@
             params![id, doc_id, label, content, word_count, hash, now],
         ).map_err(|e| e.to_string())?;
 
-        Ok(Snapshot { id, doc_id: doc_id.to_string(), label, content: Some(content.to_string()), word_count, content_hash: Some(hash), created_at: now })
+        Ok(Snapshot {
+            id,
+            doc_id: doc_id.to_string(),
+            label,
+            content: Some(content.to_string()),
+            word_count,
+            content_hash: Some(hash),
+            created_at: now,
+        })
     }
 
     pub fn snapshot_list(&self, doc_id: &str) -> Result<Vec<Snapshot>, String> {
@@ -94,17 +110,19 @@
              ORDER BY s.created_at DESC"
         ).map_err(|e| e.to_string())?;
 
-        let snapshots = stmt.query_map(params![doc_id], |row| {
-            Ok(Snapshot {
-                id: row.get(0)?,
-                doc_id: row.get(1)?,
-                label: row.get(2)?,
-                content: row.get(3)?,
-                word_count: row.get(4)?,
-                content_hash: row.get(5)?,
-                created_at: row.get(6)?,
+        let snapshots = stmt
+            .query_map(params![doc_id], |row| {
+                Ok(Snapshot {
+                    id: row.get(0)?,
+                    doc_id: row.get(1)?,
+                    label: row.get(2)?,
+                    content: row.get(3)?,
+                    word_count: row.get(4)?,
+                    content_hash: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
             })
-        }).map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -144,16 +162,22 @@
                     content_hash: row.get(5)?,
                     created_at: row.get(6)?,
                 })
-            }).map_err(|e| e.to_string())?
+            })
+            .map_err(|e| e.to_string())?
         };
 
         let now = now_iso();
-        let word_count = snapshot.content.as_ref().map(|c| c.split_whitespace().count() as i64).unwrap_or(0);
+        let word_count = snapshot
+            .content
+            .as_ref()
+            .map(|c| c.split_whitespace().count() as i64)
+            .unwrap_or(0);
 
         conn.execute(
             "UPDATE docs SET content = ?1, word_count = ?2, updated_at = ?3 WHERE id = ?4",
             params![snapshot.content, word_count, now, snapshot.doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         let doc = {
             let mut stmt = conn.prepare(
@@ -180,7 +204,8 @@
                     goal_words: row.get(16)?,
                     deadline: row.get(17)?,
                 })
-            }).map_err(|e| e.to_string())?
+            })
+            .map_err(|e| e.to_string())?
         };
 
         // Write restored content to disk. Propagate the error: a silent failure
@@ -204,7 +229,11 @@
     /// - Dedupe identical content_hash (already handled in snapshot_create)
     /// - Thin older-than-window to 1/day
     /// - Cap at 500/doc (weekly thinning past that)
-    pub fn snapshot_retention_prune(&self, doc_id: &str, retention_days: i64) -> Result<u64, String> {
+    pub fn snapshot_retention_prune(
+        &self,
+        doc_id: &str,
+        retention_days: i64,
+    ) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = now_iso();
         // i64 interpolated, never user text — no injection surface.
@@ -234,17 +263,18 @@
             )",
             window, window
         );
-        let thinned = conn.execute(
-            &thin_sql,
-            params![doc_id, now],
-        ).map_err(|e| e.to_string())?;
+        let thinned = conn
+            .execute(&thin_sql, params![doc_id, now])
+            .map_err(|e| e.to_string())?;
 
         // 3. Cap at 500: if >500, thin oldest to weekly
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM snapshots WHERE doc_id = ?1",
-            params![doc_id],
-            |row| row.get(0),
-        ).map_err(|e| e.to_string())?;
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM snapshots WHERE doc_id = ?1",
+                params![doc_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
 
         let over_cap = if count > 500 { (count - 500) as u64 } else { 0 };
         let weekly_thinned = if over_cap > 0 {
@@ -259,7 +289,9 @@
                 LIMIT ?3",
                 params![doc_id, now, over_cap],
             ).map_err(|e| e.to_string())?
-        } else { 0 };
+        } else {
+            0
+        };
 
         Ok((deduped + thinned + weekly_thinned) as u64)
     }
@@ -270,8 +302,10 @@
             let conn = self.conn.lock().map_err(|e| e.to_string())?;
             conn.prepare("SELECT DISTINCT doc_id FROM snapshots")
                 .and_then(|mut stmt| {
-                    let results = stmt.query_map([], |row| row.get(0))?
-                        .filter_map(|r| r.ok()).collect();
+                    let results = stmt
+                        .query_map([], |row| row.get(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
                     Ok(results)
                 })
                 .unwrap_or_default()
@@ -284,4 +318,3 @@
         Ok(total)
     }
 }
-

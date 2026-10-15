@@ -317,7 +317,10 @@ pub fn inline_embeds(md: &str, load: &dyn Fn(&str) -> Option<String>) -> String 
                         out.push('\n');
                     }
                     None => {
-                        out.push_str(&format!("\n> [embed missing: {}]\n", target.replace(['[', ']'], "")));
+                        out.push_str(&format!(
+                            "\n> [embed missing: {}]\n",
+                            target.replace(['[', ']'], "")
+                        ));
                     }
                 }
                 i = j + 2;
@@ -398,10 +401,7 @@ pub fn prepare_export(
 /// Content-only half of prepare_export (embeds + wikilinks, no YAML).
 /// Compile uses this per section — mid-document YAML blocks would render
 /// as visible rules + stray text, so the manuscript gets ONE header.
-pub fn prepare_export_body(
-    content: &str,
-    lookup: &dyn Fn(&str) -> Option<String>,
-) -> String {
+pub fn prepare_export_body(content: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
     let with_embeds = inline_embeds(content, lookup);
     resolve_wikilinks(&with_embeds)
 }
@@ -438,10 +438,7 @@ pub fn stage_attachments(
                 }
             }
             Err(e) => {
-                out = out.replace(
-                    &r,
-                    &format!("{} (attachment missing: {})", r, e),
-                );
+                out = out.replace(&r, &format!("{} (attachment missing: {})", r, e));
             }
         }
     }
@@ -495,10 +492,7 @@ pub fn convert_markdown(
     Ok(ConvertOutput {
         filename: format!("{}.{}", slug, ext),
         mime: mime_for(out_fmt).into(),
-        base64: base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &bytes,
-        ),
+        base64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes),
     })
 }
 
@@ -508,7 +502,10 @@ mod convert_tests {
 
     #[test]
     fn join_demotes_content_headings() {
-        let out = join_manuscript(&[("Ch 1", "# Old Title\n\nBody"), ("Ch 2", "### Deep\n\nMore")]);
+        let out = join_manuscript(&[
+            ("Ch 1", "# Old Title\n\nBody"),
+            ("Ch 2", "### Deep\n\nMore"),
+        ]);
         assert!(out.contains("# Ch 1"));
         // Content H1 demoted so it can never collide with the doc title.
         assert!(!out.contains("# Old Title\n") || out.contains("## Old Title"));
@@ -543,8 +540,14 @@ mod convert_tests {
 
     #[test]
     fn wikilinks_resolve_to_display_text() {
-        assert_eq!(resolve_wikilinks("See [[Chapter One]] now."), "See Chapter One now.");
-        assert_eq!(resolve_wikilinks("See [[ch1|first]] now."), "See first now.");
+        assert_eq!(
+            resolve_wikilinks("See [[Chapter One]] now."),
+            "See Chapter One now."
+        );
+        assert_eq!(
+            resolve_wikilinks("See [[ch1|first]] now."),
+            "See first now."
+        );
         // Images and embeds are not wikilinks.
         assert_eq!(resolve_wikilinks("![a](b.png)"), "![a](b.png)");
     }
@@ -552,7 +555,13 @@ mod convert_tests {
     #[test]
     fn embeds_inline_or_note() {
         let md = "Before ![[ch1]] after.";
-        let out = inline_embeds(md, &|t| if t == "ch1" { Some("TEXT".into()) } else { None });
+        let out = inline_embeds(md, &|t| {
+            if t == "ch1" {
+                Some("TEXT".into())
+            } else {
+                None
+            }
+        });
         assert!(out.contains("TEXT"));
         assert!(!out.contains("![["));
         let missing = inline_embeds(md, &|_| None);
@@ -563,7 +572,13 @@ mod convert_tests {
     fn attachment_refs_found_and_traversal_skipped() {
         let md = "![a](.attachments/x.png) and [b](.attachments/y.pdf) and ![c](../evil.png)";
         let refs = attachment_refs(md);
-        assert_eq!(refs, vec![".attachments/x.png".to_string(), ".attachments/y.pdf".to_string()]);
+        assert_eq!(
+            refs,
+            vec![
+                ".attachments/x.png".to_string(),
+                ".attachments/y.pdf".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -609,6 +624,11 @@ mod convert_tests {
         assert!(body.contains("See x."));
         let joined = join_manuscript(&[("Ch1", &body), ("Ch2", "Plain.")]);
         assert!(joined.starts_with("# Ch1\n\n## Ch1"));
-        assert_eq!(joined.matches("---").count(), 1, "only the doc separator: {}", joined);
+        assert_eq!(
+            joined.matches("---").count(),
+            1,
+            "only the doc separator: {}",
+            joined
+        );
     }
 }

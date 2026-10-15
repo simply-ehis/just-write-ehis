@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use crate::ipc::{IpcSidecar, SockClient};
 use crate::procutil::{hide_console, sidecar_stdio, terminate_child};
@@ -59,14 +59,21 @@ fn resolve_sidecar_script(sidecars_dir: &str, script: &str) -> Result<std::path:
 
 fn resolve_sidecar_executable(sidecars_dir: &str, executable: &str) -> Option<std::path::PathBuf> {
     let mut candidates = vec![
-        std::path::PathBuf::from(sidecars_dir).join("bin").join(executable),
+        std::path::PathBuf::from(sidecars_dir)
+            .join("bin")
+            .join(executable),
         std::path::PathBuf::from(sidecars_dir).join(executable),
     ];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("sidecars").join("bin").join(executable));
             candidates.push(dir.join("sidecars").join(executable));
-            candidates.push(dir.join("resources").join("sidecars").join("bin").join(executable));
+            candidates.push(
+                dir.join("resources")
+                    .join("sidecars")
+                    .join("bin")
+                    .join(executable),
+            );
         }
     }
     candidates.into_iter().find(|path| path.is_file())
@@ -80,7 +87,10 @@ fn sidecar_root_from_executable(executable: &std::path::Path) -> std::path::Path
     executable
         .parent()
         .and_then(|parent| {
-            if parent.file_name().is_some_and(|name| name.to_string_lossy() == "bin") {
+            if parent
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy() == "bin")
+            {
                 parent.parent()
             } else {
                 Some(parent)
@@ -114,7 +124,11 @@ impl ManagedSidecar {
                 Ok(None) => true,
                 Ok(Some(status)) => {
                     if !status.success() {
-                        eprintln!("[{}] child exited with error: {:?}", self.name, status.code());
+                        eprintln!(
+                            "[{}] child exited with error: {:?}",
+                            self.name,
+                            status.code()
+                        );
                     }
                     false
                 }
@@ -126,7 +140,13 @@ impl ManagedSidecar {
 
     /// Spawn `program`+`args` in `cwd`. A dead handle is reaped first and
     /// respawned (never early-Ok on a corpse).
-    pub fn start(&self, program: &str, args: &[String], cwd: &str, start_label: &str) -> Result<(), String> {
+    pub fn start(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &str,
+        start_label: &str,
+    ) -> Result<(), String> {
         self.start_with_env(program, args, cwd, start_label, &[])
     }
 
@@ -163,14 +183,14 @@ impl ManagedSidecar {
         // commands on it. Output that used to vanish into a hidden
         // console is now readable where the user can find it.
         let (log_out, log_err) = sidecar_stdio(self.name);
-        command
-            .stdin(Stdio::null())
-            .stdout(log_out)
-            .stderr(log_err);
+        command.stdin(Stdio::null()).stdout(log_out).stderr(log_err);
         hide_console(&mut command);
-        let child = command
-            .spawn()
-            .map_err(|e| format!("Failed to start {} sidecar ({}): {}", start_label, program, e))?;
+        let child = command.spawn().map_err(|e| {
+            format!(
+                "Failed to start {} sidecar ({}): {}",
+                start_label, program, e
+            )
+        })?;
         die_with_us(&child);
         guard.replace(child);
         Ok(())
@@ -299,7 +319,12 @@ impl SttManager {
     }
 
     /// argv is now [model?] — the server no longer takes a port.
-    pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
+    pub fn start(
+        &self,
+        python_path: &str,
+        sidecars_dir: &str,
+        model: Option<&str>,
+    ) -> Result<(), String> {
         let mut args = Vec::new();
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             check_model_name(m)?;
@@ -317,11 +342,14 @@ impl SttManager {
             );
         }
         let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")?;
-        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let working_dir = script
+            .parent()
+            .unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
         let working_dir_text = working_dir.to_string_lossy().to_string();
-        self.proc.start_with_env(python_path, &python_args, &working_dir_text, &[token])
+        self.proc
+            .start_with_env(python_path, &python_args, &working_dir_text, &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -333,7 +361,10 @@ impl SttManager {
     }
 
     pub async fn health(&self) -> Result<SttHealth, String> {
-        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        let value = self
+            .proc
+            .request("health", json!({}), HEALTH_TIMEOUT)
+            .await?;
         serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
@@ -372,7 +403,10 @@ impl SttManager {
     }
 
     pub async fn stream_stop(&self) -> Result<String, String> {
-        let value = self.proc.request("stream_stop", json!({}), MEDIA_TIMEOUT).await?;
+        let value = self
+            .proc
+            .request("stream_stop", json!({}), MEDIA_TIMEOUT)
+            .await?;
         value
             .get("text")
             .and_then(|t| t.as_str())
@@ -405,7 +439,12 @@ impl TtsManager {
     }
 
     /// argv is now [model_dir?] — no port.
-    pub fn start(&self, python_path: &str, sidecars_dir: &str, model: Option<&str>) -> Result<(), String> {
+    pub fn start(
+        &self,
+        python_path: &str,
+        sidecars_dir: &str,
+        model: Option<&str>,
+    ) -> Result<(), String> {
         let mut args = Vec::new();
         if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
             check_model_name(m)?;
@@ -423,11 +462,14 @@ impl TtsManager {
             );
         }
         let script = resolve_sidecar_script(sidecars_dir, "tts_server.py")?;
-        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let working_dir = script
+            .parent()
+            .unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
         let working_dir_text = working_dir.to_string_lossy().to_string();
-        self.proc.start_with_env(python_path, &python_args, &working_dir_text, &[token])
+        self.proc
+            .start_with_env(python_path, &python_args, &working_dir_text, &[token])
     }
 
     pub fn stop(&self) -> Result<(), String> {
@@ -439,7 +481,10 @@ impl TtsManager {
     }
 
     pub async fn health(&self) -> Result<TtsHealth, String> {
-        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        let value = self
+            .proc
+            .request("health", json!({}), HEALTH_TIMEOUT)
+            .await?;
         serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
@@ -475,7 +520,8 @@ impl TtsManager {
         let sample_rate = value
             .get("sample_rate")
             .and_then(|s| s.as_u64())
-            .ok_or_else(|| "synthesis failed: missing sample rate".to_string())? as u32;
+            .ok_or_else(|| "synthesis failed: missing sample rate".to_string())?
+            as u32;
         Ok((audio.to_string(), sample_rate))
     }
 
@@ -527,7 +573,9 @@ impl MemoryManager {
             );
         }
         let script = resolve_sidecar_script(sidecars_dir, "memory_server.py")?;
-        let working_dir = script.parent().unwrap_or(std::path::Path::new(sidecars_dir));
+        let working_dir = script
+            .parent()
+            .unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
         python_args.extend(args);
         let working_dir_text = working_dir.to_string_lossy();
@@ -548,7 +596,10 @@ impl MemoryManager {
     }
 
     pub async fn health(&self) -> Result<MemoryHealth, String> {
-        let value = self.proc.request("health", json!({}), HEALTH_TIMEOUT).await?;
+        let value = self
+            .proc
+            .request("health", json!({}), HEALTH_TIMEOUT)
+            .await?;
         serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
@@ -606,7 +657,10 @@ fn resolve_llm_model_path(
     let Some(requested) = requested else {
         let default_path = models_dir.join("lfm2.5-350m-q4_k_m.gguf");
         if !default_path.is_file() {
-            return Err(format!("LLM model not found: {}", default_path.to_string_lossy()));
+            return Err(format!(
+                "LLM model not found: {}",
+                default_path.to_string_lossy()
+            ));
         }
         return Ok(default_path);
     };
@@ -643,7 +697,8 @@ fn resolve_llm_model_path(
                 component,
                 std::path::Component::ParentDir | std::path::Component::RootDir
             )
-        }) {
+        })
+    {
         return Err("LLM model path must stay inside the bundled models directory".to_string());
     }
     let candidate = if requested_path.starts_with("models") {
@@ -652,7 +707,10 @@ fn resolve_llm_model_path(
         models_dir.join(requested_path)
     };
     if !candidate.is_file() {
-        return Err(format!("LLM model not found: {}", candidate.to_string_lossy()));
+        return Err(format!(
+            "LLM model not found: {}",
+            candidate.to_string_lossy()
+        ));
     }
     Ok(candidate)
 }
@@ -704,7 +762,12 @@ impl LlmManager {
         SockClient::new(self.sock_path.clone(), self.auth_token.clone())
     }
 
-    pub fn start(&self, sidecars_dir: &str, model_path: Option<&str>, ctx_size: Option<u32>) -> Result<(), String> {
+    pub fn start(
+        &self,
+        sidecars_dir: &str,
+        model_path: Option<&str>,
+        ctx_size: Option<u32>,
+    ) -> Result<(), String> {
         // Idempotent: a second start must not unlink the socket a live
         // llama-server is already bound to (that would strand every later
         // connect while the child keeps running).
@@ -721,7 +784,8 @@ impl LlmManager {
         ];
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                server_candidates.push(dir.join("sidecars").join("models").join("llama-server.exe"));
+                server_candidates
+                    .push(dir.join("sidecars").join("models").join("llama-server.exe"));
                 server_candidates.push(dir.join("sidecars").join("llama-server.exe"));
             }
         }
@@ -738,15 +802,23 @@ impl LlmManager {
         }
         let asset_root = server_exe
             .parent()
-            .filter(|parent| parent.file_name().is_some_and(|name| name.to_string_lossy() == "models"))
+            .filter(|parent| {
+                parent
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy() == "models")
+            })
             .and_then(std::path::Path::parent)
             .or_else(|| server_exe.parent())
             .unwrap_or(&sidecars)
             .to_path_buf();
         let models_dir = asset_root.join("models");
-        let model_file = resolve_llm_model_path(model_path, &asset_root, &models_dir).map_err(|error| {
-            format!("{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).", error)
-        })?;
+        let model_file =
+            resolve_llm_model_path(model_path, &asset_root, &models_dir).map_err(|error| {
+                format!(
+                    "{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).",
+                    error
+                )
+            })?;
 
         // Unlink a stale socket file from a previous crashed run: llama-
         // server fails to bind if the path already exists.
@@ -815,7 +887,12 @@ impl LlmManager {
         serde_json::from_value(value).map_err(|e| format!("bad health response: {}", e))
     }
 
-    pub async fn completion(&self, prompt: &str, max_tokens: u32, temperature: f32) -> Result<String, String> {
+    pub async fn completion(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        temperature: f32,
+    ) -> Result<String, String> {
         let value = self
             .sock_client()
             .post_json(
@@ -909,11 +986,7 @@ impl LlmManager {
             return Ok(());
         }
         if !self.is_running() {
-            let remembered = self
-                .start_params
-                .lock()
-                .map_err(|e| e.to_string())?
-                .clone();
+            let remembered = self.start_params.lock().map_err(|e| e.to_string())?.clone();
             let (sidecars_dir, model, ctx_size) = match remembered {
                 Some(params) => (params.sidecars_dir, params.model, params.ctx_size),
                 // Never started by the renderer: resolve the same directory
@@ -1052,7 +1125,10 @@ mod managed_tests {
         }
         drop(guard);
 
-        assert!(in_job.as_bool(), "sidecar was never assigned to the kill-on-close job");
+        assert!(
+            in_job.as_bool(),
+            "sidecar was never assigned to the kill-on-close job"
+        );
         m.stop().expect("stop");
     }
 
@@ -1077,8 +1153,14 @@ mod managed_tests {
             !friendly.contains("os error") && !friendly.contains("llm socket"),
             "raw transport error leaked: {friendly}"
         );
-        assert!(friendly.contains("Bundled LLM is not running"), "{friendly}");
-        assert!(friendly.contains("LLM toggle"), "must name a next step: {friendly}");
+        assert!(
+            friendly.contains("Bundled LLM is not running"),
+            "{friendly}"
+        );
+        assert!(
+            friendly.contains("LLM toggle"),
+            "must name a next step: {friendly}"
+        );
     }
 
     /// Only connect failures are rewritten — model/fetch hints stay verbatim.
@@ -1086,6 +1168,9 @@ mod managed_tests {
     fn unrelated_llm_errors_pass_through_untouched() {
         let raw = "LLM model not found: C:\\sidecars\\models\\missing.gguf".to_string();
         assert_eq!(LlmManager::friendly(raw.clone()), raw);
-        assert_eq!(LlmManager::friendly("bad health response: x".to_string()), "bad health response: x");
+        assert_eq!(
+            LlmManager::friendly("bad health response: x".to_string()),
+            "bad health response: x"
+        );
     }
 }

@@ -76,14 +76,7 @@ fn spans_to_runs(spans: &[Span], bold: bool, italic: bool, strike: bool) -> Stri
                 ));
             }
             Span::Code(t) => {
-                out.push_str(&run_with_props(
-                    t,
-                    bold,
-                    italic,
-                    strike,
-                    "HTMLCode",
-                    None,
-                ));
+                out.push_str(&run_with_props(t, bold, italic, strike, "HTMLCode", None));
             }
             Span::Strong(v) => out.push_str(&spans_to_runs(v, true, italic, strike)),
             Span::Emph(v) => out.push_str(&spans_to_runs(v, bold, true, strike)),
@@ -139,7 +132,10 @@ fn run_with_props(
         props.push_str("<w:strike/>");
     }
     if props.is_empty() {
-        format!("<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r>", xml_escape(text))
+        format!(
+            "<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r>",
+            xml_escape(text)
+        )
     } else {
         format!(
             "<w:r><w:rPr>{props}</w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
@@ -187,7 +183,10 @@ fn render_list(out: &mut String, ordered: bool, items: &[Vec<Block>], level: u32
                 }
                 // Extra blocks in an item (a nested list, a second para)
                 // continue after the item's first paragraph.
-                Block::List { ordered: o, items: sub } => {
+                Block::List {
+                    ordered: o,
+                    items: sub,
+                } => {
                     render_list(out, *o, sub, level + 1);
                 }
                 Block::Paragraph(spans) => {
@@ -198,11 +197,7 @@ fn render_list(out: &mut String, ordered: bool, items: &[Vec<Block>], level: u32
                     ));
                 }
                 Block::Code { text, .. } => {
-                    out.push_str(&list_item(
-                        num_id,
-                        level,
-                        &styled_run(text, "HTMLCode"),
-                    ));
+                    out.push_str(&list_item(num_id, level, &styled_run(text, "HTMLCode")));
                 }
                 Block::Quote(inner) => {
                     out.push_str(&list_item(num_id, level, ""));
@@ -228,7 +223,10 @@ fn render_blocks(out: &mut String, blocks: &[Block], level: u32) {
                 ));
             }
             Block::Paragraph(spans) => {
-                out.push_str(&para("BodyText", &spans_to_runs(spans, false, false, false)));
+                out.push_str(&para(
+                    "BodyText",
+                    &spans_to_runs(spans, false, false, false),
+                ));
             }
             Block::List { ordered, items } => render_list(out, *ordered, items, level),
             Block::Quote(inner) => {
@@ -410,7 +408,10 @@ fn build(doc: &Doc) -> Result<Vec<u8>, String> {
     // Title as the Word Title style, then content minus any duplicate H1.
     body.push_str(&para("Title", &text_run(&doc.title)));
     if let Some(a) = &doc.author {
-        body.push_str(&para("BodyText", &run_with_props(a, false, true, false, "DefaultParagraphFont", None)));
+        body.push_str(&para(
+            "BodyText",
+            &run_with_props(a, false, true, false, "DefaultParagraphFont", None),
+        ));
     }
     if let Some(d) = &doc.date {
         body.push_str(&para("BodyText", &text_run(d)));
@@ -513,7 +514,13 @@ mod tests {
         let ct = part(&bytes, "[Content_Types].xml");
         let n = names(&bytes);
         for line in ct.lines().filter(|l| l.contains("PartName=\"/")) {
-            let p = line.split("PartName=\"/").nth(1).unwrap().split('"').next().unwrap();
+            let p = line
+                .split("PartName=\"/")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
             assert!(n.contains(&p.to_string()), "declared but missing: {p}");
         }
     }
@@ -521,7 +528,11 @@ mod tests {
     #[test]
     fn document_xml_is_balanced() {
         let d = docx("# One\n\ntext\n\n- a\n- b\n\n> q\n\n```\ncode\n```");
-        assert_eq!(d.matches("<w:p>").count() + d.matches("<w:p ").count(), d.matches("</w:p>").count(), "{d}");
+        assert_eq!(
+            d.matches("<w:p>").count() + d.matches("<w:p ").count(),
+            d.matches("</w:p>").count(),
+            "{d}"
+        );
         assert_eq!(d.matches("<w:body>").count(), 1, "{d}");
         assert_eq!(d.matches("</w:body>").count(), 1, "{d}");
         assert!(d.contains("<w:sectPr>"), "{d}");
@@ -584,8 +595,17 @@ mod tests {
         let rels = part(&bytes, "word/_rels/document.xml.rels");
         assert!(d.contains("<w:hyperlink r:id=\""), "{d}");
         // r:id must exist in the rels part, and the target must be escaped.
-        let id = d.split("r:id=\"").nth(1).unwrap().split('"').next().unwrap();
-        assert!(rels.contains(&format!("Id=\"{}\"", id)), "no rel for {id}: {rels}");
+        let id = d
+            .split("r:id=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert!(
+            rels.contains(&format!("Id=\"{}\"", id)),
+            "no rel for {id}: {rels}"
+        );
         assert!(rels.contains("TargetMode=\"External\""), "{rels}");
         assert!(rels.contains("example.com/?a=1&amp;b=2"), "{rels}");
     }
@@ -668,7 +688,11 @@ mod tests {
 
     #[test]
     fn core_props_carry_title_and_author() {
-        let bytes = write(&parse("X", "---\ntitle: \"T\"\nauthor: \"A B\"\n---\n\nbody")).unwrap();
+        let bytes = write(&parse(
+            "X",
+            "---\ntitle: \"T\"\nauthor: \"A B\"\n---\n\nbody",
+        ))
+        .unwrap();
         let core = part(&bytes, "docProps/core.xml");
         assert!(core.contains("<dc:title>T</dc:title>"), "{core}");
         assert!(core.contains("<dc:creator>A B</dc:creator>"), "{core}");
@@ -693,8 +717,20 @@ mod tests {
             &write(&parse("B", "[y](https://b.com/)")).unwrap(),
             "word/document.xml",
         );
-        let id_a = a.split("r:id=\"").nth(1).unwrap().split('"').next().unwrap();
-        let id_b = b.split("r:id=\"").nth(1).unwrap().split('"').next().unwrap();
+        let id_a = a
+            .split("r:id=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        let id_b = b
+            .split("r:id=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
         assert_eq!(id_a, id_b, "rel ids must restart per document");
     }
 }

@@ -2,21 +2,21 @@ use rusqlite::{Connection, Result as SqlResult};
 use std::sync::Mutex;
 
 pub struct Database {
-  pub conn: Mutex<Connection>,
-  pub vault_path: Mutex<std::path::PathBuf>,
-  /// True when writes must be refused (e.g. a failed migration left the
-  /// schema in an unsafe state). Checked by save_doc and atomic_save.
-  pub read_only: Mutex<crate::ReadOnlyFlag>,
-  /// On-disk location of the database, when there is one.
-  ///
-  /// `backup_create` needs this to run `VACUUM INTO` on a SECOND connection:
-  /// the copy reads the whole file, and doing it on `conn` held the only
-  /// connection's mutex for the duration, stalling every concurrent command
-  /// (autosave, search, RAG) on a large vault. WAL permits a reader alongside
-  /// the writer, so a separate connection lets the app keep serving while the
-  /// backup runs. `None` for in-memory databases, where there is no file to
-  /// reopen and the caller must fall back to the locked path.
-  pub db_path: Mutex<Option<std::path::PathBuf>>,
+    pub conn: Mutex<Connection>,
+    pub vault_path: Mutex<std::path::PathBuf>,
+    /// True when writes must be refused (e.g. a failed migration left the
+    /// schema in an unsafe state). Checked by save_doc and atomic_save.
+    pub read_only: Mutex<crate::ReadOnlyFlag>,
+    /// On-disk location of the database, when there is one.
+    ///
+    /// `backup_create` needs this to run `VACUUM INTO` on a SECOND connection:
+    /// the copy reads the whole file, and doing it on `conn` held the only
+    /// connection's mutex for the duration, stalling every concurrent command
+    /// (autosave, search, RAG) on a large vault. WAL permits a reader alongside
+    /// the writer, so a separate connection lets the app keep serving while the
+    /// backup runs. `None` for in-memory databases, where there is no file to
+    /// reopen and the caller must fall back to the locked path.
+    pub db_path: Mutex<Option<std::path::PathBuf>>,
 }
 
 /// Rolls an open transaction back on drop, unless disarmed after COMMIT.
@@ -41,23 +41,23 @@ impl Drop for RollbackGuard<'_> {
 }
 
 impl Database {
-pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
-  Self {
-  conn: Mutex::new(conn),
-  vault_path: Mutex::new(vault_path),
-  db_path: Mutex::new(None),
-  read_only: Mutex::new(crate::ReadOnlyFlag(false)),
-  }
-  }
+    pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
+        Self {
+            conn: Mutex::new(conn),
+            vault_path: Mutex::new(vault_path),
+            db_path: Mutex::new(None),
+            read_only: Mutex::new(crate::ReadOnlyFlag(false)),
+        }
+    }
 
-  /// Record the backing file so long-running reads can use their own
-  /// connection. Separate from `new` so in-memory test databases stay valid.
-  pub fn with_db_path(self, path: std::path::PathBuf) -> Self {
-  if let Ok(mut slot) = self.db_path.lock() {
-  *slot = Some(path);
-  }
-  self
-  }
+    /// Record the backing file so long-running reads can use their own
+    /// connection. Separate from `new` so in-memory test databases stay valid.
+    pub fn with_db_path(self, path: std::path::PathBuf) -> Self {
+        if let Ok(mut slot) = self.db_path.lock() {
+            *slot = Some(path);
+        }
+        self
+    }
 
     pub fn initialize(&self) -> SqlResult<()> {
         // Back up the DB file before any DDL runs. A failed migration is
@@ -104,7 +104,10 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         // cannot run inside a transaction ("Safety level may not be changed
         // inside a transaction").
         conn.execute_batch("BEGIN;")?;
-        let mut rollback_guard = RollbackGuard { conn: &conn, committed: false };
+        let mut rollback_guard = RollbackGuard {
+            conn: &conn,
+            committed: false,
+        };
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS docs (
@@ -294,9 +297,13 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
             CREATE INDEX IF NOT EXISTS idx_rag_chunks_content ON rag_chunks(content);"
         )?;
 
-        let has_suggestion_status: bool = conn.prepare("SELECT status FROM bible_suggestions LIMIT 1").is_ok();
+        let has_suggestion_status: bool = conn
+            .prepare("SELECT status FROM bible_suggestions LIMIT 1")
+            .is_ok();
         if !has_suggestion_status {
-            conn.execute_batch("ALTER TABLE bible_suggestions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';")?;
+            conn.execute_batch(
+                "ALTER TABLE bible_suggestions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';",
+            )?;
         }
         let has_fact_scope_key: bool = conn.query_row(
             "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_bible_facts_doc_key_unique'",
@@ -314,7 +321,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
             "CREATE VIRTUAL TABLE IF NOT EXISTS rag_vec USING vec0(
                 chunk_id TEXT PRIMARY KEY,
                 embedding float[256]
-            );"
+            );",
         )?;
 
         conn.execute_batch(
@@ -323,26 +330,22 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                 content,
                 workspace,
                 tokenize = 'porter unicode61'
-            );"
+            );",
         )?;
 
-        let has_hash: bool = conn.prepare(
-            "SELECT content_hash FROM snapshots LIMIT 1"
-        ).is_ok();
+        let has_hash: bool = conn
+            .prepare("SELECT content_hash FROM snapshots LIMIT 1")
+            .is_ok();
         if !has_hash {
-            conn.execute_batch(
-                "ALTER TABLE snapshots ADD COLUMN content_hash TEXT;"
-            )?;
+            conn.execute_batch("ALTER TABLE snapshots ADD COLUMN content_hash TEXT;")?;
         }
 
-        let has_pinned: bool = conn.prepare(
-            "SELECT pinned FROM docs LIMIT 1"
-        ).is_ok();
+        let has_pinned: bool = conn.prepare("SELECT pinned FROM docs LIMIT 1").is_ok();
         if !has_pinned {
             conn.execute_batch(
                 "ALTER TABLE docs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
                  ALTER TABLE docs ADD COLUMN goal_words INTEGER;
-                 ALTER TABLE docs ADD COLUMN deadline TEXT;"
+                 ALTER TABLE docs ADD COLUMN deadline TEXT;",
             )?;
         }
 
@@ -364,7 +367,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                  label TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS idx_canvas_edges_source ON canvas_edges(source_id);
-             CREATE INDEX IF NOT EXISTS idx_canvas_edges_target ON canvas_edges(target_id);"
+             CREATE INDEX IF NOT EXISTS idx_canvas_edges_target ON canvas_edges(target_id);",
         )?;
 
         // The craft_metrics table gained `metric_type` in a later schema. The old
@@ -399,7 +402,7 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
                  INSERT INTO craft_metrics (id, doc_id, metric_type, value, created_at)
                      SELECT id, doc_id, 'unknown', 0.0, ts FROM craft_metrics_old;
                  DROP TABLE craft_metrics_old;
-                 CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);"
+                 CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);",
             )?;
         }
 
@@ -424,7 +427,11 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
     /// The migration itself is transactional, so the backup is a second layer
     /// of safety, not the only one.
     fn backup_before_migration(&self) -> SqlResult<()> {
-        let db_file = self.db_path.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let db_file = self
+            .db_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let Some(path) = db_file else {
             return Ok(()); // in-memory (tests): nothing to back up
         };
@@ -454,12 +461,13 @@ pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         // same primitive backup_create uses.
         let quoted = dest.to_string_lossy().replace('\'', "''");
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        conn.execute_batch(&format!("VACUUM INTO '{}';", quoted)).map_err(|e| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(1),
-                Some(format!("backup copy: {}", e)),
-            )
-        })?;
+        conn.execute_batch(&format!("VACUUM INTO '{}';", quoted))
+            .map_err(|e| {
+                rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(1),
+                    Some(format!("backup copy: {}", e)),
+                )
+            })?;
         // Keep only the newest 5 pre-migration backups.
         if let Ok(entries) = std::fs::read_dir(&backup_dir) {
             let mut backups: Vec<_> = entries

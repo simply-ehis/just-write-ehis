@@ -95,10 +95,7 @@ fn blocks_to_xhtml(blocks: &[Block], skip_first_h1: bool) -> String {
             }
             Block::Heading { level, spans } => {
                 let lv = (*level).clamp(2, 6) as usize;
-                out.push_str(&format!(
-                    "<h{lv}>{}</h{lv}>\n",
-                    spans_to_xhtml(spans)
-                ));
+                out.push_str(&format!("<h{lv}>{}</h{lv}>\n", spans_to_xhtml(spans)));
             }
             Block::Paragraph(spans) => {
                 out.push_str(&format!("<p>{}</p>\n", spans_to_xhtml(spans)));
@@ -209,7 +206,7 @@ fn build(doc: &Doc) -> Result<Vec<u8>, String> {
     )
     .map_err(|e| format!("EPUB write failed: {}", e))?;
 
-let chapters = split_chapters(doc);
+    let chapters = split_chapters(doc);
 
     // Split before writing anything: XHTML needs byte offsets so the nav
     // manifest can advertise each chapter's real size.
@@ -239,7 +236,7 @@ let chapters = split_chapters(doc);
         .map_err(|e| format!("EPUB write failed: {}", e))?;
 
     // Chapter documents.
-let mut manifest = String::new();
+    let mut manifest = String::new();
     let mut spine = String::new();
     for i in 0..chapters.len() {
         let name = format!("ch{:02}.xhtml", i + 1);
@@ -275,10 +272,7 @@ let mut manifest = String::new();
         title = xml_escape(&doc.title)
     );
     if let Some(a) = &doc.author {
-        opf.push_str(&format!(
-            "<dc:creator>{}</dc:creator>\n",
-            xml_escape(a)
-        ));
+        opf.push_str(&format!("<dc:creator>{}</dc:creator>\n", xml_escape(a)));
     }
     if let Some(d) = &doc.date {
         opf.push_str(&format!("<dc:date>{}</dc:date>\n", xml_escape(d)));
@@ -288,13 +282,13 @@ let mut manifest = String::new();
 <guide><reference type=\"toc\" title=\"Contents\" href=\"nav.xhtml\"/></guide>\n\
 </metadata>\n<manifest>\n",
     );
-opf.push_str(
+    opf.push_str(
         "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n\
 <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n\
 <item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n",
     );
     opf.push_str(&manifest);
-opf.push_str("</manifest>\n<spine toc=\"ncx\">\n");
+    opf.push_str("</manifest>\n<spine toc=\"ncx\">\n");
     opf.push_str(&spine);
     opf.push_str("</spine>\n</package>\n");
 
@@ -394,10 +388,7 @@ mod tests {
             CompressionMethod::Stored,
             "mimetype must be STORED or readers reject the epub"
         );
-        assert_eq!(
-            read_entry(&zip, "mimetype"),
-            "application/epub+zip"
-        );
+        assert_eq!(read_entry(&zip, "mimetype"), "application/epub+zip");
     }
 
     #[test]
@@ -414,13 +405,19 @@ mod tests {
             "EPUB/ch01.xhtml",
             "EPUB/ch02.xhtml",
         ] {
-            assert!(names.contains(&req.to_string()), "missing {req} in {names:?}");
+            assert!(
+                names.contains(&req.to_string()),
+                "missing {req} in {names:?}"
+            );
         }
     }
 
     #[test]
     fn opf_metadata_and_spine_agree() {
-        let doc = parse("T", "---\ntitle: \"Real Title\"\nauthor: \"A Writer\"\n---\n\n# Ch\n\nx");
+        let doc = parse(
+            "T",
+            "---\ntitle: \"Real Title\"\nauthor: \"A Writer\"\n---\n\n# Ch\n\nx",
+        );
         let zip = write(&doc).unwrap();
         let opf = read_entry(&zip, "EPUB/package.opf");
         assert!(opf.contains("<dc:title>Real Title</dc:title>"), "{opf}");
@@ -435,9 +432,9 @@ mod tests {
                 Some(rest.split('"').next().unwrap_or("").to_string())
             })
             .collect();
-// nav/css/ncx are auxiliary: they belong in the manifest but NOT the
-            // spine (spine = reading order only).
-            for id in &manifest_ids {
+        // nav/css/ncx are auxiliary: they belong in the manifest but NOT the
+        // spine (spine = reading order only).
+        for id in &manifest_ids {
             if id == "nav" || id == "css" || id == "ncx" {
                 continue;
             }
@@ -474,7 +471,10 @@ mod tests {
 
     #[test]
     fn chapters_split_on_h1_and_dedupe_titles() {
-        let doc = parse("Fallback", "# Chapter One\n\nalpha\n\n# Chapter Two\n\nbeta");
+        let doc = parse(
+            "Fallback",
+            "# Chapter One\n\nalpha\n\n# Chapter Two\n\nbeta",
+        );
         let zip = write(&doc).unwrap();
         let c1 = read_entry(&zip, "EPUB/ch01.xhtml");
         let c2 = read_entry(&zip, "EPUB/ch02.xhtml");
@@ -502,7 +502,10 @@ mod tests {
 
     #[test]
     fn inline_formatting_survives() {
-        let doc = parse("B", "Plain **bold** and *em* and `code` and [x](https://e.com/?a=1&b=2).");
+        let doc = parse(
+            "B",
+            "Plain **bold** and *em* and `code` and [x](https://e.com/?a=1&b=2).",
+        );
         let zip = write(&doc).unwrap();
         let c1 = read_entry(&zip, "EPUB/ch01.xhtml");
         assert!(c1.contains("<strong>bold</strong>"), "{c1}");
@@ -530,8 +533,16 @@ mod tests {
         assert!(c1.contains("<ul>") && c1.contains("<li>"), "{c1}");
         assert!(c1.contains("<blockquote>"), "{c1}");
         // Balanced list tags.
-        assert_eq!(c1.matches("<ul>").count(), c1.matches("</ul>").count(), "{c1}");
-        assert_eq!(c1.matches("<li>").count(), c1.matches("</li>").count(), "{c1}");
+        assert_eq!(
+            c1.matches("<ul>").count(),
+            c1.matches("</ul>").count(),
+            "{c1}"
+        );
+        assert_eq!(
+            c1.matches("<li>").count(),
+            c1.matches("</li>").count(),
+            "{c1}"
+        );
     }
 
     #[test]
@@ -550,8 +561,8 @@ mod tests {
         assert_eq!(xml, "okbad");
     }
 
-#[test]
-fn ncx_and_nav_agree_with_the_spine() {
+    #[test]
+    fn ncx_and_nav_agree_with_the_spine() {
         let doc = parse("T", "# One\n\na\n\n# Two\n\nb");
         let zip = write(&doc).unwrap();
         let opf = read_entry(&zip, "EPUB/package.opf");
@@ -559,7 +570,13 @@ fn ncx_and_nav_agree_with_the_spine() {
         assert!(opf.contains("<spine toc=\"ncx\">"), "{opf}");
         // every spine itemref target must exist as a manifest item
         for line in opf.lines().filter(|l| l.contains("<itemref")) {
-            let idref = line.split("idref=\"").nth(1).unwrap().split('"').next().unwrap();
+            let idref = line
+                .split("idref=\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap();
             assert!(
                 opf.contains(&format!("<item id=\"{}\"", idref)),
                 "spine references {idref} with no manifest item"
@@ -583,7 +600,10 @@ fn ncx_and_nav_agree_with_the_spine() {
             );
         }
         assert_eq!(nav.matches("<li>").count(), opf.matches("<itemref").count());
-        assert_eq!(ncx.matches("<navPoint ").count(), opf.matches("<itemref").count());
+        assert_eq!(
+            ncx.matches("<navPoint ").count(),
+            opf.matches("<itemref").count()
+        );
     }
 
     #[test]

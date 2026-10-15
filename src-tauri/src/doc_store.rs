@@ -1,16 +1,16 @@
-use rusqlite::{params, Transaction};
 use crate::database::Database;
 use crate::models::*;
 use chrono::Utc;
-use uuid::Uuid;
+use rusqlite::{params, Transaction};
 use std::collections::{HashMap, HashSet};
-use zerocopy::IntoBytes;
 use tauri::Emitter;
-mod search;
-mod snapshots;
+use uuid::Uuid;
+use zerocopy::IntoBytes;
 mod backups;
 mod bible;
 mod rag;
+mod search;
+mod snapshots;
 
 fn uuid_v7() -> String {
     Uuid::new_v4().to_string()
@@ -110,27 +110,24 @@ fn compute_disk_path(
                 vault.join("logs").join(format!("{}.md", id))
             }
         }
-        "write" => {
-            vault.join("write").join(format!("{}.md", id))
-        }
-        "novel" => {
-            vault.join("novels").join(sanitize_filename(title)).join(format!("{}.md", id))
-        }
-        "script" => {
-            vault.join("scripts").join(sanitize_filename(title)).join(format!("{}.md", id))
-        }
-        "projects" => {
-            vault.join("projects").join(sanitize_filename(title)).join(format!("{}.md", id))
-        }
-        "reader" => {
-            vault.join("reader").join(format!("{}.md", id))
-        }
-        "inbox" => {
-            vault.join("inbox").join(format!("{}.md", id))
-        }
-        _ => {
-            vault.join(sanitize_component(workspace, "misc")).join(format!("{}.md", id))
-        }
+        "write" => vault.join("write").join(format!("{}.md", id)),
+        "novel" => vault
+            .join("novels")
+            .join(sanitize_filename(title))
+            .join(format!("{}.md", id)),
+        "script" => vault
+            .join("scripts")
+            .join(sanitize_filename(title))
+            .join(format!("{}.md", id)),
+        "projects" => vault
+            .join("projects")
+            .join(sanitize_filename(title))
+            .join(format!("{}.md", id)),
+        "reader" => vault.join("reader").join(format!("{}.md", id)),
+        "inbox" => vault.join("inbox").join(format!("{}.md", id)),
+        _ => vault
+            .join(sanitize_component(workspace, "misc"))
+            .join(format!("{}.md", id)),
     }
 }
 
@@ -159,7 +156,12 @@ fn sanitize_filename(s: &str) -> String {
 fn sanitize_component(s: &str, fallback: &str) -> String {
     let cleaned: String = s
         .chars()
-        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'))
+        .filter(|c| {
+            !matches!(
+                c,
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'
+            )
+        })
         .collect();
     let trimmed = cleaned.trim().to_string();
     if trimmed.is_empty() || trimmed.chars().all(|c| c == '.') {
@@ -180,7 +182,8 @@ fn normalize_lexically(path: &std::path::Path) -> std::path::PathBuf {
                     out.pop();
                 } else if !matches!(
                     out.last(),
-                    None | Some(std::path::Component::RootDir) | Some(std::path::Component::Prefix(_))
+                    None | Some(std::path::Component::RootDir)
+                        | Some(std::path::Component::Prefix(_))
                 ) {
                     out.push(comp);
                 }
@@ -196,11 +199,18 @@ fn normalize_lexically(path: &std::path::Path) -> std::path::PathBuf {
 /// touch a file outside the vault the user chose.
 fn resolve_in_vault(vault: &std::path::Path, stored: &str) -> Result<std::path::PathBuf, String> {
     let raw = std::path::Path::new(stored);
-    let joined = if raw.is_absolute() { raw.to_path_buf() } else { vault.join(raw) };
+    let joined = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        vault.join(raw)
+    };
     let normalized = normalize_lexically(&joined);
     let root = normalize_lexically(vault);
     if !normalized.starts_with(&root) {
-        return Err(format!("Refusing to touch a path outside the vault: {}", stored));
+        return Err(format!(
+            "Refusing to touch a path outside the vault: {}",
+            stored
+        ));
     }
 
     // The lexical pass cannot see through a symlink, so `link/doc.md` inside
@@ -209,10 +219,15 @@ fn resolve_in_vault(vault: &std::path::Path, stored: &str) -> Result<std::path::
     // ancestor of the target that exists -- the target itself may legitimately
     // not exist yet, since a create is a valid write -- and require one to stay
     // under the other.
-    if let (Ok(real_root), Some(ancestor)) = (std::fs::canonicalize(&root), deepest_existing(&normalized)) {
+    if let (Ok(real_root), Some(ancestor)) =
+        (std::fs::canonicalize(&root), deepest_existing(&normalized))
+    {
         if let Ok(real_ancestor) = std::fs::canonicalize(&ancestor) {
             if !real_ancestor.starts_with(&real_root) {
-                return Err(format!("Refusing to touch a path outside the vault: {}", stored));
+                return Err(format!(
+                    "Refusing to touch a path outside the vault: {}",
+                    stored
+                ));
             }
         }
     }
@@ -234,10 +249,12 @@ fn deepest_existing(path: &std::path::Path) -> Option<std::path::PathBuf> {
 /// unique per call so concurrent saves of the same path never share one.
 fn write_to_disk(path: &std::path::Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create dir {}: {}", parent.display(), e))?;
     }
     let temp = path.with_extension(format!("tmp.{}", Uuid::new_v4()));
-    std::fs::write(&temp, content.as_bytes()).map_err(|e| format!("Failed to write temp: {}", e))?;
+    std::fs::write(&temp, content.as_bytes())
+        .map_err(|e| format!("Failed to write temp: {}", e))?;
     // Stamp before the rename, which is what the watcher observes.
     stamp_self_write(path);
     std::fs::rename(&temp, path).map_err(|e| format!("Failed to rename temp: {}", e))?;
@@ -260,8 +277,14 @@ const SELF_WRITE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
 /// and case-folded on case-insensitive filesystems, so a path we built and the
 /// one notify reports for the same file land on the same key.
 fn path_key(path: &std::path::Path) -> String {
-    let normalized = normalize_lexically(path).to_string_lossy().replace('\\', "/");
-    if cfg!(windows) { normalized.to_ascii_lowercase() } else { normalized }
+    let normalized = normalize_lexically(path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
 }
 
 fn stamp_self_write(path: &std::path::Path) {
@@ -274,7 +297,9 @@ fn stamp_self_write(path: &std::path::Path) {
 /// True when this process wrote `path` moments ago, so the watcher event is
 /// our own echo rather than an edit made outside the app.
 fn is_self_write(path: &std::path::Path) -> bool {
-    let Ok(mut writes) = SELF_WRITES.lock() else { return false };
+    let Ok(mut writes) = SELF_WRITES.lock() else {
+        return false;
+    };
     writes.retain(|(_, at)| at.elapsed() < SELF_WRITE_TTL);
     let key = path_key(path);
     writes.iter().any(|(k, _)| *k == key)
@@ -295,7 +320,9 @@ fn word_diff_count(old: &str, new: &str) -> i64 {
     for i in 0..max_len {
         let o = old_words.get(i).copied().unwrap_or("");
         let n = new_words.get(i).copied().unwrap_or("");
-        if o != n { changes += 1; }
+        if o != n {
+            changes += 1;
+        }
     }
     changes
 }
@@ -368,7 +395,10 @@ fn memory_kind_matches(candidate_kind: &str, fact_kind: &str) -> bool {
 }
 
 fn snippet_position(content: &str, snippet: &str) -> Option<i64> {
-    content.find(snippet).and_then(|index| content.get(..index)).map(|prefix| prefix.encode_utf16().count() as i64)
+    content
+        .find(snippet)
+        .and_then(|index| content.get(..index))
+        .map(|prefix| prefix.encode_utf16().count() as i64)
 }
 
 fn bible_mention_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BibleMention> {
@@ -419,7 +449,13 @@ fn mention_signature(mention: &BibleMention) -> String {
     )
 }
 
-fn mention_signature_from_parts(fact_key: &str, kind: &str, snippet: &str, attribute_key: Option<&str>, attribute_value: Option<&str>) -> String {
+fn mention_signature_from_parts(
+    fact_key: &str,
+    kind: &str,
+    snippet: &str,
+    attribute_key: Option<&str>,
+    attribute_value: Option<&str>,
+) -> String {
     format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         normalize_memory_key(fact_key),
@@ -447,7 +483,8 @@ fn text_to_embedding(text: &str) -> Vec<f32> {
 
     let mut word_counts: HashMap<String, usize> = HashMap::new();
     for word in &words {
-        let normalized = word.to_lowercase()
+        let normalized = word
+            .to_lowercase()
             .chars()
             .filter(|c| c.is_alphanumeric())
             .collect::<String>();
@@ -457,7 +494,9 @@ fn text_to_embedding(text: &str) -> Vec<f32> {
     }
 
     for (word, count) in &word_counts {
-        let hash: u32 = word.bytes().fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+        let hash: u32 = word
+            .bytes()
+            .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
         let pos = (hash as usize) % EMBEDDING_DIM;
         let weight = (1.0 + *count as f32).ln();
         vec[pos] += weight;
@@ -637,7 +676,14 @@ impl Database {
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let now = Utc::now().to_rfc3339();
             let old_parent = if req.parent_id.is_some() {
-                Some(tx.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get::<_, Option<String>>(0)).map_err(|e| e.to_string())?)
+                Some(
+                    tx.query_row(
+                        "SELECT parent_id FROM docs WHERE id = ?1",
+                        params![&req.id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .map_err(|e| e.to_string())?,
+                )
             } else {
                 None
             };
@@ -646,36 +692,49 @@ impl Database {
                 tx.execute(
                     "UPDATE docs SET title = ?1, updated_at = ?2 WHERE id = ?3",
                     params![title, now, req.id],
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
             if let Some(content) = &req.content {
                 let word_count = content.split_whitespace().count() as i64;
                 tx.execute(
                     "UPDATE docs SET content = ?1, word_count = ?2, updated_at = ?3 WHERE id = ?4",
                     params![content, word_count, now, req.id],
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
             if let Some(status) = &req.status {
                 tx.execute(
                     "UPDATE docs SET status = ?1, updated_at = ?2 WHERE id = ?3",
                     params![status, now, req.id],
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
             if let Some(fm) = &req.frontmatter_json {
                 tx.execute(
                     "UPDATE docs SET frontmatter_json = ?1, updated_at = ?2 WHERE id = ?3",
                     params![fm, now, req.id],
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
             if let Some(parent_id) = &req.parent_id {
                 if old_parent.as_ref() != Some(parent_id) {
-                    tx.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
-                    tx.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                    tx.execute(
+                        "DELETE FROM bible_mentions WHERE doc_id = ?1",
+                        params![&req.id],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    tx.execute(
+                        "DELETE FROM bible_suggestions WHERE source_doc_id = ?1",
+                        params![&req.id],
+                    )
+                    .map_err(|e| e.to_string())?;
                 }
                 tx.execute(
                     "UPDATE docs SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
                     params![parent_id, now, req.id],
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
             tx.commit().map_err(|e| e.to_string())?;
         }
@@ -698,8 +757,7 @@ impl Database {
             if let Some(new_content) = &req.content {
                 let new_word_count = new_content.split_whitespace().count();
                 let word_delta = match old_content_before_update.as_deref() {
-                    Some(old) => (old.split_whitespace().count() as i64)
-                        - (new_word_count as i64),
+                    Some(old) => (old.split_whitespace().count() as i64) - (new_word_count as i64),
                     // No previous content (brand-new row): snapshot whatever
                     // precedes the first write.
                     None => -(new_word_count as i64),
@@ -806,11 +864,17 @@ impl Database {
                 // bible_facts + conversations have no FK to docs.
                 tx.execute("DELETE FROM bible_facts WHERE doc_id = ?1", params![del_id])
                     .map_err(|e| e.to_string())?;
-                tx.execute("DELETE FROM conversations WHERE doc_id = ?1", params![del_id])
-                    .map_err(|e| e.to_string())?;
+                tx.execute(
+                    "DELETE FROM conversations WHERE doc_id = ?1",
+                    params![del_id],
+                )
+                .map_err(|e| e.to_string())?;
                 // Canvas cards keep existing; just unlink the dead doc.
-                tx.execute("UPDATE canvas_nodes SET doc_id = NULL WHERE doc_id = ?1", params![del_id])
-                    .map_err(|e| e.to_string())?;
+                tx.execute(
+                    "UPDATE canvas_nodes SET doc_id = NULL WHERE doc_id = ?1",
+                    params![del_id],
+                )
+                .map_err(|e| e.to_string())?;
             }
             // Chunks cascade; vectors have no FK — sweep the orphans.
             let _ = tx.execute(
@@ -837,22 +901,32 @@ impl Database {
 
     pub fn toggle_pin(&self, id: &str) -> Result<bool, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let current: i64 = conn.query_row(
-            "SELECT pinned FROM docs WHERE id = ?1", params![id], |r| r.get(0)
-        ).map_err(|e| e.to_string())?;
+        let current: i64 = conn
+            .query_row("SELECT pinned FROM docs WHERE id = ?1", params![id], |r| {
+                r.get(0)
+            })
+            .map_err(|e| e.to_string())?;
         let new_val = if current == 0 { 1 } else { 0 };
-        conn.execute("UPDATE docs SET pinned = ?1, updated_at = ?2 WHERE id = ?3",
+        conn.execute(
+            "UPDATE docs SET pinned = ?1, updated_at = ?2 WHERE id = ?3",
             params![new_val, Utc::now().to_rfc3339(), id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(new_val != 0)
     }
 
-    pub fn set_goal(&self, id: &str, goal_words: Option<i64>, deadline: Option<String>) -> Result<(), String> {
+    pub fn set_goal(
+        &self,
+        id: &str,
+        goal_words: Option<i64>,
+        deadline: Option<String>,
+    ) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE docs SET goal_words = ?1, deadline = ?2, updated_at = ?3 WHERE id = ?4",
             params![goal_words, deadline, Utc::now().to_rfc3339(), id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -864,28 +938,30 @@ impl Database {
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE pinned = 1 ORDER BY updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
@@ -896,29 +972,37 @@ impl Database {
         let mut ns = conn.prepare(
             "SELECT id, title, body, x, y, color, doc_id, updated_at FROM canvas_nodes ORDER BY updated_at ASC"
         ).map_err(|e| e.to_string())?;
-        let nodes: Vec<CanvasNode> = ns.query_map([], |row| {
-            Ok(CanvasNode {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                body: row.get(2)?,
-                x: row.get(3)?,
-                y: row.get(4)?,
-                color: row.get(5)?,
-                doc_id: row.get(6)?,
-                updated_at: row.get(7)?,
+        let nodes: Vec<CanvasNode> = ns
+            .query_map([], |row| {
+                Ok(CanvasNode {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    body: row.get(2)?,
+                    x: row.get(3)?,
+                    y: row.get(4)?,
+                    color: row.get(5)?,
+                    doc_id: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
             })
-        }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-        let mut es = conn.prepare(
-            "SELECT id, source_id, target_id, label FROM canvas_edges"
-        ).map_err(|e| e.to_string())?;
-        let edges: Vec<CanvasEdge> = es.query_map([], |row| {
-            Ok(CanvasEdge {
-                id: row.get(0)?,
-                source_id: row.get(1)?,
-                target_id: row.get(2)?,
-                label: row.get(3)?,
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        let mut es = conn
+            .prepare("SELECT id, source_id, target_id, label FROM canvas_edges")
+            .map_err(|e| e.to_string())?;
+        let edges: Vec<CanvasEdge> = es
+            .query_map([], |row| {
+                Ok(CanvasEdge {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    target_id: row.get(2)?,
+                    label: row.get(3)?,
+                })
             })
-        }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
         Ok((nodes, edges))
     }
 
@@ -939,14 +1023,22 @@ impl Database {
 
     pub fn canvas_delete_node(&self, id: &str) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM canvas_edges WHERE source_id = ?1 OR target_id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM canvas_edges WHERE source_id = ?1 OR target_id = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM canvas_nodes WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub fn canvas_connect(&self, source_id: &str, target_id: &str, label: &str) -> Result<CanvasEdge, String> {
+    pub fn canvas_connect(
+        &self,
+        source_id: &str,
+        target_id: &str,
+        label: &str,
+    ) -> Result<CanvasEdge, String> {
         if source_id == target_id {
             return Err("A card cannot connect to itself.".into());
         }
@@ -968,7 +1060,8 @@ impl Database {
         conn.execute(
             "INSERT INTO canvas_edges (id, source_id, target_id, label) VALUES (?1, ?2, ?3, ?4)",
             params![edge.id, edge.source_id, edge.target_id, edge.label],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(edge)
     }
 
@@ -986,15 +1079,19 @@ impl Database {
             "SELECT CAST(strftime('%H', ts) AS INTEGER) AS hour, COUNT(*) FROM usage_events WHERE date(ts) = date('now') GROUP BY hour"
         ).map_err(|e| e.to_string())?;
         let mut buckets = vec![0i64; 24];
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(|e| e.to_string())?;
         for r in rows.filter_map(|r| r.ok()) {
             if (0..24).contains(&r.0) {
                 buckets[r.0 as usize] = r.1;
             }
         }
-        Ok(buckets.into_iter().enumerate().map(|(h, c)| (h as i64, c)).collect())
+        Ok(buckets
+            .into_iter()
+            .enumerate()
+            .map(|(h, c)| (h as i64, c))
+            .collect())
     }
 
     pub fn move_doc(&self, req: MoveDocRequest) -> Result<Doc, String> {
@@ -1006,23 +1103,42 @@ impl Database {
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let now = Utc::now().to_rfc3339();
-        let old_parent: Option<String> = conn.query_row("SELECT parent_id FROM docs WHERE id = ?1", params![&req.id], |row| row.get(0))
+        let old_parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_id FROM docs WHERE id = ?1",
+                params![&req.id],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
         // Read the current path so the file can be moved to match the row.
         // Without this the DB pointed at a path with no file and the original
         // .md was orphaned on disk.
-        let old_path: Option<String> = conn.query_row("SELECT path FROM docs WHERE id = ?1", params![&req.id], |row| row.get(0))
+        let old_path: Option<String> = conn
+            .query_row(
+                "SELECT path FROM docs WHERE id = ?1",
+                params![&req.id],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
 
         if let Some(parent_id) = &req.new_parent_id {
             if old_parent.as_deref() != Some(parent_id.as_str()) {
-                conn.execute("DELETE FROM bible_mentions WHERE doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
-                conn.execute("DELETE FROM bible_suggestions WHERE source_doc_id = ?1", params![&req.id]).map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM bible_mentions WHERE doc_id = ?1",
+                    params![&req.id],
+                )
+                .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM bible_suggestions WHERE source_doc_id = ?1",
+                    params![&req.id],
+                )
+                .map_err(|e| e.to_string())?;
             }
             conn.execute(
                 "UPDATE docs SET parent_id = ?1, updated_at = ?2 WHERE id = ?3",
                 params![parent_id, now, req.id],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
         if let Some(path) = &req.new_path {
             // Move the file first, then update the row. If the rename fails
@@ -1035,14 +1151,20 @@ impl Database {
                 let new_full = resolve_in_vault(&vault, path)?;
                 if old_full != new_full {
                     std::fs::rename(&old_full, &new_full).map_err(|e| {
-                        format!("Failed to move file from {} to {}: {}", old_full.display(), new_full.display(), e)
+                        format!(
+                            "Failed to move file from {} to {}: {}",
+                            old_full.display(),
+                            new_full.display(),
+                            e
+                        )
                     })?;
                 }
             }
             conn.execute(
                 "UPDATE docs SET path = ?1, updated_at = ?2 WHERE id = ?3",
                 params![path, now, req.id],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
 
         drop(conn);
@@ -1056,28 +1178,30 @@ impl Database {
              FROM docs WHERE workspace = ?1 ORDER BY pinned DESC, updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map(params![workspace], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let rows = stmt
+            .query_map(params![workspace], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
@@ -1088,14 +1212,16 @@ impl Database {
             "SELECT b.source_id, b.target_id, b.context_snippet, COALESCE(d.title, '') FROM backlinks b LEFT JOIN docs d ON d.id = b.source_id WHERE b.target_id = ?1"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map(params![doc_id], |row| {
-            Ok(Backlink {
-                source_id: row.get(0)?,
-                target_id: row.get(1)?,
-                context_snippet: row.get(2)?,
-                source_title: row.get(3)?,
+        let rows = stmt
+            .query_map(params![doc_id], |row| {
+                Ok(Backlink {
+                    source_id: row.get(0)?,
+                    target_id: row.get(1)?,
+                    context_snippet: row.get(2)?,
+                    source_title: row.get(3)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
@@ -1110,7 +1236,8 @@ impl Database {
         conn.execute(
             "INSERT INTO usage_events (doc_id, event, ts) VALUES (?1, ?2, ?3)",
             params![usage.doc_id, usage.event, usage.ts],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         // Spec 8.2: weighted bumps — edits count most, reads least.
         let weight: f64 = match event {
@@ -1123,7 +1250,8 @@ impl Database {
         conn.execute(
             "UPDATE docs SET activity_score = activity_score + ?1 WHERE id = ?2",
             params![weight, doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
 
         Ok(())
     }
@@ -1168,7 +1296,9 @@ impl Database {
         // the renderer sends, so validate the shape at the boundary rather than
         // trusting the caller. This also keeps the folder split meaningful.
         if !is_iso_date(date) {
-            return Err(format!("Invalid daily-note date: {date} (expected YYYY-MM-DD)"));
+            return Err(format!(
+                "Invalid daily-note date: {date} (expected YYYY-MM-DD)"
+            ));
         }
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
@@ -1225,28 +1355,30 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
   ORDER BY title DESC LIMIT ?1"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map(params![limit], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
@@ -1256,13 +1388,15 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut stmt = conn.prepare(
             "SELECT source_id, target_id, match_type FROM links_implicit WHERE source_id = ?1 OR target_id = ?1"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![doc_id], |row| {
-            Ok(LinkImplicit {
-                source_id: row.get(0)?,
-                target_id: row.get(1)?,
-                match_type: row.get(2)?,
+        let rows = stmt
+            .query_map(params![doc_id], |row| {
+                Ok(LinkImplicit {
+                    source_id: row.get(0)?,
+                    target_id: row.get(1)?,
+                    match_type: row.get(2)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
@@ -1270,8 +1404,13 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         let all_docs: Vec<(String, String)> = {
-            let mut stmt = conn.prepare("SELECT id, title FROM docs").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            let mut stmt = conn
+                .prepare("SELECT id, title FROM docs")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
@@ -1280,7 +1419,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let wiki_re = WIKI_RE.get_or_init(|| {
             regex::Regex::new(r"\[\[([^\]]+)\]\]").expect("wikilink pattern is static")
         });
-        let title_to_id: std::collections::HashMap<String, String> = all_docs.iter()
+        let title_to_id: std::collections::HashMap<String, String> = all_docs
+            .iter()
             .map(|(id, title)| (title.to_lowercase(), id.clone()))
             .collect();
         // Lowercase once: the implicit pass below used to rebuild this per
@@ -1288,10 +1428,16 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let content_lower = content.to_lowercase();
 
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM backlinks WHERE source_id = ?1", params![doc_id])
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM links_implicit WHERE source_id = ?1", params![doc_id])
-            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM backlinks WHERE source_id = ?1",
+            params![doc_id],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM links_implicit WHERE source_id = ?1",
+            params![doc_id],
+        )
+        .map_err(|e| e.to_string())?;
 
         for cap in wiki_re.captures_iter(content) {
             let link_text = cap.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -1299,7 +1445,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             if let Some(target_id) = title_to_id.get(&link_lower) {
                 if target_id != doc_id {
                     let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
-                    let snippet = snippet_around(content, start as i64, (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64);
+                    let snippet = snippet_around(
+                        content,
+                        start as i64,
+                        (cap.get(0).map(|m| m.len()).unwrap_or(0) + 80) as i64,
+                    );
                     tx.execute(
                         "INSERT OR IGNORE INTO backlinks (source_id, target_id, context_snippet) VALUES (?1, ?2, ?3)",
                         params![doc_id, target_id, snippet],
@@ -1311,12 +1461,17 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         // Titles already [[linked]] anywhere in this doc must not ALSO
         // produce implicit edges (the old whole-doc `!wiki_re.is_match`
         // guard killed every implicit link when ANY [[link]] existed).
-        let linked_titles: std::collections::HashSet<String> = wiki_re.captures_iter(content)
+        let linked_titles: std::collections::HashSet<String> = wiki_re
+            .captures_iter(content)
             .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
             .collect();
         for (title, target_id) in &title_to_id {
-            if target_id == doc_id { continue; }
-            if linked_titles.contains(title) { continue; }
+            if target_id == doc_id {
+                continue;
+            }
+            if linked_titles.contains(title) {
+                continue;
+            }
             if content_lower.contains(title) {
                 tx.execute(
                     "INSERT OR IGNORE INTO links_implicit (source_id, target_id, match_type) VALUES (?1, ?2, ?3)",
@@ -1338,24 +1493,66 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
     /// documents the same algorithm — keep the two in sync.
     pub fn refresh_entities(&self, doc_id: &str, content: &str) -> Result<(), String> {
         let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM entity_occurrences WHERE doc_id = ?1", params![doc_id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM entity_occurrences WHERE doc_id = ?1",
+            params![doc_id],
+        )
+        .map_err(|e| e.to_string())?;
         if content.trim().is_empty() {
             return Ok(());
         }
 
         const STOPLIST: &[&str] = &[
-            "the", "a", "an", "and", "but", "or", "if", "then", "when", "while", "because",
-            "chapter", "part", "scene", "act", "prologue", "epilogue", "interlude", "appendix",
-            "book", "volume", "monday", "tuesday", "wednesday", "thursday", "friday",
-            "saturday", "sunday", "january", "february", "march", "april", "may", "june",
-            "july", "august", "september", "october", "november", "december",
+            "the",
+            "a",
+            "an",
+            "and",
+            "but",
+            "or",
+            "if",
+            "then",
+            "when",
+            "while",
+            "because",
+            "chapter",
+            "part",
+            "scene",
+            "act",
+            "prologue",
+            "epilogue",
+            "interlude",
+            "appendix",
+            "book",
+            "volume",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
         ];
         fn map_kind(kind: &str) -> &'static str {
             let k = kind.to_lowercase();
-            if k.contains("character") { "person" }
-            else if k.contains("setting") || k.contains("location") || k.contains("place") { "place" }
-            else { "term" }
+            if k.contains("character") {
+                "person"
+            } else if k.contains("setting") || k.contains("location") || k.contains("place") {
+                "place"
+            } else {
+                "term"
+            }
         }
 
         // (norm, display, kind, start, end)
@@ -1370,8 +1567,13 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         // regex and one full scan per fact. DB order is kept inside the
         // alternation so earlier facts keep priority on ties.
         let facts: Vec<(String, String)> = {
-            let mut stmt = conn.prepare("SELECT kind, key FROM bible_facts").map_err(|e| e.to_string())?;
-            let iter = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            let mut stmt = conn
+                .prepare("SELECT kind, key FROM bible_facts")
+                .map_err(|e| e.to_string())?;
+            let iter = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|e| e.to_string())?;
             iter.filter_map(|r| r.ok()).collect()
         };
@@ -1380,13 +1582,18 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         // either, so repeated names still match). DB order is preserved in
         // the alternation (first fact wins ties, as with the old per-fact
         // loop) and duplicate keys collapse to their first fact.
-        let mut by_name: std::collections::HashMap<String, (String, String)> = std::collections::HashMap::new();
+        let mut by_name: std::collections::HashMap<String, (String, String)> =
+            std::collections::HashMap::new();
         let mut alternatives: Vec<String> = Vec::new();
         for (kind, key) in &facts {
             let trimmed = key.trim();
-            if trimmed.len() < 2 { continue; }
+            if trimmed.len() < 2 {
+                continue;
+            }
             let lowered = trimmed.to_lowercase();
-            if by_name.contains_key(&lowered) { continue; }
+            if by_name.contains_key(&lowered) {
+                continue;
+            }
             alternatives.push(regex::escape(&lowered));
             by_name.insert(lowered, (map_kind(kind).to_string(), trimmed.to_string()));
         }
@@ -1394,12 +1601,27 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             let pattern = format!(r"(?i)\b((?:{}))\b", alternatives.join("|"));
             if let Ok(re) = regex::Regex::new(&pattern) {
                 for cap in re.captures_iter(content) {
-                    let m = match cap.get(1) { Some(m) => m, None => continue };
-                    if overlaps(m.start(), m.end(), &used) { continue; }
-                    let Some((kind, key)) = by_name.get(&m.as_str().to_lowercase()) else { continue };
+                    let m = match cap.get(1) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+                    if overlaps(m.start(), m.end(), &used) {
+                        continue;
+                    }
+                    let Some((kind, key)) = by_name.get(&m.as_str().to_lowercase()) else {
+                        continue;
+                    };
                     used.push((m.start(), m.end()));
-                    rows.push((key.to_lowercase(), m.as_str().to_string(), kind.clone(), m.start() as i64, m.end() as i64));
-                    if rows.len() >= 500 { break; }
+                    rows.push((
+                        key.to_lowercase(),
+                        m.as_str().to_string(),
+                        kind.clone(),
+                        m.start() as i64,
+                        m.end() as i64,
+                    ));
+                    if rows.len() >= 500 {
+                        break;
+                    }
                 }
             }
         }
@@ -1412,20 +1634,36 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                     .expect("name-run pattern is static")
             });
             // First surface form wins the display name per norm.
-            let mut seen: std::collections::HashSet<String> = rows.iter().map(|r| r.0.clone()).collect();
+            let mut seen: std::collections::HashSet<String> =
+                rows.iter().map(|r| r.0.clone()).collect();
             for cap in re.captures_iter(content) {
-                let m = match cap.get(1) { Some(m) => m, None => continue };
+                let m = match cap.get(1) {
+                    Some(m) => m,
+                    None => continue,
+                };
                 let text = m.as_str();
                 let first = text.split_whitespace().next().unwrap_or("").to_lowercase();
-                if STOPLIST.contains(&first.as_str()) { continue; }
-                if overlaps(m.start(), m.end(), &used) { continue; }
+                if STOPLIST.contains(&first.as_str()) {
+                    continue;
+                }
+                if overlaps(m.start(), m.end(), &used) {
+                    continue;
+                }
                 used.push((m.start(), m.end()));
                 let norm = text.to_lowercase();
                 if !seen.contains(&norm) {
                     seen.insert(norm.clone());
-                    rows.push((norm, text.to_string(), "name".to_string(), m.start() as i64, m.end() as i64));
+                    rows.push((
+                        norm,
+                        text.to_string(),
+                        "name".to_string(),
+                        m.start() as i64,
+                        m.end() as i64,
+                    ));
                 }
-                if rows.len() >= 500 { break; }
+                if rows.len() >= 500 {
+                    break;
+                }
             }
         }
 
@@ -1445,15 +1683,17 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut stmt = conn.prepare(
             "SELECT entity_norm, MAX(display), MAX(kind), COUNT(DISTINCT doc_id), COUNT(*) FROM entity_occurrences GROUP BY entity_norm ORDER BY COUNT(*) DESC LIMIT 500"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok(EntitySummary {
-                entity_norm: row.get(0)?,
-                display: row.get(1)?,
-                kind: row.get(2)?,
-                doc_count: row.get(3)?,
-                occ_count: row.get(4)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(EntitySummary {
+                    entity_norm: row.get(0)?,
+                    display: row.get(1)?,
+                    kind: row.get(2)?,
+                    doc_count: row.get(3)?,
+                    occ_count: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
@@ -1462,29 +1702,36 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut stmt = conn.prepare(
             "SELECT e.entity_norm, e.display, e.kind, e.doc_id, COALESCE(d.title, ''), e.span_start, e.span_end, COALESCE(d.content, '') FROM entity_occurrences e LEFT JOIN docs d ON d.id = e.doc_id WHERE e.entity_norm = ?1 ORDER BY d.title, e.span_start LIMIT 200"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![norm], |row| {
-            let content: String = row.get(7)?;
-            let start: i64 = row.get(5)?;
-            let end: i64 = row.get(6)?;
-            Ok(EntityHit {
-                entity_norm: row.get(0)?,
-                display: row.get(1)?,
-                kind: row.get(2)?,
-                doc_id: row.get(3)?,
-                doc_title: row.get(4)?,
-                span_start: start,
-                span_end: end,
-                snippet: snippet_around(&content, start, end),
+        let rows = stmt
+            .query_map(params![norm], |row| {
+                let content: String = row.get(7)?;
+                let start: i64 = row.get(5)?;
+                let end: i64 = row.get(6)?;
+                Ok(EntityHit {
+                    entity_norm: row.get(0)?,
+                    display: row.get(1)?,
+                    kind: row.get(2)?,
+                    doc_id: row.get(3)?,
+                    doc_title: row.get(4)?,
+                    span_start: start,
+                    span_end: end,
+                    snippet: snippet_around(&content, start, end),
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
     pub fn entities_backfill(&self) -> Result<i64, String> {
         let docs: Vec<(String, String)> = {
             let conn = self.conn.lock().map_err(|e| e.to_string())?;
-            let mut stmt = conn.prepare("SELECT id, content FROM docs").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            let mut stmt = conn
+                .prepare("SELECT id, content FROM docs")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
@@ -1497,14 +1744,25 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         Ok(done)
     }
 
-    pub fn graph_query(&self, workspace: Option<&str>, tags: Option<&[String]>) -> Result<GraphQueryResult, String> {
+    pub fn graph_query(
+        &self,
+        workspace: Option<&str>,
+        tags: Option<&[String]>,
+    ) -> Result<GraphQueryResult, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
         // "all" (and empty/missing) means no workspace filter — mirrors the preview backend.
         let ws = workspace.filter(|w| !w.trim().is_empty() && *w != "all");
         let docs: Vec<(String, String, String, String, i64, f64)> = {
             let map_row = |row: &rusqlite::Row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, i64>(4)?, row.get::<_, f64>(5)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, f64>(5)?,
+                ))
             };
             match ws {
                 Some(w) => {
@@ -1525,50 +1783,71 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         };
 
         // One batched tag lookup (no per-doc N+1) doubling as the tag filter.
-        let mut tag_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        let mut tag_map: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
         {
-            let mut stmt = conn.prepare("SELECT doc_id, tag FROM doc_tags").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            }).map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare("SELECT doc_id, tag FROM doc_tags")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| e.to_string())?;
             for (doc_id, tag) in rows.filter_map(|r| r.ok()) {
                 tag_map.entry(doc_id).or_default().push(tag);
             }
         }
         let wanted: &[String] = tags.unwrap_or(&[]);
-        let docs: Vec<(String, String, String, String, i64, f64)> = docs.into_iter().filter(|(id, _, _, _, _, _)| {
-            if wanted.is_empty() {
-                return true;
-            }
-            match tag_map.get(id) {
-                Some(ts) => wanted.iter().all(|t| ts.contains(t)),
-                None => false,
-            }
-        }).collect();
+        let docs: Vec<(String, String, String, String, i64, f64)> = docs
+            .into_iter()
+            .filter(|(id, _, _, _, _, _)| {
+                if wanted.is_empty() {
+                    return true;
+                }
+                match tag_map.get(id) {
+                    Some(ts) => wanted.iter().all(|t| ts.contains(t)),
+                    None => false,
+                }
+            })
+            .collect();
 
-        let mut edge_stmt = conn.prepare(
-            "SELECT source_id, target_id, context_snippet FROM backlinks"
-        ).map_err(|e| e.to_string())?;
+        let mut edge_stmt = conn
+            .prepare("SELECT source_id, target_id, context_snippet FROM backlinks")
+            .map_err(|e| e.to_string())?;
 
         let backlink_edges: Vec<(String, String, String)> = {
-            let rows = edge_stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-            }).map_err(|e| e.to_string())?;
+            let rows = edge_stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
 
-        let mut implicit_stmt = conn.prepare(
-            "SELECT source_id, target_id, match_type FROM links_implicit"
-        ).map_err(|e| e.to_string())?;
+        let mut implicit_stmt = conn
+            .prepare("SELECT source_id, target_id, match_type FROM links_implicit")
+            .map_err(|e| e.to_string())?;
 
         let implicit_edges: Vec<(String, String, String)> = {
-            let rows = implicit_stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-            }).map_err(|e| e.to_string())?;
+            let rows = implicit_stmt
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
 
-        let mut degree_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let mut degree_map: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
         for (src, tgt, _) in &backlink_edges {
             *degree_map.entry(src.clone()).or_insert(0) += 1;
             *degree_map.entry(tgt.clone()).or_insert(0) += 1;
@@ -1578,8 +1857,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             *degree_map.entry(tgt.clone()).or_insert(0) += 1;
         }
 
-        let nodes: Vec<GraphNode> = docs.iter().map(|(id, title, workspace, kind, wc, score)| {
-            GraphNode {
+        let nodes: Vec<GraphNode> = docs
+            .iter()
+            .map(|(id, title, workspace, kind, wc, score)| GraphNode {
                 id: id.clone(),
                 title: title.clone(),
                 workspace: workspace.clone(),
@@ -1588,17 +1868,18 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 activity_score: *score,
                 degree: degree_map.get(id).copied().unwrap_or(0),
                 tags: tag_map.get(id).cloned().unwrap_or_default(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let mut edges: Vec<GraphEdge> = backlink_edges.iter().map(|(src, tgt, ctx)| {
-            GraphEdge {
+        let mut edges: Vec<GraphEdge> = backlink_edges
+            .iter()
+            .map(|(src, tgt, ctx)| GraphEdge {
                 source: src.clone(),
                 target: tgt.clone(),
                 kind: "backlink".to_string(),
                 context_snippet: Some(ctx.clone()),
-            }
-        }).collect();
+            })
+            .collect();
 
         for (src, tgt, mt) in &implicit_edges {
             edges.push(GraphEdge {
@@ -1609,23 +1890,32 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             });
         }
 
-        let node_ids: std::collections::HashSet<String> = docs.iter().map(|(id, _, _, _, _, _)| id.clone()).collect();
-        let connected: std::collections::HashSet<String> = edges.iter()
+        let node_ids: std::collections::HashSet<String> =
+            docs.iter().map(|(id, _, _, _, _, _)| id.clone()).collect();
+        let connected: std::collections::HashSet<String> = edges
+            .iter()
             .flat_map(|e| vec![e.source.clone(), e.target.clone()])
             .collect();
-        let orphans: Vec<String> = node_ids.iter()
+        let orphans: Vec<String> = node_ids
+            .iter()
             .filter(|id| !connected.contains(*id))
             .cloned()
             .collect();
 
-        let mut hubs: Vec<(String, i64)> = degree_map.iter()
+        let mut hubs: Vec<(String, i64)> = degree_map
+            .iter()
             .filter(|(_, deg)| **deg >= 3)
             .map(|(id, deg)| (id.clone(), *deg))
             .collect();
         hubs.sort_by_key(|b| std::cmp::Reverse(b.1));
         hubs.truncate(20);
 
-        Ok(GraphQueryResult { nodes, edges, orphans, hubs })
+        Ok(GraphQueryResult {
+            nodes,
+            edges,
+            orphans,
+            hubs,
+        })
     }
 
     pub fn get_unlinked_mentions(&self, doc_id: &str) -> Result<Vec<UnlinkedMention>, String> {
@@ -1635,14 +1925,20 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let content_lower = doc.content.to_lowercase();
 
         let all_docs: Vec<(String, String)> = {
-            let mut stmt = conn.prepare("SELECT id, title FROM docs WHERE id != ?1").map_err(|e| e.to_string())?;
-            let rows = stmt.query_map(params![doc_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            let mut stmt = conn
+                .prepare("SELECT id, title FROM docs WHERE id != ?1")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![doc_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
                 .map_err(|e| e.to_string())?;
             rows.filter_map(|r| r.ok()).collect()
         };
 
         let wiki_re = regex::Regex::new(r"\[\[([^\]]+)\]\]").map_err(|e| e.to_string())?;
-        let linked_titles: Vec<String> = wiki_re.captures_iter(&doc.content)
+        let linked_titles: Vec<String> = wiki_re
+            .captures_iter(&doc.content)
             .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
             .collect();
 
@@ -1651,7 +1947,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             let title_lower = other_title.to_lowercase();
             if content_lower.contains(&title_lower) && !linked_titles.contains(&title_lower) {
                 let pos = content_lower.find(&title_lower).unwrap_or(0);
-                let snippet = snippet_around(&doc.content, pos as i64, (other_title.len() as i64) + 80);
+                let snippet =
+                    snippet_around(&doc.content, pos as i64, (other_title.len() as i64) + 80);
                 mentions.push(UnlinkedMention {
                     source_id: doc_id.to_string(),
                     source_title: doc.title.clone(),
@@ -1673,7 +1970,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         conn.execute(
             "UPDATE docs SET reading_position = ?1 WHERE id = ?2",
             params![req.position, req.doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1682,7 +1980,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         conn.execute(
             "UPDATE docs SET status = ?1 WHERE id = ?2",
             params![status, doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1691,9 +1990,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         // Merge into existing frontmatter — never clobber sibling keys
         // (margin notes, custom properties).
         let current: Option<String> = conn
-            .query_row("SELECT frontmatter_json FROM docs WHERE id = ?1", params![doc_id], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT frontmatter_json FROM docs WHERE id = ?1",
+                params![doc_id],
+                |row| row.get(0),
+            )
             .map_err(|e| e.to_string())?;
         let mut fm: serde_json::Map<String, serde_json::Value> = current
             .as_deref()
@@ -1707,11 +2008,16 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 fm.remove("rating");
             }
         }
-        let fm_json = if fm.is_empty() { None } else { Some(serde_json::Value::Object(fm).to_string()) };
+        let fm_json = if fm.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Object(fm).to_string())
+        };
         conn.execute(
             "UPDATE docs SET frontmatter_json = ?1 WHERE id = ?2",
             params![fm_json, doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1726,39 +2032,46 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         };
 
         let mut stmt = conn.prepare(query).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
-        let entries: Vec<BookshelfEntry> = rows.filter_map(|r| r.ok()).map(|doc| {
-            let rating = doc.frontmatter_json.as_ref().and_then(|fm| {
-                serde_json::from_str::<serde_json::Value>(fm).ok().and_then(|v| v.get("rating")?.as_i64())
-            });
-            BookshelfEntry {
-                shelf_status: doc.status.clone(),
-                rating,
-                doc,
-            }
-        }).collect();
+        let entries: Vec<BookshelfEntry> = rows
+            .filter_map(|r| r.ok())
+            .map(|doc| {
+                let rating = doc.frontmatter_json.as_ref().and_then(|fm| {
+                    serde_json::from_str::<serde_json::Value>(fm)
+                        .ok()
+                        .and_then(|v| v.get("rating")?.as_i64())
+                });
+                BookshelfEntry {
+                    shelf_status: doc.status.clone(),
+                    rating,
+                    doc,
+                }
+            })
+            .collect();
 
         Ok(entries)
     }
@@ -1774,10 +2087,12 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             title: title.to_string(),
             parent_id: None,
             content: Some(content.to_string()),
-            frontmatter_json: Some(serde_json::json!({"status": "to-read", "imported_from": req.file_path}).to_string()),
+            frontmatter_json: Some(
+                serde_json::json!({"status": "to-read", "imported_from": req.file_path})
+                    .to_string(),
+            ),
         })
     }
-
 
     pub fn get_beat_board(&self, project_id: &str) -> Result<BeatBoard, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
@@ -1786,28 +2101,30 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE parent_id = ?1 ORDER BY updated_at ASC"
         ).map_err(|e| e.to_string())?;
 
-        let docs: Vec<Doc> = stmt.query_map(params![project_id], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let docs: Vec<Doc> = stmt
+            .query_map(params![project_id], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -1816,7 +2133,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut scenes = Vec::new();
 
         for doc in docs {
-            let fm: serde_json::Value = doc.frontmatter_json.as_ref()
+            let fm: serde_json::Value = doc
+                .frontmatter_json
+                .as_ref()
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
 
@@ -1824,14 +2143,30 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 doc: doc.clone(),
                 act: fm.get("act").and_then(|v| v.as_i64()),
                 sequence: fm.get("sequence").and_then(|v| v.as_i64()),
-                status: fm.get("status").and_then(|v| v.as_str()).unwrap_or("idea").to_string(),
+                status: fm
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("idea")
+                    .to_string(),
                 summary: fm.get("summary").and_then(|v| v.as_str()).map(String::from),
                 pov: fm.get("pov").and_then(|v| v.as_str()).map(String::from),
-                location: fm.get("location").and_then(|v| v.as_str()).map(String::from),
-                timeframe: fm.get("timeframe").and_then(|v| v.as_str()).map(String::from),
-                characters: fm.get("characters").and_then(|v| v.as_array()).map(|a| {
-                    a.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-                }).unwrap_or_default(),
+                location: fm
+                    .get("location")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                timeframe: fm
+                    .get("timeframe")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                characters: fm
+                    .get("characters")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             };
 
             match doc.kind.as_str() {
@@ -1843,20 +2178,33 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
 
         // Manual arrangement = compile order: drag-reorder on the board
         // persists frontmatter `order`; ties keep updated_at (creation) order.
-        acts.sort_by(|a, b| Self::beat_order_static(&a.doc).partial_cmp(&Self::beat_order_static(&b.doc)).unwrap_or(std::cmp::Ordering::Equal));
+        acts.sort_by(|a, b| {
+            Self::beat_order_static(&a.doc)
+                .partial_cmp(&Self::beat_order_static(&b.doc))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sequences.sort_by(|a, b| {
-            (a.act, Self::beat_order_static(&a.doc)).partial_cmp(&(b.act, Self::beat_order_static(&b.doc))).unwrap_or(std::cmp::Ordering::Equal)
+            (a.act, Self::beat_order_static(&a.doc))
+                .partial_cmp(&(b.act, Self::beat_order_static(&b.doc)))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         scenes.sort_by(|a, b| {
-            (a.act, a.sequence, Self::beat_order_static(&a.doc)).partial_cmp(&(b.act, b.sequence, Self::beat_order_static(&b.doc))).unwrap_or(std::cmp::Ordering::Equal)
+            (a.act, a.sequence, Self::beat_order_static(&a.doc))
+                .partial_cmp(&(b.act, b.sequence, Self::beat_order_static(&b.doc)))
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        Ok(BeatBoard { acts, sequences, scenes })
+        Ok(BeatBoard {
+            acts,
+            sequences,
+            scenes,
+        })
     }
 
     /// Frontmatter `order` set by board drag-reorder; missing = 0.0 (creation order wins ties).
     fn beat_order_static(doc: &Doc) -> f64 {
-        doc.frontmatter_json.as_ref()
+        doc.frontmatter_json
+            .as_ref()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .and_then(|v| v.get("order").and_then(|o| o.as_f64()))
             .unwrap_or(0.0)
@@ -1870,7 +2218,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             output.push_str(&format!("{}\n\n", act.doc.title));
             for seq in board.sequences.iter().filter(|s| s.act == act.act) {
                 output.push_str(&format!("  {}\n", seq.doc.title));
-                for scene in board.scenes.iter().filter(|sc| sc.act == act.act && sc.sequence == seq.sequence) {
+                for scene in board
+                    .scenes
+                    .iter()
+                    .filter(|sc| sc.act == act.act && sc.sequence == seq.sequence)
+                {
                     if !scene.doc.content.is_empty() {
                         output.push_str(&format!("    {}\n\n", scene.doc.content));
                     }
@@ -1890,7 +2242,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         Ok(output)
     }
 
-    pub fn conversation_create(&self, doc_id: Option<&str>, mode: &str) -> Result<Conversation, String> {
+    pub fn conversation_create(
+        &self,
+        doc_id: Option<&str>,
+        mode: &str,
+    ) -> Result<Conversation, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let id = uuid_v7();
         let now = now_iso();
@@ -1898,7 +2254,13 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "INSERT INTO conversations (id, doc_id, mode, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, doc_id, mode, now, now],
         ).map_err(|e| e.to_string())?;
-        Ok(Conversation { id, doc_id: doc_id.map(String::from), mode: mode.to_string(), created_at: now.clone(), updated_at: now })
+        Ok(Conversation {
+            id,
+            doc_id: doc_id.map(String::from),
+            mode: mode.to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        })
     }
 
     pub fn conversation_list(&self) -> Result<Vec<Conversation>, String> {
@@ -1907,22 +2269,29 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT id, doc_id, mode, created_at, updated_at FROM conversations ORDER BY updated_at DESC"
         ).map_err(|e| e.to_string())?;
 
-        let convos = stmt.query_map([], |row| {
-            Ok(Conversation {
-                id: row.get(0)?,
-                doc_id: row.get(1)?,
-                mode: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+        let convos = stmt
+            .query_map([], |row| {
+                Ok(Conversation {
+                    id: row.get(0)?,
+                    doc_id: row.get(1)?,
+                    mode: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(convos)
     }
 
-    pub fn conversation_add_message(&self, conversation_id: &str, role: &str, content: &str) -> Result<ChatMessage, String> {
+    pub fn conversation_add_message(
+        &self,
+        conversation_id: &str,
+        role: &str,
+        content: &str,
+    ) -> Result<ChatMessage, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let id = uuid_v7();
         let now = now_iso();
@@ -1933,25 +2302,37 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         conn.execute(
             "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
             params![now, conversation_id],
-        ).map_err(|e| e.to_string())?;
-        Ok(ChatMessage { id, conversation_id: conversation_id.to_string(), role: role.to_string(), content: content.to_string(), created_at: now })
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(ChatMessage {
+            id,
+            conversation_id: conversation_id.to_string(),
+            role: role.to_string(),
+            content: content.to_string(),
+            created_at: now,
+        })
     }
 
-    pub fn conversation_get_messages(&self, conversation_id: &str) -> Result<Vec<ChatMessage>, String> {
+    pub fn conversation_get_messages(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<ChatMessage>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, role, content, created_at FROM chat_messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
         ).map_err(|e| e.to_string())?;
 
-        let messages = stmt.query_map(params![conversation_id], |row| {
-            Ok(ChatMessage {
-                id: row.get(0)?,
-                conversation_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get(4)?,
+        let messages = stmt
+            .query_map(params![conversation_id], |row| {
+                Ok(ChatMessage {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row.get(4)?,
+                })
             })
-        }).map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -1974,35 +2355,42 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT id, workspace, kind, title, path, parent_id, created_at, updated_at, content, word_count, reading_position, status, frontmatter_json, activity_score, embedding_ref, pinned, goal_words, deadline FROM docs WHERE workspace = ?1 ORDER BY activity_score DESC, updated_at DESC LIMIT 20"
         ).map_err(|e| e.to_string())?;
 
-        let docs = stmt.query_map(params![workspace], |row| {
-            Ok(Doc {
-                id: row.get(0)?,
-                workspace: row.get(1)?,
-                kind: row.get(2)?,
-                title: row.get(3)?,
-                path: row.get(4)?,
-                parent_id: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                content: row.get(8)?,
-                word_count: row.get(9)?,
-                reading_position: row.get(10)?,
-                status: row.get(11)?,
-                frontmatter_json: row.get(12)?,
-                activity_score: row.get(13)?,
-                embedding_ref: row.get(14)?,
-                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                goal_words: row.get(16)?,
-                deadline: row.get(17)?,
+        let docs = stmt
+            .query_map(params![workspace], |row| {
+                Ok(Doc {
+                    id: row.get(0)?,
+                    workspace: row.get(1)?,
+                    kind: row.get(2)?,
+                    title: row.get(3)?,
+                    path: row.get(4)?,
+                    parent_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    content: row.get(8)?,
+                    word_count: row.get(9)?,
+                    reading_position: row.get(10)?,
+                    status: row.get(11)?,
+                    frontmatter_json: row.get(12)?,
+                    activity_score: row.get(13)?,
+                    embedding_ref: row.get(14)?,
+                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                    goal_words: row.get(16)?,
+                    deadline: row.get(17)?,
+                })
             })
-        }).map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(docs)
     }
 
-    pub fn record_craft_metric(&self, doc_id: &str, metric_type: &str, value: f64) -> Result<(), String> {
+    pub fn record_craft_metric(
+        &self,
+        doc_id: &str,
+        metric_type: &str,
+        value: f64,
+    ) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let metric = CraftMetric {
             id: uuid_v7(),
@@ -2024,24 +2412,36 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT metric_type, value, created_at FROM craft_metrics WHERE doc_id = ?1 ORDER BY created_at DESC"
         ).map_err(|e| e.to_string())?;
 
-        let metrics = stmt.query_map(params![doc_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, String>(2)?))
-        }).map_err(|e| e.to_string())?
+        let metrics = stmt
+            .query_map(params![doc_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, f64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
         Ok(metrics)
     }
 
-    pub fn get_craft_metrics_trend(&self, doc_id: &str, metric_type: &str) -> Result<Vec<(String, f64)>, String> {
+    pub fn get_craft_metrics_trend(
+        &self,
+        doc_id: &str,
+        metric_type: &str,
+    ) -> Result<Vec<(String, f64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT date(created_at) as day, AVG(value) FROM craft_metrics WHERE doc_id = ?1 AND metric_type = ?2 GROUP BY day ORDER BY day"
         ).map_err(|e| e.to_string())?;
 
-        let trend = stmt.query_map(params![doc_id, metric_type], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-        }).map_err(|e| e.to_string())?
+        let trend = stmt
+            .query_map(params![doc_id, metric_type], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2054,7 +2454,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT DISTINCT date(ts) as day FROM usage_events WHERE event = 'write' ORDER BY day DESC"
         ).map_err(|e| e.to_string())?;
 
-        let days: Vec<String> = stmt.query_map([], |row| row.get(0))
+        let days: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
@@ -2067,7 +2468,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             if day == &expected {
                 streak += 1;
                 if let Ok(dt) = chrono::NaiveDate::parse_from_str(&expected, "%Y-%m-%d") {
-                    expected = (dt - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+                    expected = (dt - chrono::Duration::days(1))
+                        .format("%Y-%m-%d")
+                        .to_string();
                 }
             } else {
                 break;
@@ -2083,17 +2486,24 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         Ok((streak, total_words))
     }
 
-
-
-    pub fn dashboard_recent_docs(&self, limit: i64) -> Result<Vec<(String, String, String)>, String> {
+    pub fn dashboard_recent_docs(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(String, String, String)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, updated_at FROM docs ORDER BY updated_at DESC LIMIT ?1"
-        ).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, title, updated_at FROM docs ORDER BY updated_at DESC LIMIT ?1")
+            .map_err(|e| e.to_string())?;
 
-        let docs = stmt.query_map(params![limit], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-        }).map_err(|e| e.to_string())?
+        let docs = stmt
+            .query_map(params![limit], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2102,13 +2512,17 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
 
     pub fn dashboard_workspace_counts(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT workspace, COUNT(*) FROM docs GROUP BY workspace ORDER BY COUNT(*) DESC"
-        ).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT workspace, COUNT(*) FROM docs GROUP BY workspace ORDER BY COUNT(*) DESC",
+            )
+            .map_err(|e| e.to_string())?;
 
-        let counts = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?
+        let counts = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2121,7 +2535,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT DISTINCT date(u.ts) as day FROM usage_events u JOIN docs d ON d.id = u.doc_id WHERE u.event = 'write' ORDER BY day DESC LIMIT 90"
         ).map_err(|e| e.to_string())?;
 
-        let days = stmt.query_map([], |row| row.get(0))
+        let days = stmt
+            .query_map([], |row| row.get(0))
             .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
@@ -2199,22 +2614,26 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
     pub fn dashboard_goals(&self) -> Result<Vec<GoalRow>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
 
-        let mut stmt = conn.prepare(
-            "SELECT id, title, workspace, goal_words, word_count, deadline FROM docs \
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, workspace, goal_words, word_count, deadline FROM docs \
              WHERE goal_words IS NOT NULL AND goal_words > 0 \
-             ORDER BY deadline ASC NULLS LAST, updated_at DESC"
-        ).map_err(|e| e.to_string())?;
+             ORDER BY deadline ASC NULLS LAST, updated_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
 
-        let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt.query_map([], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-            ))
-        }).map_err(|e| e.to_string())?
+        let rows: Vec<(String, String, String, i64, i64, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2238,32 +2657,34 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
              ORDER BY u.last_open DESC"
         ).map_err(|e| e.to_string())?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                Doc {
-                    id: row.get(0)?,
-                    workspace: row.get(1)?,
-                    kind: row.get(2)?,
-                    title: row.get(3)?,
-                    path: row.get(4)?,
-                    parent_id: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    content: row.get(8)?,
-                    word_count: row.get(9)?,
-                    reading_position: row.get(10)?,
-                    status: row.get(11)?,
-                    frontmatter_json: row.get(12)?,
-                    activity_score: row.get(13)?,
-                    embedding_ref: row.get(14)?,
-                    pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-                    goal_words: row.get(16)?,
-                    deadline: row.get(17)?,
-                },
-                row.get::<_, i64>(19)?,
-                row.get::<_, String>(20)?,
-            ))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    Doc {
+                        id: row.get(0)?,
+                        workspace: row.get(1)?,
+                        kind: row.get(2)?,
+                        title: row.get(3)?,
+                        path: row.get(4)?,
+                        parent_id: row.get(5)?,
+                        created_at: row.get(6)?,
+                        updated_at: row.get(7)?,
+                        content: row.get(8)?,
+                        word_count: row.get(9)?,
+                        reading_position: row.get(10)?,
+                        status: row.get(11)?,
+                        frontmatter_json: row.get(12)?,
+                        activity_score: row.get(13)?,
+                        embedding_ref: row.get(14)?,
+                        pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                        goal_words: row.get(16)?,
+                        deadline: row.get(17)?,
+                    },
+                    row.get::<_, i64>(19)?,
+                    row.get::<_, String>(20)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
 
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
@@ -2274,9 +2695,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let mut stmt = conn.prepare(
             "SELECT date(updated_at) as day, SUM(word_count) FROM docs GROUP BY day ORDER BY day"
         ).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
@@ -2287,15 +2710,19 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT CAST(strftime('%H', ts) AS INTEGER) AS hour, COUNT(*) FROM usage_events WHERE ts >= date('now', '-90 days') GROUP BY hour"
         ).map_err(|e| e.to_string())?;
         let mut buckets = vec![0i64; 24];
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .map_err(|e| e.to_string())?;
         for r in rows.filter_map(|r| r.ok()) {
             if (0..24).contains(&r.0) {
                 buckets[r.0 as usize] = r.1;
             }
         }
-        Ok(buckets.into_iter().enumerate().map(|(h, c)| (h as i64, c)).collect())
+        Ok(buckets
+            .into_iter()
+            .enumerate()
+            .map(|(h, c)| (h as i64, c))
+            .collect())
     }
 
     /// Words per day for the last 7 days. Zero-filled.
@@ -2305,16 +2732,20 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             "SELECT date(updated_at) as day, SUM(word_count) FROM docs WHERE updated_at >= date('now', '-7 days') GROUP BY day"
         ).map_err(|e| e.to_string())?;
         let mut by_day = std::collections::HashMap::new();
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        }).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         for r in rows.filter_map(|r| r.ok()) {
             by_day.insert(r.0, r.1);
         }
         let today = chrono::Utc::now().date_naive();
         let mut out = Vec::with_capacity(7);
         for back in (0..7).rev() {
-            let day = (today - chrono::Duration::days(back)).format("%Y-%m-%d").to_string();
+            let day = (today - chrono::Duration::days(back))
+                .format("%Y-%m-%d")
+                .to_string();
             out.push((day.clone(), *by_day.get(&day).unwrap_or(&0)));
         }
         Ok(out)
@@ -2323,17 +2754,31 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
     /// Composite productivity score + totals. Mirrors the browser backend formula.
     pub fn dashboard_productivity_score(&self) -> Result<serde_json::Value, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let total_words: i64 = conn.query_row(
-            "SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| r.get(0),
-        ).map_err(|e| e.to_string())?;
-        let total_docs: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM docs", [], |r| r.get(0),
-        ).map_err(|e| e.to_string())?;
-        let active_days: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT date(updated_at)) FROM docs", [], |r| r.get(0),
-        ).map_err(|e| e.to_string())?;
-        let avg_words = if total_docs > 0 { total_words / total_docs } else { 0 };
-        let score = ((total_words as f64 / 10000.0) * 30.0 + active_days as f64 * 2.0 + total_docs as f64 * 0.5).round().min(100.0) as i64;
+        let total_words: i64 = conn
+            .query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| e.to_string())?;
+        let total_docs: i64 = conn
+            .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        let active_days: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT date(updated_at)) FROM docs",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let avg_words = if total_docs > 0 {
+            total_words / total_docs
+        } else {
+            0
+        };
+        let score = ((total_words as f64 / 10000.0) * 30.0
+            + active_days as f64 * 2.0
+            + total_docs as f64 * 0.5)
+            .round()
+            .min(100.0) as i64;
         Ok(serde_json::json!({
             "score": score,
             "totalWords": total_words,
@@ -2365,16 +2810,25 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         })
     }
 
-    pub fn vault_rename_preview(&self, old_title: &str) -> Result<Vec<(String, String, String)>, String> {
+    pub fn vault_rename_preview(
+        &self,
+        old_title: &str,
+    ) -> Result<Vec<(String, String, String)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let pattern = format!("[[{}]]", old_title);
-        let mut stmt = conn.prepare(
-            "SELECT id, title, content FROM docs WHERE content LIKE ?1"
-        ).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, title, content FROM docs WHERE content LIKE ?1")
+            .map_err(|e| e.to_string())?;
 
-        let docs = stmt.query_map(params![format!("%{}%", pattern)], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-        }).map_err(|e| e.to_string())?
+        let docs = stmt
+            .query_map(params![format!("%{}%", pattern)], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
             .filter_map(|r| r.ok())
             .collect();
 
@@ -2386,10 +2840,12 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let old_link = format!("[[{}]]", old_title);
         let new_link = format!("[[{}]]", new_title);
 
-        let count = conn.execute(
-            "UPDATE docs SET content = REPLACE(content, ?1, ?2) WHERE content LIKE ?3",
-            params![old_link, new_link, format!("%{}%", old_link)],
-        ).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute(
+                "UPDATE docs SET content = REPLACE(content, ?1, ?2) WHERE content LIKE ?3",
+                params![old_link, new_link, format!("%{}%", old_link)],
+            )
+            .map_err(|e| e.to_string())?;
 
         Ok(count as u64)
     }
@@ -2430,7 +2886,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         conn.execute(
             "UPDATE docs SET content = ?1, word_count = ?2, updated_at = ?3 WHERE id = ?4",
             params![body, word_count, now_iso(), doc_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         drop(conn);
 
         // Re-extract backlinks
@@ -2445,7 +2902,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
     }
 
     pub fn setup_file_watcher(&self, app_handle: tauri::AppHandle) -> Result<(), String> {
-        use notify::{Watcher, RecursiveMode, Event, EventKind};
+        use notify::{Event, EventKind, RecursiveMode, Watcher};
         use std::sync::mpsc;
 
         let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
@@ -2457,7 +2914,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
         let mut watcher = notify::recommended_watcher(tx).map_err(|e| e.to_string())?;
 
-        watcher.watch(&vault, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
+        watcher
+            .watch(&vault, RecursiveMode::Recursive)
+            .map_err(|e| e.to_string())?;
 
         let handle = app_handle.clone();
         std::thread::spawn(move || {
@@ -2468,7 +2927,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                             if path.extension().and_then(|e| e.to_str()) == Some("md")
                                 && !is_self_write(&path)
                             {
-                                let _ = handle.emit("file-changed", path.to_string_lossy().to_string());
+                                let _ =
+                                    handle.emit("file-changed", path.to_string_lossy().to_string());
                             }
                         }
                     }
@@ -2508,7 +2968,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             .map_err(|e| e.to_string())?;
 
         // Search latency test: run 10 FTS5 searches and average
-        let search_query = "SELECT id FROM docs WHERE title LIKE '%test%' OR content LIKE '%test%' LIMIT 10";
+        let search_query =
+            "SELECT id FROM docs WHERE title LIKE '%test%' OR content LIKE '%test%' LIMIT 10";
         let iterations = 10u32;
         let mut total_us: u64 = 0;
         for _ in 0..iterations {
@@ -2521,11 +2982,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         // Snapshot restore latency: pick one snapshot, time a read
         let snapshot_latency_us: u64 = {
             let start = std::time::Instant::now();
-            let _: Result<String, _> = conn.query_row(
-                "SELECT content FROM snapshots LIMIT 1",
-                [],
-                |r| r.get(0),
-            );
+            let _: Result<String, _> =
+                conn.query_row("SELECT content FROM snapshots LIMIT 1", [], |r| r.get(0));
             start.elapsed().as_micros() as u64
         };
 
@@ -2533,18 +2991,21 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         let graph_latency_us: u64 = {
             let start = std::time::Instant::now();
             // Simple timing: fetch all nodes and edges count (avoids stmt lifetime issues)
-            let _node_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM docs", [], |r| r.get(0)
-            ).unwrap_or(0);
-            let _edge_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM backlinks", [], |r| r.get(0)
-            ).unwrap_or(0);
+            let _node_count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
+                .unwrap_or(0);
+            let _edge_count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM backlinks", [], |r| r.get(0))
+                .unwrap_or(0);
             let _rows: Vec<(String, String)> = conn
                 .prepare("SELECT source_id, target_id FROM backlinks")
                 .and_then(|mut stmt| {
-                    let results = stmt.query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?.filter_map(|r| r.ok()).collect();
+                    let results = stmt
+                        .query_map([], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
                     Ok(results)
                 })
                 .unwrap_or_default();
@@ -2559,12 +3020,13 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 use std::process::Command;
                 let pid = std::process::id();
                 let mut probe = Command::new("powershell");
-                probe.args(["-NoProfile", "-Command", &format!(
-                    "(Get-Process -Id {}).WorkingSet64 / 1MB", pid
-                )]);
+                probe.args([
+                    "-NoProfile",
+                    "-Command",
+                    &format!("(Get-Process -Id {}).WorkingSet64 / 1MB", pid),
+                ]);
                 crate::procutil::hide_console(&mut probe);
-                if let Ok(output) = probe.output()
-                {
+                if let Ok(output) = probe.output() {
                     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     s.parse::<f64>().unwrap_or(0.0) as u64
                 } else {
@@ -2579,7 +3041,9 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
 
         // Word count total
         let total_words: i64 = conn
-            .query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| r.get(0))
+            .query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| {
+                r.get(0)
+            })
             .map_err(|e| e.to_string())?;
 
         Ok(serde_json::json!({
@@ -2597,31 +3061,41 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
 
     pub fn clear_conversations(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute("DELETE FROM conversations", [])
+            .map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
     pub fn clear_messages(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM chat_messages", []).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute("DELETE FROM chat_messages", [])
+            .map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
     pub fn clear_snapshots(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM snapshots", []).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute("DELETE FROM snapshots", [])
+            .map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
     pub fn clear_usage_events(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM usage_events", []).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute("DELETE FROM usage_events", [])
+            .map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
     pub fn clear_tab_states(&self) -> Result<u64, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        let count = conn.execute("DELETE FROM tab_state", []).map_err(|e| e.to_string())?;
+        let count = conn
+            .execute("DELETE FROM tab_state", [])
+            .map_err(|e| e.to_string())?;
         Ok(count as u64)
     }
 
@@ -2672,11 +3146,15 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 }
 
                 // Previous scene (sibling doc with same parent, earlier in order)
-                if let Some(pid) = conn.query_row(
-                    "SELECT parent_id FROM docs WHERE id = ?1",
-                    params![doc_id],
-                    |row| row.get::<_, Option<String>>(0),
-                ).ok().flatten() {
+                if let Some(pid) = conn
+                    .query_row(
+                        "SELECT parent_id FROM docs WHERE id = ?1",
+                        params![doc_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten()
+                {
                     if let Ok(prev) = conn.query_row(
                         "SELECT title, content FROM docs WHERE parent_id = ?1 AND id != ?2 ORDER BY updated_at DESC LIMIT 1",
                         params![pid, doc_id],
@@ -2842,7 +3320,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
                 .frontmatter_json
                 .as_ref()
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                .and_then(|fm| fm.get("ghost_parent").and_then(|v| v.as_str()).map(String::from))
+                .and_then(|fm| {
+                    fm.get("ghost_parent")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
                 .ok_or("No ghost_parent found and no target specified".to_string())?,
         };
 
@@ -2986,17 +3468,24 @@ mod entity_tests {
         let norms: Vec<&str> = list.iter().map(|e| e.entity_norm.as_str()).collect();
         assert!(norms.contains(&"jon snow"), "{norms:?}");
         assert!(norms.contains(&"arya stark"), "{norms:?}");
-        assert!(!norms.iter().any(|n| n.starts_with("the king")), "{norms:?}");
+        assert!(
+            !norms.iter().any(|n| n.starts_with("the king")),
+            "{norms:?}"
+        );
         let hits = db.entity_occurrences("jon snow").unwrap();
         assert_eq!(hits.len(), 1);
-        assert_eq!(&text[hits[0].span_start as usize..hits[0].span_end as usize], "Jon Snow");
+        assert_eq!(
+            &text[hits[0].span_start as usize..hits[0].span_end as usize],
+            "Jon Snow"
+        );
     }
 
     #[test]
     fn gazetteer_wins_kind_and_spans() {
         let db = test_db("gaz");
         let id = mk_doc(&db, "Ch1");
-        db.bible_upsert_fact(&id, "world_characters", "Elena", "protagonist").unwrap();
+        db.bible_upsert_fact(&id, "world_characters", "Elena", "protagonist")
+            .unwrap();
         set_content(&db, &id, "Elena met Jon Snow at Grey Harbor.");
         let list = db.entity_list().unwrap();
         let elena = list.iter().find(|e| e.entity_norm == "elena").unwrap();
@@ -3011,7 +3500,11 @@ mod entity_tests {
         let db = test_db("impl");
         let _harbor = mk_doc(&db, "Grey Harbor");
         let id = mk_doc(&db, "Ch1");
-        set_content(&db, &id, "See [[Jon Snow]] for details. They sailed from Grey Harbor.");
+        set_content(
+            &db,
+            &id,
+            "See [[Jon Snow]] for details. They sailed from Grey Harbor.",
+        );
         let implicit = db.get_implicit_links(&id).unwrap();
         assert!(
             implicit.iter().any(|l| l.target_id == _harbor),
@@ -3027,12 +3520,19 @@ mod entity_tests {
         // pre-index doc, then backfill.
         {
             let conn = db.conn.lock().unwrap();
-            conn.execute("UPDATE docs SET content = ?1 WHERE id = ?2", params!["Jon Snow rides.", id])
-                .unwrap();
+            conn.execute(
+                "UPDATE docs SET content = ?1 WHERE id = ?2",
+                params!["Jon Snow rides.", id],
+            )
+            .unwrap();
         }
         assert!(db.entity_list().unwrap().is_empty());
         assert_eq!(db.entities_backfill().unwrap(), 1);
-        assert!(db.entity_list().unwrap().iter().any(|e| e.entity_norm == "jon snow"));
+        assert!(db
+            .entity_list()
+            .unwrap()
+            .iter()
+            .any(|e| e.entity_norm == "jon snow"));
     }
 
     #[test]
@@ -3050,112 +3550,345 @@ mod entity_tests {
     #[test]
     fn memory_requires_confirmation_and_recomputes_only_the_changed_scene() {
         let db = test_db("memory-delta");
-        let project = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "project".into(), title: "Book".into(),
-            parent_id: None, content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
-        let scene_one = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "scene".into(), title: "One".into(),
-            parent_id: Some(project.clone()), content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
-        let scene_two = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "scene".into(), title: "Two".into(),
-            parent_id: Some(project.clone()), content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
-        db.bible_upsert_fact(&project, "world_characters", "Elena", "protagonist").unwrap();
+        let project = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "project".into(),
+                title: "Book".into(),
+                parent_id: None,
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        let scene_one = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "scene".into(),
+                title: "One".into(),
+                parent_id: Some(project.clone()),
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        let scene_two = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "scene".into(),
+                title: "Two".into(),
+                parent_id: Some(project.clone()),
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        db.bible_upsert_fact(&project, "world_characters", "Elena", "protagonist")
+            .unwrap();
 
         let first_text = "Elena wore a blue coat. Mara waited by the gate.";
-        let first = db.bible_replace_scene_memory(&project, &scene_one, first_text, None, &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a blue coat.".into(), attribute_key: Some("coat".into()), attribute_value: Some("blue".into()) },
-            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara waited by the gate.".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
+        let first = db
+            .bible_replace_scene_memory(
+                &project,
+                &scene_one,
+                first_text,
+                None,
+                &[
+                    BibleMentionCandidate {
+                        key: "Elena".into(),
+                        kind: "character".into(),
+                        snippet: "Elena wore a blue coat.".into(),
+                        attribute_key: Some("coat".into()),
+                        attribute_value: Some("blue".into()),
+                    },
+                    BibleMentionCandidate {
+                        key: "Mara".into(),
+                        kind: "character".into(),
+                        snippet: "Mara waited by the gate.".into(),
+                        attribute_key: None,
+                        attribute_value: None,
+                    },
+                ],
+            )
+            .unwrap();
         assert_eq!(first.matched, 1);
         assert_eq!(first.suggested, 1);
-        assert_eq!(db.bible_get_facts(&project).unwrap().len(), 1, "unmatched names must stay suggestions");
+        assert_eq!(
+            db.bible_get_facts(&project).unwrap().len(),
+            1,
+            "unmatched names must stay suggestions"
+        );
         assert_eq!(db.bible_get_mentions(&project).unwrap().len(), 1);
 
         let second_text = "Elena wore a red coat at dawn.";
-        db.bible_replace_scene_memory(&project, &scene_two, second_text, None, &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a red coat at dawn.".into(), attribute_key: Some("coat".into()), attribute_value: Some("red".into()) },
-        ]).unwrap();
+        db.bible_replace_scene_memory(
+            &project,
+            &scene_two,
+            second_text,
+            None,
+            &[BibleMentionCandidate {
+                key: "Elena".into(),
+                kind: "character".into(),
+                snippet: "Elena wore a red coat at dawn.".into(),
+                attribute_key: Some("coat".into()),
+                attribute_value: Some("red".into()),
+            }],
+        )
+        .unwrap();
         let mentions = db.bible_get_mentions(&project).unwrap();
         assert_eq!(mentions.len(), 2);
-        let values = mentions.iter().filter(|m| m.doc_id == scene_two).filter_map(|m| m.attribute_value.clone()).collect::<Vec<_>>();
+        let values = mentions
+            .iter()
+            .filter(|m| m.doc_id == scene_two)
+            .filter_map(|m| m.attribute_value.clone())
+            .collect::<Vec<_>>();
         assert_eq!(values, vec!["red".to_string()]);
 
         let updated_text = "Elena waited beneath the arch.";
-        db.bible_replace_scene_memory(&project, &scene_two, updated_text, None, &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena waited beneath the arch.".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
+        db.bible_replace_scene_memory(
+            &project,
+            &scene_two,
+            updated_text,
+            None,
+            &[BibleMentionCandidate {
+                key: "Elena".into(),
+                kind: "character".into(),
+                snippet: "Elena waited beneath the arch.".into(),
+                attribute_key: None,
+                attribute_value: None,
+            }],
+        )
+        .unwrap();
         let mentions = db.bible_get_mentions(&project).unwrap();
         assert_eq!(mentions.iter().filter(|m| m.doc_id == scene_one).count(), 1);
         assert_eq!(mentions.iter().filter(|m| m.doc_id == scene_two).count(), 1);
         assert_eq!(db.bible_get_suggestions(&project).unwrap().len(), 1);
-        let suggestion = db.bible_get_suggestions(&project).unwrap().into_iter().find(|s| s.key == "Mara").unwrap();
-        db.bible_reject_suggestion(&project, &suggestion.id).unwrap();
-        db.bible_replace_scene_memory(&project, &scene_one, "Mara waited by the river.", None, &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena wore a blue coat.".into(), attribute_key: Some("coat".into()), attribute_value: Some("blue".into()) },
-            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara waited by the river.".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
-        assert!(db.bible_get_suggestions(&project).unwrap().is_empty(), "rejected suggestions must stay rejected");
-        let scene_three = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "scene".into(), title: "Three".into(),
-            parent_id: Some(project.clone()), content: Some("Elena waited.".into()), frontmatter_json: None,
-        }).unwrap().id;
-        db.bible_replace_scene_memory(&project, &scene_three, "Elena waited.", None, &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "Elena waited.".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
-        assert_eq!(db.bible_get_mentions(&project).unwrap().iter().filter(|m| m.doc_id == scene_three).count(), 1);
-        db.save_doc(SaveDocRequest { id: scene_three.clone(), title: None, content: Some("Mara arrived.".into()), status: None, frontmatter_json: None, parent_id: None }).unwrap();
-        db.bible_replace_scene_memory(&project, &scene_three, "Mara arrived.", None, &[
-            BibleMentionCandidate { key: "Mara".into(), kind: "character".into(), snippet: "Mara arrived.".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
-        let suggestion = db.bible_get_suggestions(&project).unwrap().into_iter().find(|s| s.key == "Mara").unwrap();
-        let fact = db.bible_confirm_suggestion(&project, &suggestion.id).unwrap();
+        let suggestion = db
+            .bible_get_suggestions(&project)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.key == "Mara")
+            .unwrap();
+        db.bible_reject_suggestion(&project, &suggestion.id)
+            .unwrap();
+        db.bible_replace_scene_memory(
+            &project,
+            &scene_one,
+            "Mara waited by the river.",
+            None,
+            &[
+                BibleMentionCandidate {
+                    key: "Elena".into(),
+                    kind: "character".into(),
+                    snippet: "Elena wore a blue coat.".into(),
+                    attribute_key: Some("coat".into()),
+                    attribute_value: Some("blue".into()),
+                },
+                BibleMentionCandidate {
+                    key: "Mara".into(),
+                    kind: "character".into(),
+                    snippet: "Mara waited by the river.".into(),
+                    attribute_key: None,
+                    attribute_value: None,
+                },
+            ],
+        )
+        .unwrap();
+        assert!(
+            db.bible_get_suggestions(&project).unwrap().is_empty(),
+            "rejected suggestions must stay rejected"
+        );
+        let scene_three = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "scene".into(),
+                title: "Three".into(),
+                parent_id: Some(project.clone()),
+                content: Some("Elena waited.".into()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        db.bible_replace_scene_memory(
+            &project,
+            &scene_three,
+            "Elena waited.",
+            None,
+            &[BibleMentionCandidate {
+                key: "Elena".into(),
+                kind: "character".into(),
+                snippet: "Elena waited.".into(),
+                attribute_key: None,
+                attribute_value: None,
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            db.bible_get_mentions(&project)
+                .unwrap()
+                .iter()
+                .filter(|m| m.doc_id == scene_three)
+                .count(),
+            1
+        );
+        db.save_doc(SaveDocRequest {
+            id: scene_three.clone(),
+            title: None,
+            content: Some("Mara arrived.".into()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })
+        .unwrap();
+        db.bible_replace_scene_memory(
+            &project,
+            &scene_three,
+            "Mara arrived.",
+            None,
+            &[BibleMentionCandidate {
+                key: "Mara".into(),
+                kind: "character".into(),
+                snippet: "Mara arrived.".into(),
+                attribute_key: None,
+                attribute_value: None,
+            }],
+        )
+        .unwrap();
+        let suggestion = db
+            .bible_get_suggestions(&project)
+            .unwrap()
+            .into_iter()
+            .find(|s| s.key == "Mara")
+            .unwrap();
+        let fact = db
+            .bible_confirm_suggestion(&project, &suggestion.id)
+            .unwrap();
         assert_eq!(fact.key, "Mara");
         assert!(db.bible_get_suggestions(&project).unwrap().is_empty());
-        assert!(db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_three && m.fact_key == "Mara"));
-        db.save_doc(SaveDocRequest { id: scene_three.clone(), title: None, content: Some(String::new()), status: None, frontmatter_json: None, parent_id: None }).unwrap();
-        db.bible_replace_scene_memory(&project, &scene_three, "", None, &[]).unwrap();
-        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_three), "empty content must clear scene memory");
-        let stale = db.bible_replace_scene_memory(&project, &scene_two, "stale", Some("not the saved content"), &[
-            BibleMentionCandidate { key: "Elena".into(), kind: "character".into(), snippet: "stale".into(), attribute_key: None, attribute_value: None },
-        ]).unwrap();
-        assert!(stale.skipped && db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_two));
-        let project_two = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "project".into(), title: "Other Book".into(),
-            parent_id: None, content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
-        db.move_doc(MoveDocRequest { id: scene_two.clone(), new_parent_id: Some(project_two.clone()), new_path: None }).unwrap();
+        assert!(db
+            .bible_get_mentions(&project)
+            .unwrap()
+            .iter()
+            .any(|m| m.doc_id == scene_three && m.fact_key == "Mara"));
+        db.save_doc(SaveDocRequest {
+            id: scene_three.clone(),
+            title: None,
+            content: Some(String::new()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })
+        .unwrap();
+        db.bible_replace_scene_memory(&project, &scene_three, "", None, &[])
+            .unwrap();
+        assert!(
+            !db.bible_get_mentions(&project)
+                .unwrap()
+                .iter()
+                .any(|m| m.doc_id == scene_three),
+            "empty content must clear scene memory"
+        );
+        let stale = db
+            .bible_replace_scene_memory(
+                &project,
+                &scene_two,
+                "stale",
+                Some("not the saved content"),
+                &[BibleMentionCandidate {
+                    key: "Elena".into(),
+                    kind: "character".into(),
+                    snippet: "stale".into(),
+                    attribute_key: None,
+                    attribute_value: None,
+                }],
+            )
+            .unwrap();
+        assert!(
+            stale.skipped
+                && db
+                    .bible_get_mentions(&project)
+                    .unwrap()
+                    .iter()
+                    .any(|m| m.doc_id == scene_two)
+        );
+        let project_two = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "project".into(),
+                title: "Other Book".into(),
+                parent_id: None,
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        db.move_doc(MoveDocRequest {
+            id: scene_two.clone(),
+            new_parent_id: Some(project_two.clone()),
+            new_path: None,
+        })
+        .unwrap();
         assert_eq!(db.bible_scope_id(&scene_two).unwrap(), project_two);
-        assert!(!db.bible_get_mentions(&project).unwrap().iter().any(|m| m.doc_id == scene_two));
+        assert!(!db
+            .bible_get_mentions(&project)
+            .unwrap()
+            .iter()
+            .any(|m| m.doc_id == scene_two));
     }
 
     #[test]
     fn graph_query_filters_workspace_and_tags() {
         let db = test_db("graphfilter");
-        let a = db.create_doc(CreateDocRequest {
-            workspace: "novel".into(), kind: "scene".into(), title: "A".into(),
-            parent_id: None, content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
-        let b = db.create_doc(CreateDocRequest {
-            workspace: "write".into(), kind: "doc".into(), title: "B".into(),
-            parent_id: None, content: Some(String::new()), frontmatter_json: None,
-        }).unwrap().id;
+        let a = db
+            .create_doc(CreateDocRequest {
+                workspace: "novel".into(),
+                kind: "scene".into(),
+                title: "A".into(),
+                parent_id: None,
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
+        let b = db
+            .create_doc(CreateDocRequest {
+                workspace: "write".into(),
+                kind: "doc".into(),
+                title: "B".into(),
+                parent_id: None,
+                content: Some(String::new()),
+                frontmatter_json: None,
+            })
+            .unwrap()
+            .id;
         {
             let conn = db.conn.lock().unwrap();
-            conn.execute("INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)", rusqlite::params![a, "cast"]).unwrap();
-            conn.execute("INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)", rusqlite::params![b, "research"]).unwrap();
+            conn.execute(
+                "INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)",
+                rusqlite::params![a, "cast"],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO doc_tags (doc_id, tag) VALUES (?1, ?2)",
+                rusqlite::params![b, "research"],
+            )
+            .unwrap();
         }
         assert_eq!(db.graph_query(None, None).unwrap().nodes.len(), 2);
         let novel = db.graph_query(Some("novel"), None).unwrap();
         assert_eq!(novel.nodes.len(), 1);
         assert_eq!(novel.nodes[0].id, a);
         assert_eq!(novel.nodes[0].tags, vec!["cast".to_string()]);
-        let tagged = db.graph_query(Some("all"), Some(&["research".to_string()])).unwrap();
+        let tagged = db
+            .graph_query(Some("all"), Some(&["research".to_string()]))
+            .unwrap();
         assert_eq!(tagged.nodes.len(), 1);
         assert_eq!(tagged.nodes[0].id, b);
-        assert!(db.graph_query(None, Some(&["nope".to_string()])).unwrap().nodes.is_empty());
+        assert!(db
+            .graph_query(None, Some(&["nope".to_string()]))
+            .unwrap()
+            .nodes
+            .is_empty());
     }
 }
 
@@ -3300,11 +4033,11 @@ mod vault_confinement_tests {
         // Owned Strings: several of these land mid-character at every boundary,
         // and a borrowed literal would not express a seam at byte 499.
         let cases: Vec<String> = vec![
-            "\u{4e00}".repeat(30),                             // 90 B, 3 B/char
-            "\u{2014}".repeat(30),                             // em-dash, 3 B/char
-            format!("{}😀", "a".repeat(62)),                    // emoji on the seam
-            format!("{}\u{4e00}", "a".repeat(499)),             // CJK on the seam
-            "a".repeat(200),                                    // pure ASCII
+            "\u{4e00}".repeat(30),                  // 90 B, 3 B/char
+            "\u{2014}".repeat(30),                  // em-dash, 3 B/char
+            format!("{}😀", "a".repeat(62)),        // emoji on the seam
+            format!("{}\u{4e00}", "a".repeat(499)), // CJK on the seam
+            "a".repeat(200),                        // pure ASCII
             String::new(),
         ];
         for s in &cases {
@@ -3322,7 +4055,7 @@ mod vault_confinement_tests {
     fn sanitize_filename_survives_multibyte_titles() {
         // 22 CJK chars = 66 bytes: byte 64 is mid-character.
         let cases: Vec<String> = vec![
-            "\u{4e00}".repeat(22),         // exactly the reported boundary
+            "\u{4e00}".repeat(22), // exactly the reported boundary
             "\u{4e00}".repeat(30),
             "\u{2014}".repeat(30),
             format!("{}😀", "a".repeat(62)),
@@ -3330,7 +4063,12 @@ mod vault_confinement_tests {
         ];
         for title in &cases {
             let out = sanitize_filename(title);
-            assert!(out.len() <= 64, "{} bytes for {} chars", out.len(), title.chars().count());
+            assert!(
+                out.len() <= 64,
+                "{} bytes for {} chars",
+                out.len(),
+                title.chars().count()
+            );
             assert!(!out.is_empty());
         }
     }
@@ -3422,8 +4160,18 @@ mod vault_confinement_tests {
         // Everything that would otherwise reach path construction, including the
         // non-ASCII input that used to panic the byte slice.
         for bad in [
-            "", "2026", "2026-1-2", "Journal — 2026", "第一章第一", "2026-01-02-03",
-            "2026/01/02", "2026-01-02 ", "..-..-..", "aaaaaaaaaa", "-", "----------",
+            "",
+            "2026",
+            "2026-1-2",
+            "Journal — 2026",
+            "第一章第一",
+            "2026-01-02-03",
+            "2026/01/02",
+            "2026-01-02 ",
+            "..-..-..",
+            "aaaaaaaaaa",
+            "-",
+            "----------",
         ] {
             assert!(!is_iso_date(bad), "{bad:?} must be rejected");
         }
@@ -3517,11 +4265,15 @@ mod save_path_tests {
     fn atomic_save_updates_row_and_file_together() {
         let db = test_db("atomic");
         let (id, file) = mk_doc(&db, "Chapter", "first draft");
-        db.atomic_save(&id, "second draft, longer by a few words indeed").unwrap();
+        db.atomic_save(&id, "second draft, longer by a few words indeed")
+            .unwrap();
         let doc = db.get_doc(&id).unwrap();
         assert_eq!(doc.content, "second draft, longer by a few words indeed");
         let on_disk = std::fs::read_to_string(&file).unwrap();
-        assert!(on_disk.contains("second draft"), "file not updated: {on_disk:?}");
+        assert!(
+            on_disk.contains("second draft"),
+            "file not updated: {on_disk:?}"
+        );
     }
 
     #[test]
@@ -3543,7 +4295,10 @@ mod save_path_tests {
         // Restore snapshots the pre-restore state first, so the overwrite is
         // itself recoverable now.
         let snaps = db.snapshot_list(&id).unwrap();
-        assert!(snaps.len() >= 2, "restore must leave a snapshot of the overwritten state");
+        assert!(
+            snaps.len() >= 2,
+            "restore must leave a snapshot of the overwritten state"
+        );
     }
 
     #[test]
@@ -3570,7 +4325,10 @@ mod save_path_tests {
         let vault = db.vault_path.lock().unwrap().clone();
         let new_file = resolve_in_vault(&vault, &moved.path).unwrap();
         assert!(!old_file.exists(), "old file still present after move");
-        assert!(new_file.is_file(), "new file missing after move: {new_file:?}");
+        assert!(
+            new_file.is_file(),
+            "new file missing after move: {new_file:?}"
+        );
         assert_eq!(std::fs::read_to_string(&new_file).unwrap(), "body");
     }
 
@@ -3586,16 +4344,27 @@ mod save_path_tests {
             .to_string_lossy()
             .to_string();
         let listed = db.backup_list().unwrap();
-        assert!(listed.iter().any(|(n, _, _)| n == &file_name), "backup not listed");
+        assert!(
+            listed.iter().any(|(n, _, _)| n == &file_name),
+            "backup not listed"
+        );
         let restored = db.backup_restore(&file_name).unwrap();
         let conn = Connection::open(&restored).unwrap();
         let found: i64 = conn
-            .query_row("SELECT COUNT(*) FROM docs WHERE id = ?1", params![&id], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM docs WHERE id = ?1",
+                params![&id],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(found, 1, "restored backup is missing the doc");
         drop(conn);
         db.backup_delete(&file_name).unwrap();
-        assert!(!db.backup_list().unwrap().iter().any(|(n, _, _)| n == &file_name));
+        assert!(!db
+            .backup_list()
+            .unwrap()
+            .iter()
+            .any(|(n, _, _)| n == &file_name));
         let _ = std::fs::remove_file(&restored);
     }
 
@@ -3607,11 +4376,17 @@ mod save_path_tests {
         let written = std::path::PathBuf::from("vault/notes/a.md");
         let other = std::path::PathBuf::from("vault/notes/b.md");
 
-        assert!(!is_self_write(&written), "a path we never wrote must not be suppressed");
+        assert!(
+            !is_self_write(&written),
+            "a path we never wrote must not be suppressed"
+        );
 
         stamp_self_write(&written);
         assert!(is_self_write(&written), "our own write must be suppressed");
-        assert!(!is_self_write(&other), "a different file must still report as external");
+        assert!(
+            !is_self_write(&other),
+            "a different file must still report as external"
+        );
     }
 
     /// A symlink inside the vault pointing outside it must be refused.
@@ -3635,7 +4410,10 @@ mod save_path_tests {
 
         let err = resolve_in_vault(&vault, "link/secret.md")
             .expect_err("a symlink pointing out of the vault must be refused");
-        assert!(err.contains("outside the vault"), "unexpected refusal: {err}");
+        assert!(
+            err.contains("outside the vault"),
+            "unexpected refusal: {err}"
+        );
 
         // An ordinary in-vault path must still resolve, symlink or not.
         assert!(resolve_in_vault(&vault, "notes/a.md").is_ok());

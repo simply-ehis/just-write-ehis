@@ -82,10 +82,17 @@ fn open_log_file(name: &str, banner: bool) -> Option<File> {
     let dir = LOG_DIR.get()?;
     let _ = std::fs::create_dir_all(dir);
     let path = dir.join(format!("{}.log", name));
-    if std::fs::metadata(&path).map(|m| m.len() > LOG_ROTATE_BYTES).unwrap_or(false) {
+    if std::fs::metadata(&path)
+        .map(|m| m.len() > LOG_ROTATE_BYTES)
+        .unwrap_or(false)
+    {
         let _ = std::fs::rename(&path, dir.join(format!("{}.old.log", name)));
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
     if banner {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -159,7 +166,10 @@ pub fn terminate_child(child: &mut Child) -> Result<(), String> {
                 }
                 Ok(None) => break None,
                 Err(error) => {
-                    return Err(format!("failed to terminate sidecar process tree: {}", error))
+                    return Err(format!(
+                        "failed to terminate sidecar process tree: {}",
+                        error
+                    ))
                 }
             }
         };
@@ -180,7 +190,10 @@ pub fn terminate_child(child: &mut Child) -> Result<(), String> {
             }
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!("taskkill failed for sidecar process tree: {}", status));
+            return Err(format!(
+                "taskkill failed for sidecar process tree: {}",
+                status
+            ));
         }
     }
     #[cfg(not(windows))]

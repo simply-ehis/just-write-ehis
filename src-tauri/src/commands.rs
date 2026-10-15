@@ -1,17 +1,17 @@
-use tauri::{Manager, State};
 use crate::database::Database;
 use crate::models::*;
 use crate::sidecar;
-use std::io::Read;
-use std::time::{Duration, Instant};
+use crate::windows::AutostartLaunch;
+use crate::windows::PendingLaunchFile;
 use std::collections::HashSet;
+use std::io::Read;
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::process::Command;
+use std::time::{Duration, Instant};
+use tauri::{Manager, State};
 use uuid::Uuid;
-use crate::windows::PendingLaunchFile;
-use crate::windows::AutostartLaunch;
 
 #[tauri::command]
 pub fn doc_create(
@@ -58,9 +58,15 @@ pub fn open_external_file(
             return Ok(None);
         };
         let path = PathBuf::from(raw);
-        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         if extension != "txt" && extension != "md" {
-            return Err("Only .txt and .md files can be opened from Windows file associations.".into());
+            return Err(
+                "Only .txt and .md files can be opened from Windows file associations.".into(),
+            );
         }
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
@@ -70,19 +76,28 @@ pub fn open_external_file(
         if path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_TEXT_BYTES as u64 {
             return Err("File over 25 MB — open it from its own app instead.".into());
         }
-        let bytes = std::fs::read(&path).map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
+        let bytes = std::fs::read(&path)
+            .map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
         if bytes.contains(&0) {
             return Err("That file looks binary, not UTF-8 text.".into());
         }
-        let content = String::from_utf8(bytes).map_err(|_| "The file is not valid UTF-8 text.".to_string())?;
-        let title = path.file_stem().and_then(|value| value.to_str()).filter(|value| !value.is_empty()).unwrap_or("Untitled").to_string();
+        let content = String::from_utf8(bytes)
+            .map_err(|_| "The file is not valid UTF-8 text.".to_string())?;
+        let title = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Untitled")
+            .to_string();
         let doc = db.create_doc(CreateDocRequest {
             workspace: "write".into(),
             kind: "doc".into(),
             title,
             parent_id: None,
             content: Some(content),
-            frontmatter_json: Some(serde_json::json!({ "source_path": path.to_string_lossy() }).to_string()),
+            frontmatter_json: Some(
+                serde_json::json!({ "source_path": path.to_string_lossy() }).to_string(),
+            ),
         })?;
         Ok(Some(doc))
     }
@@ -206,7 +221,12 @@ pub fn doc_toggle_pin(db: State<'_, Database>, id: String) -> Result<bool, Strin
 }
 
 #[tauri::command]
-pub fn doc_set_goal(db: State<'_, Database>, id: String, goal_words: Option<i64>, deadline: Option<String>) -> Result<(), String> {
+pub fn doc_set_goal(
+    db: State<'_, Database>,
+    id: String,
+    goal_words: Option<i64>,
+    deadline: Option<String>,
+) -> Result<(), String> {
     db.set_goal(&id, goal_words, deadline)
 }
 
@@ -244,22 +264,33 @@ pub fn memory_sidecar_running(mem: State<'_, sidecar::MemoryManager>) -> bool {
 }
 
 #[tauri::command]
-pub async fn memory_sidecar_health(mem: State<'_, sidecar::MemoryManager>) -> Result<sidecar::MemoryHealth, String> {
+pub async fn memory_sidecar_health(
+    mem: State<'_, sidecar::MemoryManager>,
+) -> Result<sidecar::MemoryHealth, String> {
     mem.health().await
 }
 
 #[tauri::command]
-pub async fn memory_learn(mem: State<'_, sidecar::MemoryManager>, text: String) -> Result<i64, String> {
+pub async fn memory_learn(
+    mem: State<'_, sidecar::MemoryManager>,
+    text: String,
+) -> Result<i64, String> {
     mem.learn(&text).await
 }
 
 #[tauri::command]
-pub async fn memory_recall(mem: State<'_, sidecar::MemoryManager>, query: String) -> Result<String, String> {
+pub async fn memory_recall(
+    mem: State<'_, sidecar::MemoryManager>,
+    query: String,
+) -> Result<String, String> {
     mem.recall(&query).await
 }
 
 #[tauri::command]
-pub async fn memory_redact(mem: State<'_, sidecar::MemoryManager>, text: String) -> Result<String, String> {
+pub async fn memory_redact(
+    mem: State<'_, sidecar::MemoryManager>,
+    text: String,
+) -> Result<String, String> {
     mem.redact(&text).await
 }
 
@@ -284,7 +315,12 @@ pub fn canvas_delete_node(db: State<'_, Database>, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn canvas_connect(db: State<'_, Database>, source_id: String, target_id: String, label: String) -> Result<CanvasEdge, String> {
+pub fn canvas_connect(
+    db: State<'_, Database>,
+    source_id: String,
+    target_id: String,
+    label: String,
+) -> Result<CanvasEdge, String> {
     db.canvas_connect(&source_id, &target_id, &label)
 }
 
@@ -330,7 +366,10 @@ pub fn backlinks_get(db: State<'_, Database>, doc_id: String) -> Result<Vec<Back
 }
 
 #[tauri::command]
-pub fn implicit_links_get(db: State<'_, Database>, doc_id: String) -> Result<Vec<LinkImplicit>, String> {
+pub fn implicit_links_get(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<Vec<LinkImplicit>, String> {
     db.get_implicit_links(&doc_id)
 }
 
@@ -360,7 +399,11 @@ pub fn log_list_entries(db: State<'_, Database>, limit: Option<i64>) -> Result<V
 }
 
 #[tauri::command]
-pub fn graph_query(db: State<'_, Database>, workspace: Option<String>, tags: Option<Vec<String>>) -> Result<GraphQueryResult, String> {
+pub fn graph_query(
+    db: State<'_, Database>,
+    workspace: Option<String>,
+    tags: Option<Vec<String>>,
+) -> Result<GraphQueryResult, String> {
     db.graph_query(workspace.as_deref(), tags.as_deref())
 }
 
@@ -371,7 +414,10 @@ pub fn backlinks_extract(db: State<'_, Database>, doc_id: String) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn unlinked_mentions(db: State<'_, Database>, doc_id: String) -> Result<Vec<UnlinkedMention>, String> {
+pub fn unlinked_mentions(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<Vec<UnlinkedMention>, String> {
     db.get_unlinked_mentions(&doc_id)
 }
 
@@ -381,7 +427,10 @@ pub fn entities_list(db: State<'_, Database>) -> Result<Vec<EntitySummary>, Stri
 }
 
 #[tauri::command]
-pub fn entity_occurrences(db: State<'_, Database>, entity_norm: String) -> Result<Vec<EntityHit>, String> {
+pub fn entity_occurrences(
+    db: State<'_, Database>,
+    entity_norm: String,
+) -> Result<Vec<EntityHit>, String> {
     db.entity_occurrences(&entity_norm)
 }
 
@@ -391,32 +440,55 @@ pub fn entities_backfill(db: State<'_, Database>) -> Result<i64, String> {
 }
 
 #[tauri::command]
-pub fn reader_update_position(db: State<'_, Database>, doc_id: String, position: f64) -> Result<(), String> {
+pub fn reader_update_position(
+    db: State<'_, Database>,
+    doc_id: String,
+    position: f64,
+) -> Result<(), String> {
     db.update_reading_position(&doc_id, position)
 }
 
 #[tauri::command]
-pub fn reader_set_shelf_status(db: State<'_, Database>, doc_id: String, status: String) -> Result<(), String> {
+pub fn reader_set_shelf_status(
+    db: State<'_, Database>,
+    doc_id: String,
+    status: String,
+) -> Result<(), String> {
     db.set_bookshelf_status(&doc_id, &status)
 }
 
 #[tauri::command]
-pub fn reader_set_rating(db: State<'_, Database>, doc_id: String, rating: Option<i64>) -> Result<(), String> {
+pub fn reader_set_rating(
+    db: State<'_, Database>,
+    doc_id: String,
+    rating: Option<i64>,
+) -> Result<(), String> {
     db.set_book_rating(&doc_id, rating)
 }
 
 #[tauri::command]
-pub fn reader_get_bookshelf(db: State<'_, Database>, filter: Option<String>) -> Result<Vec<BookshelfEntry>, String> {
+pub fn reader_get_bookshelf(
+    db: State<'_, Database>,
+    filter: Option<String>,
+) -> Result<Vec<BookshelfEntry>, String> {
     db.get_bookshelf(filter.as_deref())
 }
 
 #[tauri::command]
-pub fn reader_import_book(db: State<'_, Database>, title: String, content: String, kind: String) -> Result<Doc, String> {
+pub fn reader_import_book(
+    db: State<'_, Database>,
+    title: String,
+    content: String,
+    kind: String,
+) -> Result<Doc, String> {
     db.import_book(&title, &content, &kind)
 }
 
 #[tauri::command]
-pub fn novel_get_beat_board(db: State<'_, Database>, project_id: String) -> Result<BeatBoard, String> {
+pub fn novel_get_beat_board(
+    db: State<'_, Database>,
+    project_id: String,
+) -> Result<BeatBoard, String> {
     db.get_beat_board(&project_id)
 }
 
@@ -436,7 +508,13 @@ pub fn bible_get_facts(db: State<'_, Database>, doc_id: String) -> Result<Vec<Bi
 }
 
 #[tauri::command]
-pub fn bible_upsert_fact(db: State<'_, Database>, doc_id: String, kind: String, key: String, value: String) -> Result<BibleFact, String> {
+pub fn bible_upsert_fact(
+    db: State<'_, Database>,
+    doc_id: String,
+    kind: String,
+    key: String,
+    value: String,
+) -> Result<BibleFact, String> {
     db.bible_upsert_fact(&doc_id, &kind, &key, &value)
 }
 
@@ -446,7 +524,10 @@ pub fn bible_delete_fact(db: State<'_, Database>, fact_id: String) -> Result<(),
 }
 
 #[tauri::command]
-pub fn bible_get_mentions(db: State<'_, Database>, bible_doc_id: String) -> Result<Vec<BibleMention>, String> {
+pub fn bible_get_mentions(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+) -> Result<Vec<BibleMention>, String> {
     db.bible_get_mentions(&bible_doc_id)
 }
 
@@ -486,17 +567,28 @@ pub fn bible_delete_mentions(
 }
 
 #[tauri::command]
-pub fn bible_get_suggestions(db: State<'_, Database>, bible_doc_id: String) -> Result<Vec<BibleSuggestion>, String> {
+pub fn bible_get_suggestions(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+) -> Result<Vec<BibleSuggestion>, String> {
     db.bible_get_suggestions(&bible_doc_id)
 }
 
 #[tauri::command]
-pub fn bible_confirm_suggestion(db: State<'_, Database>, bible_doc_id: String, suggestion_id: String) -> Result<BibleFact, String> {
+pub fn bible_confirm_suggestion(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+    suggestion_id: String,
+) -> Result<BibleFact, String> {
     db.bible_confirm_suggestion(&bible_doc_id, &suggestion_id)
 }
 
 #[tauri::command]
-pub fn bible_reject_suggestion(db: State<'_, Database>, bible_doc_id: String, suggestion_id: String) -> Result<(), String> {
+pub fn bible_reject_suggestion(
+    db: State<'_, Database>,
+    bible_doc_id: String,
+    suggestion_id: String,
+) -> Result<(), String> {
     db.bible_reject_suggestion(&bible_doc_id, &suggestion_id)
 }
 
@@ -535,12 +627,24 @@ pub async fn bible_rebuild_memory(
             suggested += update.suggested;
         }
     }
-    Ok(BibleMemoryRebuild { skipped, retryable, processed, matched, suggested })
+    Ok(BibleMemoryRebuild {
+        skipped,
+        retryable,
+        processed,
+        matched,
+        suggested,
+    })
 }
 
 #[tauri::command]
-pub fn conversation_create(db: State<'_, Database>, doc_id: Option<String>, mode: Option<String>) -> Result<Conversation, String> {
-    let mode = mode.filter(|m| !m.trim().is_empty()).unwrap_or_else(|| "chat".to_string());
+pub fn conversation_create(
+    db: State<'_, Database>,
+    doc_id: Option<String>,
+    mode: Option<String>,
+) -> Result<Conversation, String> {
+    let mode = mode
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| "chat".to_string());
     db.conversation_create(doc_id.as_deref(), &mode)
 }
 
@@ -550,12 +654,20 @@ pub fn conversation_list(db: State<'_, Database>) -> Result<Vec<Conversation>, S
 }
 
 #[tauri::command]
-pub fn conversation_add_message(db: State<'_, Database>, conversation_id: String, role: String, content: String) -> Result<ChatMessage, String> {
+pub fn conversation_add_message(
+    db: State<'_, Database>,
+    conversation_id: String,
+    role: String,
+    content: String,
+) -> Result<ChatMessage, String> {
     db.conversation_add_message(&conversation_id, &role, &content)
 }
 
 #[tauri::command]
-pub fn conversation_get_messages(db: State<'_, Database>, conversation_id: String) -> Result<Vec<ChatMessage>, String> {
+pub fn conversation_get_messages(
+    db: State<'_, Database>,
+    conversation_id: String,
+) -> Result<Vec<ChatMessage>, String> {
     db.conversation_get_messages(&conversation_id)
 }
 
@@ -717,7 +829,10 @@ pub async fn ai_generate(
         let content = llm
             .chat_completion(messages, request.max_tokens.unwrap_or(2048), 0.7)
             .await?;
-        return Ok(AiGenerateResponse { content, tokens_used: None });
+        return Ok(AiGenerateResponse {
+            content,
+            tokens_used: None,
+        });
     }
 
     let (content, tokens) = post_chat_completions(
@@ -730,7 +845,10 @@ pub async fn ai_generate(
     )
     .await?;
 
-    Ok(AiGenerateResponse { content, tokens_used: tokens })
+    Ok(AiGenerateResponse {
+        content,
+        tokens_used: tokens,
+    })
 }
 
 /// Pull model ids out of an OpenAI-compatible `/models` payload.
@@ -813,7 +931,9 @@ fn is_private_ip_literal(host: &str) -> bool {
 
 /// True when a credential may be sent to this endpoint.
 fn may_send_key(url: &reqwest::Url) -> bool {
-    let Some(host) = url.host_str() else { return false };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
     let host = host.to_ascii_lowercase();
     // `localhost` is a name, but it resolves only through the local resolver,
     // so it is safe in the same way a private IP is — and self-hosted
@@ -885,7 +1005,9 @@ pub async fn provider_probe(
         return Err(friendly_http_status(resp.status().as_u16()));
     }
     let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(ProviderProbeResponse { models: parse_models_list(&data) })
+    Ok(ProviderProbeResponse {
+        models: parse_models_list(&data),
+    })
 }
 
 #[cfg(test)]
@@ -961,13 +1083,13 @@ mod provider_probe_tests {
     #[test]
     fn private_ip_literal_rejects_spoofs() {
         for host in [
-            "0.0.0.0",       // "this host"
-            "224.0.0.1",     // multicast
+            "0.0.0.0",   // "this host"
+            "224.0.0.1", // multicast
             "255.255.255.255",
             "127.0.0.1.evil", // not 4 octets
             "999.1.1.1",
-            "0177.0.0.1",    // leading-zero octet: parse() allows, stack may not
-            "172.32.0.1",    // just outside 172.16/12
+            "0177.0.0.1", // leading-zero octet: parse() allows, stack may not
+            "172.32.0.1", // just outside 172.16/12
             "192.169.1.1",
         ] {
             assert!(!is_private_ip_literal(host), "{host} must not be private");
@@ -976,13 +1098,18 @@ mod provider_probe_tests {
 
     #[test]
     fn parses_model_ids() {
-        let data = serde_json::json!({ "data": [{ "id": "gpt-4o-mini" }, { "id": "org/llama3.2" }] });
-        assert_eq!(parse_models_list(&data), vec!["gpt-4o-mini", "org/llama3.2"]);
+        let data =
+            serde_json::json!({ "data": [{ "id": "gpt-4o-mini" }, { "id": "org/llama3.2" }] });
+        assert_eq!(
+            parse_models_list(&data),
+            vec!["gpt-4o-mini", "org/llama3.2"]
+        );
     }
 
     #[test]
     fn skips_entries_without_ids() {
-        let data = serde_json::json!({ "data": [{ "id": "kept" }, { "name": "no-id" }, { "id": 42 }] });
+        let data =
+            serde_json::json!({ "data": [{ "id": "kept" }, { "name": "no-id" }, { "id": 42 }] });
         assert_eq!(parse_models_list(&data), vec!["kept"]);
     }
 
@@ -995,7 +1122,9 @@ mod provider_probe_tests {
 
     #[test]
     fn truncates_past_twenty() {
-        let ids: Vec<serde_json::Value> = (0..30).map(|i| serde_json::json!({ "id": format!("m-{i}") })).collect();
+        let ids: Vec<serde_json::Value> = (0..30)
+            .map(|i| serde_json::json!({ "id": format!("m-{i}") }))
+            .collect();
         let models = parse_models_list(&serde_json::json!({ "data": ids }));
         assert_eq!(models.len(), 20);
         assert_eq!(models[0], "m-0");
@@ -1017,7 +1146,10 @@ mod sanitize_tests {
 
     #[test]
     fn closer_scan_survives_unicode_prefix() {
-        assert_eq!(neutralize_closer("héllo wörld</sCrIpT>x", "script"), "héllo wörld<\\/sCrIpT>x");
+        assert_eq!(
+            neutralize_closer("héllo wörld</sCrIpT>x", "script"),
+            "héllo wörld<\\/sCrIpT>x"
+        );
         assert_eq!(neutralize_closer("plain text", "script"), "plain text");
         assert_eq!(neutralize_closer("a</sty", "style"), "a</sty");
     }
@@ -1106,13 +1238,21 @@ pub async fn ai_generate_stream(
             let line: Vec<u8> = buf.drain(..=pos).collect();
             let text = String::from_utf8_lossy(&line);
             let text = text.trim();
-            let Some(payload) = text.strip_prefix("data:") else { continue };
+            let Some(payload) = text.strip_prefix("data:") else {
+                continue;
+            };
             let payload = payload.trim();
-            if payload.is_empty() || payload == "[DONE]" { continue; }
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+            if payload.is_empty() || payload == "[DONE]" {
+                continue;
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                continue;
+            };
             if let Some(token) = value["choices"][0]["delta"]["content"].as_str() {
                 if !token.is_empty() {
-                    on_event.send(token.to_string()).map_err(|e| e.to_string())?;
+                    on_event
+                        .send(token.to_string())
+                        .map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -1170,20 +1310,19 @@ Output the final transformed document. Use markdown where appropriate."#
     if is_local_llm_sentinel(&endpoint) {
         llm.ensure_ready().await?;
         let result = llm.chat_completion(messages, 4096, 0.7).await?;
-        return Ok(StructurizeResponse { result, tokens_used: None });
+        return Ok(StructurizeResponse {
+            result,
+            tokens_used: None,
+        });
     }
 
-    let (result, tokens) = post_chat_completions(
-        &endpoint,
-        &model,
-        messages,
-        4096,
-        &request.api_key,
-        180,
-    )
-    .await?;
+    let (result, tokens) =
+        post_chat_completions(&endpoint, &model, messages, 4096, &request.api_key, 180).await?;
 
-    Ok(StructurizeResponse { result, tokens_used: tokens })
+    Ok(StructurizeResponse {
+        result,
+        tokens_used: tokens,
+    })
 }
 
 fn normalize_memory_key(value: &str) -> String {
@@ -1207,7 +1346,11 @@ fn normalize_memory_kind(value: &str) -> Option<&'static str> {
 }
 
 fn clean_model_quote(value: &str) -> String {
-    value.trim().trim_matches(['"', '\'', '“', '”']).trim().to_string()
+    value
+        .trim()
+        .trim_matches(['"', '\'', '“', '”'])
+        .trim()
+        .to_string()
 }
 
 fn collapse_model_text(value: &str) -> String {
@@ -1216,13 +1359,32 @@ fn collapse_model_text(value: &str) -> String {
 
 fn surface_for_key(text: &str, key: &str) -> Option<String> {
     let key = key.trim();
-    if key.is_empty() { return None; }
+    if key.is_empty() {
+        return None;
+    }
     let exact = text.find(key).map(|start| (start, start + key.len()));
-    let lower = text.to_lowercase().find(&key.to_lowercase()).map(|start| (start, start + key.len()));
+    let lower = text
+        .to_lowercase()
+        .find(&key.to_lowercase())
+        .map(|start| (start, start + key.len()));
     let (start, end) = exact.or(lower)?;
-    if !text.is_char_boundary(start) || !text.is_char_boundary(end) { return None; }
-    if text[..start].chars().last().is_some_and(|c| c.is_alphanumeric()) { return None; }
-    if text[end..].chars().next().is_some_and(|c| c.is_alphanumeric()) { return None; }
+    if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+        return None;
+    }
+    if text[..start]
+        .chars()
+        .last()
+        .is_some_and(|c| c.is_alphanumeric())
+    {
+        return None;
+    }
+    if text[end..]
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_alphanumeric())
+    {
+        return None;
+    }
     Some(text[start..end].to_string())
 }
 
@@ -1236,19 +1398,35 @@ fn sentence_for_key(text: &str, key: &str) -> Option<String> {
 
 fn infer_memory_trait(sentence: &str) -> Option<(String, String)> {
     let words = sentence.split_whitespace().collect::<Vec<_>>();
-    let colors = ["blue", "green", "red", "black", "brown", "white", "gold", "silver", "gray", "grey"];
+    let colors = [
+        "blue", "green", "red", "black", "brown", "white", "gold", "silver", "gray", "grey",
+    ];
     for (index, word) in words.iter().enumerate() {
-        let clean = word.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        let clean = word
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
         if colors.contains(&clean.as_str()) {
             if index > 0 {
-                let key = words[index - 1].trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-                if !key.is_empty() && !["a", "an", "the", "has", "have", "had", "is", "are", "was", "were", "wears", "wore"].contains(&key.as_str()) {
+                let key = words[index - 1]
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase();
+                if !key.is_empty()
+                    && ![
+                        "a", "an", "the", "has", "have", "had", "is", "are", "was", "were",
+                        "wears", "wore",
+                    ]
+                    .contains(&key.as_str())
+                {
                     return Some((key, clean));
                 }
             }
             if index + 1 < words.len() {
-                let key = words[index + 1].trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-                if !key.is_empty() { return Some((key, clean)); }
+                let key = words[index + 1]
+                    .trim_matches(|c: char| !c.is_alphanumeric())
+                    .to_lowercase();
+                if !key.is_empty() {
+                    return Some((key, clean));
+                }
             }
         }
     }
@@ -1263,33 +1441,83 @@ fn parse_memory_names(raw: &str, text: &str, facts: &[BibleFact]) -> Vec<BibleMe
         (Some(start), Some(end)) if end >= start => &trimmed[start..=end],
         _ => trimmed,
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
-    let entries = value.as_array().or_else(|| value.get("mentions").and_then(|v| v.as_array()));
-    let Some(entries) = entries else { return Vec::new() };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let entries = value
+        .as_array()
+        .or_else(|| value.get("mentions").and_then(|v| v.as_array()));
+    let Some(entries) = entries else {
+        return Vec::new();
+    };
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for item in entries {
-        let raw_key = item.as_str().or_else(|| item.get("name").and_then(|v| v.as_str())).or_else(|| item.get("fact_key").and_then(|v| v.as_str())).unwrap_or_default();
-        let Some(key) = surface_for_key(text, raw_key) else { continue };
+        let raw_key = item
+            .as_str()
+            .or_else(|| item.get("name").and_then(|v| v.as_str()))
+            .or_else(|| item.get("fact_key").and_then(|v| v.as_str()))
+            .unwrap_or_default();
+        let Some(key) = surface_for_key(text, raw_key) else {
+            continue;
+        };
         let normalized = normalize_memory_key(&key);
-        let fact = facts.iter().find(|fact| normalize_memory_key(&fact.key) == normalized);
-        let kind = fact.map(|fact| {
-            let kind = fact.kind.to_lowercase();
-            if kind.contains("location") || kind.contains("place") || kind.contains("setting") { "location" }
-            else if kind.contains("object") || kind.contains("item") { "object" }
-            else { "character" }
-        }).unwrap_or_else(|| {
-            let lower_key = key.to_lowercase();
-            let lower_sentence = sentence_for_key(text, &key).unwrap_or_default().to_lowercase();
-            if ["by the ", "at the ", "in the ", "near the ", "inside the "].iter().any(|prefix| lower_sentence.contains(&format!("{}{}", prefix, lower_key))) { "location" }
-            else if key.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) { "character" }
-            else { "object" }
-        });
-        let Some(snippet) = sentence_for_key(text, &key) else { continue };
-        let (attribute_key, attribute_value) = infer_memory_trait(&snippet).map(|(key, value)| (Some(key), Some(value))).unwrap_or((None, None));
-        let signature = format!("{}|{}|{}|{}", kind, normalized, snippet, attribute_value.clone().unwrap_or_default());
+        let fact = facts
+            .iter()
+            .find(|fact| normalize_memory_key(&fact.key) == normalized);
+        let kind = fact
+            .map(|fact| {
+                let kind = fact.kind.to_lowercase();
+                if kind.contains("location") || kind.contains("place") || kind.contains("setting") {
+                    "location"
+                } else if kind.contains("object") || kind.contains("item") {
+                    "object"
+                } else {
+                    "character"
+                }
+            })
+            .unwrap_or_else(|| {
+                let lower_key = key.to_lowercase();
+                let lower_sentence = sentence_for_key(text, &key)
+                    .unwrap_or_default()
+                    .to_lowercase();
+                if ["by the ", "at the ", "in the ", "near the ", "inside the "]
+                    .iter()
+                    .any(|prefix| lower_sentence.contains(&format!("{}{}", prefix, lower_key)))
+                {
+                    "location"
+                } else if key
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
+                    "character"
+                } else {
+                    "object"
+                }
+            });
+        let Some(snippet) = sentence_for_key(text, &key) else {
+            continue;
+        };
+        let (attribute_key, attribute_value) = infer_memory_trait(&snippet)
+            .map(|(key, value)| (Some(key), Some(value)))
+            .unwrap_or((None, None));
+        let signature = format!(
+            "{}|{}|{}|{}",
+            kind,
+            normalized,
+            snippet,
+            attribute_value.clone().unwrap_or_default()
+        );
         if seen.insert(signature) {
-            candidates.push(BibleMentionCandidate { key, kind: kind.to_string(), snippet, attribute_key, attribute_value });
+            candidates.push(BibleMentionCandidate {
+                key,
+                kind: kind.to_string(),
+                snippet,
+                attribute_key,
+                attribute_value,
+            });
         }
     }
     candidates
@@ -1303,21 +1531,36 @@ fn parse_memory_candidates(raw: &str, text: &str) -> Option<Vec<BibleMentionCand
         (Some(start), Some(end)) if end >= start => &trimmed[start..=end],
         _ => trimmed,
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else { return None };
-    let entries = value.get("mentions").and_then(|v| v.as_array())
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return None;
+    };
+    let entries = value
+        .get("mentions")
+        .and_then(|v| v.as_array())
         .or_else(|| value.as_array());
     let entries = entries?;
     let source = collapse_model_text(text);
     let mut seen = HashSet::new();
     let mut candidates = Vec::new();
     for item in entries {
-        let raw_key = item.get("fact_key").or_else(|| item.get("key")).or_else(|| item.get("name"))
-            .and_then(|v| v.as_str()).unwrap_or_default();
-        let Some(key) = surface_for_key(text, raw_key) else { continue };
-        let kind = item.get("kind").and_then(|v| v.as_str()).and_then(normalize_memory_kind);
+        let raw_key = item
+            .get("fact_key")
+            .or_else(|| item.get("key"))
+            .or_else(|| item.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let Some(key) = surface_for_key(text, raw_key) else {
+            continue;
+        };
+        let kind = item
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .and_then(normalize_memory_kind);
         let model_snippet = clean_model_quote(
-            item.get("snippet").or_else(|| item.get("quote"))
-                .and_then(|v| v.as_str()).unwrap_or_default(),
+            item.get("snippet")
+                .or_else(|| item.get("quote"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default(),
         );
         let snippet = sentence_for_key(text, &key).unwrap_or(model_snippet);
         let Some(kind) = kind else { continue };
@@ -1327,22 +1570,43 @@ fn parse_memory_candidates(raw: &str, text: &str) -> Option<Vec<BibleMentionCand
         if !source.contains(&collapse_model_text(&snippet)) {
             continue;
         }
-        let attribute_key = item.get("attribute_key").or_else(|| item.get("trait_key"))
-            .and_then(|v| v.as_str()).and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
-        let attribute_value = item.get("attribute_value").or_else(|| item.get("trait_value"))
-            .and_then(|v| v.as_str()).and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
+        let attribute_key = item
+            .get("attribute_key")
+            .or_else(|| item.get("trait_key"))
+            .and_then(|v| v.as_str())
+            .and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
+        let attribute_value = item
+            .get("attribute_value")
+            .or_else(|| item.get("trait_value"))
+            .and_then(|v| v.as_str())
+            .and_then(|v| (!v.trim().is_empty()).then(|| v.trim().to_string()));
         if attribute_key.is_some() != attribute_value.is_some() {
             continue;
         }
         if let (Some(attribute_key), Some(attribute_value)) = (&attribute_key, &attribute_value) {
             let sentence = snippet.to_lowercase();
-            if !sentence.contains(&attribute_key.to_lowercase()) || !sentence.contains(&attribute_value.to_lowercase()) {
+            if !sentence.contains(&attribute_key.to_lowercase())
+                || !sentence.contains(&attribute_value.to_lowercase())
+            {
                 continue;
             }
         }
-        let signature = format!("{}|{}|{}|{}|{}", kind, key.to_lowercase(), snippet, attribute_key.clone().unwrap_or_default(), attribute_value.clone().unwrap_or_default());
+        let signature = format!(
+            "{}|{}|{}|{}|{}",
+            kind,
+            key.to_lowercase(),
+            snippet,
+            attribute_key.clone().unwrap_or_default(),
+            attribute_value.clone().unwrap_or_default()
+        );
         if seen.insert(signature) {
-            candidates.push(BibleMentionCandidate { key, kind: kind.to_string(), snippet, attribute_key, attribute_value });
+            candidates.push(BibleMentionCandidate {
+                key,
+                kind: kind.to_string(),
+                snippet,
+                attribute_key,
+                attribute_value,
+            });
         }
     }
     Some(candidates)
@@ -1356,21 +1620,45 @@ async fn extract_bible_memory(
 ) -> Result<BibleMemoryUpdate, String> {
     let doc = db.get_doc(doc_id)?;
     if !matches!(doc.kind.as_str(), "scene" | "chapter") {
-        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+        return Ok(BibleMemoryUpdate {
+            skipped: true,
+            retryable: false,
+            matched: 0,
+            suggested: 0,
+        });
     }
     if doc.content != expected_content {
-        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+        return Ok(BibleMemoryUpdate {
+            skipped: true,
+            retryable: false,
+            matched: 0,
+            suggested: 0,
+        });
     }
     let scope_id = db.bible_scope_id(doc_id)?;
     if doc.content.trim().is_empty() {
-        return db.bible_replace_scene_memory(&scope_id, doc_id, &doc.content, Some(expected_content), &[]);
+        return db.bible_replace_scene_memory(
+            &scope_id,
+            doc_id,
+            &doc.content,
+            Some(expected_content),
+            &[],
+        );
     }
     let facts = db.bible_get_facts(&scope_id)?;
-    let known_keys = facts.iter().map(|fact| format!("{} ({})", fact.key, fact.kind)).collect::<Vec<_>>().join(", ");
+    let known_keys = facts
+        .iter()
+        .map(|fact| format!("{} ({})", fact.key, fact.kind))
+        .collect::<Vec<_>>()
+        .join(", ");
     let system_prompt = format!(
         "{}\nKnown Story Bible fact keys: {}",
         r#"You extract Story Bible evidence from manuscript text. Return ONLY valid JSON with this shape: {"mentions":[{"fact_key":"exact name","kind":"character|location|object","snippet":"one exact supporting sentence","attribute_key":"optional trait name","attribute_value":"optional trait value"}]}. Include every character, location, and object mentioned. Do not infer facts not stated. The snippet must be copied exactly from the text. Do not add commentary or markdown."#,
-        if known_keys.is_empty() { "none".to_string() } else { known_keys }
+        if known_keys.is_empty() {
+            "none".to_string()
+        } else {
+            known_keys
+        }
     );
     let messages = vec![
         serde_json::json!({"role": "system", "content": system_prompt}),
@@ -1378,7 +1666,14 @@ async fn extract_bible_memory(
     ];
     let raw = match llm.chat_completion(messages, 768, 0.1).await {
         Ok(value) => value,
-        Err(_) => return Ok(BibleMemoryUpdate { skipped: true, retryable: true, matched: 0, suggested: 0 }),
+        Err(_) => {
+            return Ok(BibleMemoryUpdate {
+                skipped: true,
+                retryable: true,
+                matched: 0,
+                suggested: 0,
+            })
+        }
     };
     let mut candidates = parse_memory_candidates(&raw, &doc.content).unwrap_or_default();
     if candidates.is_empty() {
@@ -1386,19 +1681,49 @@ async fn extract_bible_memory(
             "List every character, location, and object name in this text. Return only a JSON array of strings. Do not explain. Text: {}",
             doc.content
         );
-        if let Ok(fallback_raw) = llm.chat_completion(vec![serde_json::json!({"role": "user", "content": fallback_prompt})], 256, 0.0).await {
+        if let Ok(fallback_raw) = llm
+            .chat_completion(
+                vec![serde_json::json!({"role": "user", "content": fallback_prompt})],
+                256,
+                0.0,
+            )
+            .await
+        {
             for candidate in parse_memory_names(&fallback_raw, &doc.content, &facts) {
-                let signature = format!("{}|{}|{}", candidate.key, candidate.snippet, candidate.attribute_value.clone().unwrap_or_default());
-                if !candidates.iter().any(|item| format!("{}|{}|{}", item.key, item.snippet, item.attribute_value.clone().unwrap_or_default()) == signature) {
+                let signature = format!(
+                    "{}|{}|{}",
+                    candidate.key,
+                    candidate.snippet,
+                    candidate.attribute_value.clone().unwrap_or_default()
+                );
+                if !candidates.iter().any(|item| {
+                    format!(
+                        "{}|{}|{}",
+                        item.key,
+                        item.snippet,
+                        item.attribute_value.clone().unwrap_or_default()
+                    ) == signature
+                }) {
                     candidates.push(candidate);
                 }
             }
         }
     }
     if candidates.is_empty() {
-        return Ok(BibleMemoryUpdate { skipped: true, retryable: false, matched: 0, suggested: 0 });
+        return Ok(BibleMemoryUpdate {
+            skipped: true,
+            retryable: false,
+            matched: 0,
+            suggested: 0,
+        });
     }
-    db.bible_replace_scene_memory(&scope_id, doc_id, &doc.content, Some(expected_content), &candidates)
+    db.bible_replace_scene_memory(
+        &scope_id,
+        doc_id,
+        &doc.content,
+        Some(expected_content),
+        &candidates,
+    )
 }
 
 #[tauri::command]
@@ -1412,22 +1737,37 @@ pub fn memory_smart_tabs(db: State<'_, Database>, workspace: String) -> Result<V
 }
 
 #[tauri::command]
-pub fn memory_record_metric(db: State<'_, Database>, doc_id: String, metric_type: String, value: f64) -> Result<(), String> {
+pub fn memory_record_metric(
+    db: State<'_, Database>,
+    doc_id: String,
+    metric_type: String,
+    value: f64,
+) -> Result<(), String> {
     db.record_craft_metric(&doc_id, &metric_type, value)
 }
 
 #[tauri::command]
-pub fn memory_get_metrics(db: State<'_, Database>, doc_id: String) -> Result<Vec<(String, f64, String)>, String> {
+pub fn memory_get_metrics(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<Vec<(String, f64, String)>, String> {
     db.get_craft_metrics(&doc_id)
 }
 
 #[tauri::command]
-pub fn craft_metrics_trend(db: State<'_, Database>, doc_id: String, metric_type: String) -> Result<Vec<(String, f64)>, String> {
+pub fn craft_metrics_trend(
+    db: State<'_, Database>,
+    doc_id: String,
+    metric_type: String,
+) -> Result<Vec<(String, f64)>, String> {
     db.get_craft_metrics_trend(&doc_id, &metric_type)
 }
 
 #[tauri::command]
-pub fn dashboard_recent_docs(db: State<'_, Database>, limit: i64) -> Result<Vec<(String, String, String)>, String> {
+pub fn dashboard_recent_docs(
+    db: State<'_, Database>,
+    limit: i64,
+) -> Result<Vec<(String, String, String)>, String> {
     db.dashboard_recent_docs(limit)
 }
 
@@ -1449,16 +1789,20 @@ pub fn dashboard_patterns(db: State<'_, Database>) -> Result<serde_json::Value, 
 #[tauri::command]
 pub fn dashboard_goals(db: State<'_, Database>) -> Result<serde_json::Value, String> {
     let rows = db.dashboard_goals()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(id, title, workspace, goal_words, word_count, deadline)| {
-        serde_json::json!({
-            "id": id,
-            "title": title,
-            "workspace": workspace,
-            "goal_words": goal_words,
-            "word_count": word_count,
-            "deadline": deadline
-        })
-    }).collect()))
+    Ok(serde_json::Value::Array(
+        rows.into_iter()
+            .map(|(id, title, workspace, goal_words, word_count, deadline)| {
+                serde_json::json!({
+                    "id": id,
+                    "title": title,
+                    "workspace": workspace,
+                    "goal_words": goal_words,
+                    "word_count": word_count,
+                    "deadline": deadline
+                })
+            })
+            .collect(),
+    ))
 }
 
 #[tauri::command]
@@ -1472,25 +1816,33 @@ pub fn get_reopen_never_finish(db: State<'_, Database>) -> Result<serde_json::Va
 #[tauri::command]
 pub fn dashboard_streak_heatmap(db: State<'_, Database>) -> Result<serde_json::Value, String> {
     let rows = db.dashboard_streak_heatmap()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(date, words)| {
-        serde_json::json!({"date": date, "words": words})
-    }).collect()))
+    Ok(serde_json::Value::Array(
+        rows.into_iter()
+            .map(|(date, words)| serde_json::json!({"date": date, "words": words}))
+            .collect(),
+    ))
 }
 
 #[tauri::command]
-pub fn dashboard_writing_time_patterns(db: State<'_, Database>) -> Result<serde_json::Value, String> {
+pub fn dashboard_writing_time_patterns(
+    db: State<'_, Database>,
+) -> Result<serde_json::Value, String> {
     let rows = db.dashboard_writing_time_patterns()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(hour, count)| {
-        serde_json::json!({"hour": hour, "count": count})
-    }).collect()))
+    Ok(serde_json::Value::Array(
+        rows.into_iter()
+            .map(|(hour, count)| serde_json::json!({"hour": hour, "count": count}))
+            .collect(),
+    ))
 }
 
 #[tauri::command]
 pub fn dashboard_writing_velocity(db: State<'_, Database>) -> Result<serde_json::Value, String> {
     let rows = db.dashboard_writing_velocity()?;
-    Ok(serde_json::Value::Array(rows.into_iter().map(|(date, words)| {
-        serde_json::json!({"date": date, "words": words})
-    }).collect()))
+    Ok(serde_json::Value::Array(
+        rows.into_iter()
+            .map(|(date, words)| serde_json::json!({"date": date, "words": words}))
+            .collect(),
+    ))
 }
 
 #[tauri::command]
@@ -1498,75 +1850,139 @@ pub fn dashboard_productivity_score(db: State<'_, Database>) -> Result<serde_jso
     db.dashboard_productivity_score()
 }
 
-fn script_frontmatter_array(doc_id: &str, db: &State<'_, Database>, key: &str) -> Result<serde_json::Value, String> {
+fn script_frontmatter_array(
+    doc_id: &str,
+    db: &State<'_, Database>,
+    key: &str,
+) -> Result<serde_json::Value, String> {
     let fm = db.get_doc_frontmatter(doc_id)?;
-    Ok(fm.get(key).cloned().unwrap_or(serde_json::Value::Array(vec![])))
+    Ok(fm
+        .get(key)
+        .cloned()
+        .unwrap_or(serde_json::Value::Array(vec![])))
 }
 
-fn script_frontmatter_set(doc_id: &str, db: &State<'_, Database>, key: &str, value: serde_json::Value) -> Result<(), String> {
+fn script_frontmatter_set(
+    doc_id: &str,
+    db: &State<'_, Database>,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
     let mut fm = db.get_doc_frontmatter(doc_id)?;
     let obj = fm.as_object_mut().ok_or("Frontmatter is not an object")?;
     obj.insert(key.to_string(), value);
-    db.set_doc_frontmatter(doc_id, &serde_json::to_string(&fm).map_err(|e| e.to_string())?)?;
+    db.set_doc_frontmatter(
+        doc_id,
+        &serde_json::to_string(&fm).map_err(|e| e.to_string())?,
+    )?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn script_character_list(db: State<'_, Database>, doc_id: String) -> Result<serde_json::Value, String> {
+pub fn script_character_list(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<serde_json::Value, String> {
     script_frontmatter_array(&doc_id, &db, "characters")
 }
 
 #[tauri::command]
-pub fn script_character_add(db: State<'_, Database>, doc_id: String, name: String) -> Result<serde_json::Value, String> {
+pub fn script_character_add(
+    db: State<'_, Database>,
+    doc_id: String,
+    name: String,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "characters")?;
     let arr = list.as_array_mut().ok_or("characters is not an array")?;
     arr.push(serde_json::Value::String(name));
-    script_frontmatter_set(&doc_id, &db, "characters", serde_json::Value::Array(arr.clone()))?;
+    script_frontmatter_set(
+        &doc_id,
+        &db,
+        "characters",
+        serde_json::Value::Array(arr.clone()),
+    )?;
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
-pub fn script_location_list(db: State<'_, Database>, doc_id: String) -> Result<serde_json::Value, String> {
+pub fn script_location_list(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<serde_json::Value, String> {
     script_frontmatter_array(&doc_id, &db, "locations")
 }
 
 #[tauri::command]
-pub fn script_location_add(db: State<'_, Database>, doc_id: String, name: String) -> Result<serde_json::Value, String> {
+pub fn script_location_add(
+    db: State<'_, Database>,
+    doc_id: String,
+    name: String,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "locations")?;
     let arr = list.as_array_mut().ok_or("locations is not an array")?;
     arr.push(serde_json::Value::String(name));
-    script_frontmatter_set(&doc_id, &db, "locations", serde_json::Value::Array(arr.clone()))?;
+    script_frontmatter_set(
+        &doc_id,
+        &db,
+        "locations",
+        serde_json::Value::Array(arr.clone()),
+    )?;
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
-pub fn script_timeline_get(db: State<'_, Database>, doc_id: String) -> Result<serde_json::Value, String> {
+pub fn script_timeline_get(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<serde_json::Value, String> {
     script_frontmatter_array(&doc_id, &db, "timeline")
 }
 
 #[tauri::command]
-pub fn script_timeline_add(db: State<'_, Database>, doc_id: String, event: String, date: String, act: i64) -> Result<serde_json::Value, String> {
+pub fn script_timeline_add(
+    db: State<'_, Database>,
+    doc_id: String,
+    event: String,
+    date: String,
+    act: i64,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "timeline")?;
     let arr = list.as_array_mut().ok_or("timeline is not an array")?;
     arr.push(serde_json::json!({"event": event, "date": date, "act": act}));
-    script_frontmatter_set(&doc_id, &db, "timeline", serde_json::Value::Array(arr.clone()))?;
+    script_frontmatter_set(
+        &doc_id,
+        &db,
+        "timeline",
+        serde_json::Value::Array(arr.clone()),
+    )?;
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
-pub fn script_role_list(db: State<'_, Database>, doc_id: String) -> Result<serde_json::Value, String> {
+pub fn script_role_list(
+    db: State<'_, Database>,
+    doc_id: String,
+) -> Result<serde_json::Value, String> {
     script_frontmatter_array(&doc_id, &db, "roles")
 }
 
 #[tauri::command]
-pub fn script_role_assign(db: State<'_, Database>, doc_id: String, role_id: String, assigned_to: String) -> Result<serde_json::Value, String> {
+pub fn script_role_assign(
+    db: State<'_, Database>,
+    doc_id: String,
+    role_id: String,
+    assigned_to: String,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "roles")?;
     let arr = list.as_array_mut().ok_or("roles is not an array")?;
     let mut found = false;
     for role in arr.iter_mut() {
         if role.get("id").and_then(|v| v.as_str()) == Some(role_id.as_str()) {
             if let Some(obj) = role.as_object_mut() {
-                obj.insert("assignedTo".to_string(), serde_json::Value::String(assigned_to.clone()));
+                obj.insert(
+                    "assignedTo".to_string(),
+                    serde_json::Value::String(assigned_to.clone()),
+                );
                 found = true;
             }
         }
@@ -1579,7 +1995,13 @@ pub fn script_role_assign(db: State<'_, Database>, doc_id: String, role_id: Stri
 }
 
 #[tauri::command]
-pub fn script_role_create(db: State<'_, Database>, doc_id: String, name: String, color: String, assigned_to: Option<String>) -> Result<serde_json::Value, String> {
+pub fn script_role_create(
+    db: State<'_, Database>,
+    doc_id: String,
+    name: String,
+    color: String,
+    assigned_to: Option<String>,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "roles")?;
     let arr = list.as_array_mut().ok_or("roles is not an array")?;
     let role = serde_json::json!({
@@ -1594,7 +2016,11 @@ pub fn script_role_create(db: State<'_, Database>, doc_id: String, name: String,
 }
 
 #[tauri::command]
-pub fn script_role_delete(db: State<'_, Database>, doc_id: String, role_id: String) -> Result<serde_json::Value, String> {
+pub fn script_role_delete(
+    db: State<'_, Database>,
+    doc_id: String,
+    role_id: String,
+) -> Result<serde_json::Value, String> {
     let mut list = script_frontmatter_array(&doc_id, &db, "roles")?;
     let arr = list.as_array_mut().ok_or("roles is not an array")?;
     arr.retain(|role| role.get("id").and_then(|v| v.as_str()) != Some(role_id.as_str()));
@@ -1603,12 +2029,19 @@ pub fn script_role_delete(db: State<'_, Database>, doc_id: String, role_id: Stri
 }
 
 #[tauri::command]
-pub fn vault_rename_preview(db: State<'_, Database>, old_title: String) -> Result<Vec<(String, String, String)>, String> {
+pub fn vault_rename_preview(
+    db: State<'_, Database>,
+    old_title: String,
+) -> Result<Vec<(String, String, String)>, String> {
     db.vault_rename_preview(&old_title)
 }
 
 #[tauri::command]
-pub fn vault_rename_execute(db: State<'_, Database>, old_title: String, new_title: String) -> Result<u64, String> {
+pub fn vault_rename_execute(
+    db: State<'_, Database>,
+    old_title: String,
+    new_title: String,
+) -> Result<u64, String> {
     db.vault_rename_execute(&old_title, &new_title)
 }
 
@@ -1618,7 +2051,11 @@ pub fn atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Res
 }
 
 #[tauri::command]
-pub fn widget_atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Result<(), String> {
+pub fn widget_atomic_save(
+    db: State<'_, Database>,
+    doc_id: String,
+    body: String,
+) -> Result<(), String> {
     db.atomic_save(&doc_id, &body)
 }
 
@@ -1633,12 +2070,20 @@ pub fn memory_get_streak(db: State<'_, Database>) -> Result<(i64, i64), String> 
 }
 
 #[tauri::command]
-pub fn doc_search_full(db: State<'_, Database>, query: String, workspace: Option<String>) -> Result<Vec<SearchResult>, String> {
+pub fn doc_search_full(
+    db: State<'_, Database>,
+    query: String,
+    workspace: Option<String>,
+) -> Result<Vec<SearchResult>, String> {
     db.search_docs(&query, workspace.as_deref())
 }
 
 #[tauri::command]
-pub fn search_docs_fts(db: State<'_, Database>, query: String, workspace: Option<String>) -> Result<Vec<SearchResult>, String> {
+pub fn search_docs_fts(
+    db: State<'_, Database>,
+    query: String,
+    workspace: Option<String>,
+) -> Result<Vec<SearchResult>, String> {
     db.search_docs_fts(&query, workspace.as_deref())
 }
 
@@ -1650,9 +2095,17 @@ pub fn reindex_fts(db: State<'_, Database>) -> Result<u64, String> {
 #[tauri::command]
 pub fn doc_get_stats(db: State<'_, Database>) -> Result<(i64, i64, i64), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let total_docs: i64 = conn.query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    let total_words: i64 = conn.query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    let total_backlinks: i64 = conn.query_row("SELECT COUNT(*) FROM backlinks", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let total_docs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM docs", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let total_words: i64 = conn
+        .query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let total_backlinks: i64 = conn
+        .query_row("SELECT COUNT(*) FROM backlinks", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
     Ok((total_docs, total_words, total_backlinks))
 }
 
@@ -1706,35 +2159,75 @@ pub fn backup_prune(db: State<'_, Database>, count: usize) -> Result<u64, String
 }
 
 #[tauri::command]
-pub fn rag_chunk_document(db: State<'_, Database>, doc_id: String, chunk_size: Option<usize>, overlap: Option<usize>) -> Result<Vec<RagChunk>, String> {
+pub fn rag_chunk_document(
+    db: State<'_, Database>,
+    doc_id: String,
+    chunk_size: Option<usize>,
+    overlap: Option<usize>,
+) -> Result<Vec<RagChunk>, String> {
     db.rag_chunk_document(&doc_id, chunk_size.unwrap_or(200), overlap.unwrap_or(50))
 }
 
 #[tauri::command]
-pub fn rag_search(db: State<'_, Database>, query: String, limit: Option<usize>) -> Result<Vec<(RagChunk, f64)>, String> {
+pub fn rag_search(
+    db: State<'_, Database>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<(RagChunk, f64)>, String> {
     db.rag_search(&query, limit.unwrap_or(10))
 }
 
 #[tauri::command]
-pub fn rag_get_context(db: State<'_, Database>, doc_id: String, query: String, max_chunks: Option<usize>) -> Result<String, String> {
+pub fn rag_get_context(
+    db: State<'_, Database>,
+    doc_id: String,
+    query: String,
+    max_chunks: Option<usize>,
+) -> Result<String, String> {
     db.rag_get_context(&doc_id, &query, max_chunks.unwrap_or(5))
 }
 
 #[tauri::command]
-pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -> Result<serde_json::Value, String> {
+pub fn publish_static_site(
+    db: State<'_, Database>,
+    config: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     use pulldown_cmark::{html, Parser};
 
-    let title = config.get("title").and_then(|v| v.as_str()).unwrap_or("My Writing");
-    let description = config.get("description").and_then(|v| v.as_str()).unwrap_or("Published from Just Write");
-    let theme = config.get("theme").and_then(|v| v.as_str()).unwrap_or("auto");
-    let include_workspaces: Vec<String> = config.get("includeWorkspaces")
+    let title = config
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("My Writing");
+    let description = config
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Published from Just Write");
+    let theme = config
+        .get("theme")
+        .and_then(|v| v.as_str())
+        .unwrap_or("auto");
+    let include_workspaces: Vec<String> = config
+        .get("includeWorkspaces")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or(vec!["write".into(), "novel".into(), "projects".into()]);
-    let include_drafts = config.get("includeDrafts").and_then(|v| v.as_bool()).unwrap_or(false);
+    let include_drafts = config
+        .get("includeDrafts")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let toc_depth = config.get("tocDepth").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
-    let custom_css = config.get("customCss").and_then(|v| v.as_str()).unwrap_or("");
-    let custom_js = config.get("customJs").and_then(|v| v.as_str()).unwrap_or("");
+    let custom_css = config
+        .get("customCss")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let custom_js = config
+        .get("customJs")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Fetch all docs from included workspaces
     let mut all_docs = Vec::new();
@@ -1754,10 +2247,16 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
 
     for ws in &include_workspaces {
         let ws_docs: Vec<_> = all_docs.iter().filter(|d| d.workspace == *ws).collect();
-        if ws_docs.is_empty() { continue; }
-        
-        html_parts.push(format!("<section id=\"{}\"><h2>{}</h2>", html_escape(ws), html_escape(ws)));
-        
+        if ws_docs.is_empty() {
+            continue;
+        }
+
+        html_parts.push(format!(
+            "<section id=\"{}\"><h2>{}</h2>",
+            html_escape(ws),
+            html_escape(ws)
+        ));
+
         for doc in ws_docs {
             let content = doc.content.as_str();
 
@@ -1777,21 +2276,30 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
             html::push_html(&mut body_raw, parser);
             let body = sanitize_body(&body_raw);
 
-            html_parts.push(format!("<article><h1 id=\"{}\">{}{}</h1>{}</article>",
+            html_parts.push(format!(
+                "<article><h1 id=\"{}\">{}{}</h1>{}</article>",
                 html_escape(&doc.id),
                 html_escape(&doc.title),
                 toc,
                 body
             ));
         }
-        
+
         html_parts.push("</section>".to_string());
     }
 
     // Generate full HTML (single-file scope: one index.html, images
     // inlined as data URIs — documented in docs/EXPORT.md).
     let body_html = html_parts.join("\n");
-    let full_html = render_publish_html(title, description, theme, &include_workspaces, &body_html, custom_css, custom_js);
+    let full_html = render_publish_html(
+        title,
+        description,
+        theme,
+        &include_workspaces,
+        &body_html,
+        custom_css,
+        custom_js,
+    );
     files.push("index.html".to_string());
 
     Ok(serde_json::json!({
@@ -1803,7 +2311,8 @@ pub fn publish_static_site(db: State<'_, Database>, config: serde_json::Value) -
 }
 
 fn process_transclusions(content: &str, db: &crate::database::Database) -> Result<String, String> {
-    let re = regex::Regex::new(r"!\[\[([^\]]+)\]\]").map_err(|e| format!("Invalid transclusion regex: {}", e))?;
+    let re = regex::Regex::new(r"!\[\[([^\]]+)\]\]")
+        .map_err(|e| format!("Invalid transclusion regex: {}", e))?;
     let mut result = content.to_string();
     for cap in re.captures_iter(content) {
         let target = &cap[1];
@@ -1816,8 +2325,11 @@ fn process_transclusions(content: &str, db: &crate::database::Database) -> Resul
 
 fn resolve_transclusion(target: &str, db: &crate::database::Database) -> Option<String> {
     let (title_part, heading) = target.split_once('#').unwrap_or((target, ""));
-    let is_id = title_part.len() >= 20 && title_part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    
+    let is_id = title_part.len() >= 20
+        && title_part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-');
+
     let doc = if is_id {
         db.get_doc(title_part).ok()
     } else {
@@ -1828,7 +2340,8 @@ fn resolve_transclusion(target: &str, db: &crate::database::Database) -> Option<
 
     let mut text = doc.content;
     if !heading.is_empty() {
-        let heading_regex = regex::Regex::new(&format!(r"(?im)^(#+)\s+{}\s*$", regex::escape(heading))).ok()?;
+        let heading_regex =
+            regex::Regex::new(&format!(r"(?im)^(#+)\s+{}\s*$", regex::escape(heading))).ok()?;
         let lines: Vec<&str> = text.lines().collect();
         let mut start_idx = None;
         let mut heading_level = 0;
@@ -1866,8 +2379,17 @@ fn build_toc(content: &str, max_depth: usize) -> String {
     for cap in re.captures_iter(content) {
         let level = cap[1].len();
         let text = &cap[2];
-        let id = text.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect::<String>();
-        toc.push_str(&format!("<li style=\"margin-left: {}rem\"><a href=\"#{}\">{}</a></li>", (level - 1) as f32 * 1.5, id, html_escape(text)));
+        let id = text
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+        toc.push_str(&format!(
+            "<li style=\"margin-left: {}rem\"><a href=\"#{}\">{}</a></li>",
+            (level - 1) as f32 * 1.5,
+            id,
+            html_escape(text)
+        ));
     }
     toc.push_str("</ul></div>");
     toc
@@ -1903,7 +2425,13 @@ fn inline_attachments(content: &str, db: &State<'_, Database>) -> (String, u64, 
     let mut skipped = 0u64;
     for r in crate::convert::attachment_refs(content) {
         let path = vault.join(&r);
-        let mime = match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+        let mime = match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str()
+        {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
             "gif" => "image/gif",
@@ -1993,9 +2521,13 @@ fn render_publish_html(
     let custom_js_block = if custom_js.trim().is_empty() {
         String::new()
     } else {
-        format!("\n  <script>\n  // site custom JS (breakouts neutralized)\n  {}\n  </script>", custom_js)
+        format!(
+            "\n  <script>\n  // site custom JS (breakouts neutralized)\n  {}\n  </script>",
+            custom_js
+        )
     };
-    format!(r#"<!DOCTYPE html>
+    format!(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -2096,11 +2628,19 @@ fn render_publish_html(
     else if (prefersDark) document.body.dataset.theme = 'dark';
   </script>
 </body>
-</html>"#, 
+</html>"#,
         html_escape(title),
         html_escape(description),
         html_escape(theme),
-        nav_workspaces.iter().map(|w| format!("<li><a href=\"#{}\">{}</a></li>", html_escape(w), html_escape(w))).collect::<Vec<_>>().join(""),
+        nav_workspaces
+            .iter()
+            .map(|w| format!(
+                "<li><a href=\"#{}\">{}</a></li>",
+                html_escape(w),
+                html_escape(w)
+            ))
+            .collect::<Vec<_>>()
+            .join(""),
         body,
         chrono::Utc::now().format("%B %d, %Y"),
         custom_css_block,
@@ -2144,9 +2684,7 @@ fn confine_path_in(vault: &std::path::Path, raw: &str) -> Result<std::path::Path
             _ => return Err("Path does not resolve inside the vault.".into()),
         }
     }
-    let mut resolved = current
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let mut resolved = current.canonicalize().map_err(|e| e.to_string())?;
     for part in tail.iter().rev() {
         let text = part.to_string_lossy();
         if text.is_empty()
@@ -2179,7 +2717,10 @@ fn check_single_name(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn fs_list_dir(db: State<'_, Database>, path: String) -> Result<Vec<(String, bool, u64)>, String> {
+pub fn fs_list_dir(
+    db: State<'_, Database>,
+    path: String,
+) -> Result<Vec<(String, bool, u64)>, String> {
     let dir = confine_to_vault(&db, &path)?;
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", path));
@@ -2203,20 +2744,24 @@ const MAX_TEXT_BYTES: usize = 25 * 1024 * 1024;
 
 #[tauri::command]
 pub fn fs_read_file(db: State<'_, Database>, path: String) -> Result<String, String> {
-  let file = confine_to_vault(&db, &path)?;
-  // Cap before reading: `fs_write_file`, `attachment_save` and
-  // `open_external_file` all refuse anything larger, so an unbounded read here
-  // let a renderer (or an XSS) force an arbitrarily large allocation inside the
-  // vault by pointing at one big file.
-  let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-  if len > MAX_TEXT_BYTES as u64 {
-    return Err("File over 25 MB — open it from its own app instead.".into());
-  }
-  std::fs::read_to_string(&file).map_err(|e| e.to_string())
+    let file = confine_to_vault(&db, &path)?;
+    // Cap before reading: `fs_write_file`, `attachment_save` and
+    // `open_external_file` all refuse anything larger, so an unbounded read here
+    // let a renderer (or an XSS) force an arbitrarily large allocation inside the
+    // vault by pointing at one big file.
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if len > MAX_TEXT_BYTES as u64 {
+        return Err("File over 25 MB — open it from its own app instead.".into());
+    }
+    std::fs::read_to_string(&file).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn fs_rename(db: State<'_, Database>, old_path: String, new_name: String) -> Result<String, String> {
+pub fn fs_rename(
+    db: State<'_, Database>,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
     check_single_name(&new_name)?;
     let p = confine_to_vault(&db, &old_path)?;
     // `p` is already resolved inside the vault, so its parent is too, and
@@ -2257,7 +2802,11 @@ pub fn fs_create_dir(db: State<'_, Database>, path: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn fs_write_file(db: State<'_, Database>, path: String, contents: String) -> Result<(), String> {
+pub fn fs_write_file(
+    db: State<'_, Database>,
+    path: String,
+    contents: String,
+) -> Result<(), String> {
     if contents.len() > MAX_TEXT_BYTES {
         return Err("File over 25 MB — link it instead of saving inline.".to_string());
     }
@@ -2298,12 +2847,12 @@ pub fn attachment_save(
             }
         })
         .collect();
-    let safe = if safe.is_empty() { "file".to_string() } else { safe };
-    let unique = format!(
-        "{}-{}",
-        chrono::Utc::now().format("%Y%m%d%H%M%S"),
+    let safe = if safe.is_empty() {
+        "file".to_string()
+    } else {
         safe
-    );
+    };
+    let unique = format!("{}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"), safe);
     let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
     let dir = vault.join(".attachments");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -2385,7 +2934,11 @@ pub fn clear_tab_states(db: State<'_, Database>) -> Result<u64, String> {
 }
 
 #[tauri::command]
-pub fn get_workspace_context(db: State<'_, Database>, doc_id: String, workspace: String) -> Result<String, String> {
+pub fn get_workspace_context(
+    db: State<'_, Database>,
+    doc_id: String,
+    workspace: String,
+) -> Result<String, String> {
     db.get_workspace_context(&doc_id, &workspace)
 }
 
@@ -2399,9 +2952,10 @@ pub fn get_vault_path(db: State<'_, Database>) -> Result<String, String> {
 
 fn trusted_sidecars_dir(sidecars_dir: &str) -> bool {
     let requested = std::path::Path::new(sidecars_dir);
-    if requested.components().any(|component| {
-        matches!(component, std::path::Component::ParentDir)
-    }) {
+    if requested
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
         return false;
     }
     let candidate = if requested.is_absolute() {
@@ -2413,7 +2967,9 @@ fn trusted_sidecars_dir(sidecars_dir: &str) -> bool {
     } else {
         return false;
     };
-    let Ok(candidate) = std::fs::canonicalize(candidate) else { return false };
+    let Ok(candidate) = std::fs::canonicalize(candidate) else {
+        return false;
+    };
     let mut roots = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecars")];
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -2430,7 +2986,9 @@ fn trusted_sidecars_dir(sidecars_dir: &str) -> bool {
 
 fn require_sidecar_paths(sidecars_dir: &str) -> Result<(), String> {
     if sidecars_dir.trim().is_empty() {
-        return Err("sidecars directory is empty — reinstall or re-fetch the sidecar bundle.".to_string());
+        return Err(
+            "sidecars directory is empty — reinstall or re-fetch the sidecar bundle.".to_string(),
+        );
     }
     if !trusted_sidecars_dir(sidecars_dir) {
         return Err("sidecar directory is outside the application resource root".to_string());
@@ -2471,7 +3029,8 @@ fn resolve_sidecars_dir_in(
     for candidate in candidates {
         let text = candidate.to_string_lossy().into_owned();
         tried.push(text.clone());
-        if candidate.is_dir() && trusted_sidecars_dir(&text) && looks_like_sidecars_dir(&candidate) {
+        if candidate.is_dir() && trusted_sidecars_dir(&text) && looks_like_sidecars_dir(&candidate)
+        {
             return Ok(text);
         }
     }
@@ -2481,7 +3040,9 @@ fn resolve_sidecars_dir_in(
     ))
 }
 
-pub(crate) fn resolve_sidecars_dir(resource_dir: Option<std::path::PathBuf>) -> Result<String, String> {
+pub(crate) fn resolve_sidecars_dir(
+    resource_dir: Option<std::path::PathBuf>,
+) -> Result<String, String> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()));
@@ -2499,23 +3060,38 @@ pub fn sidecars_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 fn trusted_python_command(requested: &str) -> Result<String, String> {
     let command = requested.trim();
-    let command = if command.is_empty() { "python" } else { command };
+    let command = if command.is_empty() {
+        "python"
+    } else {
+        command
+    };
     let name = std::path::Path::new(command)
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let allowed = matches!(name.as_str(), "python" | "python.exe" | "python3" | "python3.exe" | "py" | "py.exe");
-    if command.contains('/') || command.contains('\\') || command.contains(':')
+    let allowed = matches!(
+        name.as_str(),
+        "python" | "python.exe" | "python3" | "python3.exe" | "py" | "py.exe"
+    );
+    if command.contains('/')
+        || command.contains('\\')
+        || command.contains(':')
         || std::path::Path::new(command).components().count() != 1
         || !allowed
     {
-        return Err("custom Python paths are disabled; use python, python3, or py from PATH".to_string());
+        return Err(
+            "custom Python paths are disabled; use python, python3, or py from PATH".to_string(),
+        );
     }
     Ok(command.to_string())
 }
 
-fn python_for_sidecar(requested: &str, sidecars_dir: &str, executable: &str) -> Result<String, String> {
+fn python_for_sidecar(
+    requested: &str,
+    sidecars_dir: &str,
+    executable: &str,
+) -> Result<String, String> {
     if sidecar::native_runtime_available(sidecars_dir, executable) {
         Ok("python".to_string())
     } else {
@@ -2614,7 +3190,10 @@ fn run_python_probe(python: &str) -> Result<String, String> {
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("Python probe timed out — use a responsive python command from PATH".to_string());
+                return Err(
+                    "Python probe timed out — use a responsive python command from PATH"
+                        .to_string(),
+                );
             }
             Err(error) => return Err(format!("Python probe failed: {}", error)),
         }
@@ -2637,7 +3216,9 @@ fn run_python_probe(python: &str) -> Result<String, String> {
         "{}{}",
         String::from_utf8_lossy(&stdout),
         String::from_utf8_lossy(&stderr)
-    ).trim().to_string())
+    )
+    .trim()
+    .to_string())
 }
 
 #[tauri::command]
@@ -2675,7 +3256,8 @@ pub async fn tts_synthesize(
     split_pattern: String,
     chunk_size: u32,
 ) -> Result<(String, u32), String> {
-    tts.synthesize(&text, &voice, speed, &lang_code, &split_pattern, chunk_size).await
+    tts.synthesize(&text, &voice, speed, &lang_code, &split_pattern, chunk_size)
+        .await
 }
 
 #[tauri::command]
@@ -2818,7 +3400,10 @@ pub async fn compile_run(
             crate::convert::prepare_export_body(&doc.content, &lookup),
         ));
     }
-    let refs: Vec<(&str, &str)> = prepared.iter().map(|(t, c)| (t.as_str(), c.as_str())).collect();
+    let refs: Vec<(&str, &str)> = prepared
+        .iter()
+        .map(|(t, c)| (t.as_str(), c.as_str()))
+        .collect();
     let manuscript = crate::convert::join_manuscript(&refs);
     if manuscript.len() > crate::convert::COMPILE_CHAR_CAP {
         return Err(format!(
@@ -2831,7 +3416,11 @@ pub async fn compile_run(
     // authors). Per-section blocks would render as visible noise.
     let header = crate::convert::ExportFrontmatter {
         title: Some(name.clone()),
-        author: if authors.is_empty() { None } else { Some(authors.join(", ")) },
+        author: if authors.is_empty() {
+            None
+        } else {
+            Some(authors.join(", "))
+        },
         date: None,
         extra: Vec::new(),
     };
@@ -2875,8 +3464,13 @@ pub fn attachment_read(db: State<'_, Database>, path: String) -> Result<String, 
     // Canonicalize and re-check: a symlink inside .attachments/ pointing
     // outside the vault must not be followed.
     let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    let vault_canon = vault.canonicalize().map_err(|_| "Vault is unavailable.".to_string())?;
-    let target = vault_canon.join(rel).canonicalize().map_err(|e| format!("Attachment unreadable: {}", e))?;
+    let vault_canon = vault
+        .canonicalize()
+        .map_err(|_| "Vault is unavailable.".to_string())?;
+    let target = vault_canon
+        .join(rel)
+        .canonicalize()
+        .map_err(|e| format!("Attachment unreadable: {}", e))?;
     if !target.starts_with(&vault_canon) {
         return Err("Refusing path escaping the vault.".into());
     }
@@ -2910,13 +3504,9 @@ pub fn app_update_status(app: tauri::AppHandle) -> Result<serde_json::Value, Str
                 .collect()
         })
         .unwrap_or_default();
-    let pubkey = updater
-        .get("pubkey")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let configured = !endpoints.is_empty()
-        && !pubkey.is_empty()
-        && pubkey != "REPLACE_WITH_UPDATER_PUBLIC_KEY";
+    let pubkey = updater.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
+    let configured =
+        !endpoints.is_empty() && !pubkey.is_empty() && pubkey != "REPLACE_WITH_UPDATER_PUBLIC_KEY";
     Ok(serde_json::json!({
         "configured": configured,
         "endpoint": endpoints.first(),
@@ -2926,7 +3516,11 @@ pub fn app_update_status(app: tauri::AppHandle) -> Result<serde_json::Value, Str
 // ── Ghosts (scene forking) ──────────────────────────────────────
 
 #[tauri::command]
-pub fn ghost_fork(db: State<'_, Database>, doc_id: String, label: Option<String>) -> Result<Doc, String> {
+pub fn ghost_fork(
+    db: State<'_, Database>,
+    doc_id: String,
+    label: Option<String>,
+) -> Result<Doc, String> {
     db.ghost_fork(&doc_id, label.as_deref())
 }
 
@@ -2936,7 +3530,11 @@ pub fn ghost_list(db: State<'_, Database>, doc_id: String) -> Result<GhostGroup,
 }
 
 #[tauri::command]
-pub fn ghost_merge(db: State<'_, Database>, ghost_id: String, target_id: Option<String>) -> Result<Doc, String> {
+pub fn ghost_merge(
+    db: State<'_, Database>,
+    ghost_id: String,
+    target_id: Option<String>,
+) -> Result<Doc, String> {
     db.ghost_merge(&ghost_id, target_id.as_deref())
 }
 
@@ -2974,7 +3572,9 @@ pub fn secret_set(key: String, value: String) -> Result<(), String> {
             Err(_) => Err("keychain delete failed".to_string()),
         }
     } else {
-        entry.set_password(&value).map_err(|_| "keychain write failed".to_string())
+        entry
+            .set_password(&value)
+            .map_err(|_| "keychain write failed".to_string())
     }
 }
 
@@ -3006,7 +3606,9 @@ mod ai_slot_tests {
         // The dev fail-closed bug: resourceDir/sidecars never exists in dev,
         // so resolution must fall through to CARGO_MANIFEST_DIR/sidecars.
         let dir = resolve_sidecars_dir(None).expect("source checkout must resolve");
-        assert!(std::path::Path::new(&dir).join("memory_server.py").is_file());
+        assert!(std::path::Path::new(&dir)
+            .join("memory_server.py")
+            .is_file());
         assert!(trusted_sidecars_dir(&dir));
     }
 
@@ -3020,7 +3622,8 @@ mod ai_slot_tests {
     fn sidecars_dir_reports_searched_paths_when_all_candidates_fail() {
         let bogus_resource = std::path::PathBuf::from("no-such-resource-for-tests");
         let bogus_exe = std::path::PathBuf::from("no-such-exe-dir-for-tests");
-        let bogus_manifest = std::path::PathBuf::from("no-such-manifest-for-tests").join("sidecars");
+        let bogus_manifest =
+            std::path::PathBuf::from("no-such-manifest-for-tests").join("sidecars");
         let err = resolve_sidecars_dir_in(Some(bogus_resource), Some(bogus_exe), bogus_manifest)
             .expect_err("all candidates bogus must error");
         assert!(err.contains("searched:"), "error lists tried paths: {err}");
@@ -3107,8 +3710,18 @@ mod ai_slot_tests {
 
     #[test]
     fn memory_name_fallback_infers_real_sentences_and_traits() {
-        let facts = vec![BibleFact { id: "f".into(), doc_id: "b".into(), kind: "world_characters".into(), key: "Elena".into(), value: "protagonist".into() }];
-        let candidates = parse_memory_names(r#"["Elena", "Mara"]"#, "Elena has blue eyes. Mara waited by the gate.", &facts);
+        let facts = vec![BibleFact {
+            id: "f".into(),
+            doc_id: "b".into(),
+            kind: "world_characters".into(),
+            key: "Elena".into(),
+            value: "protagonist".into(),
+        }];
+        let candidates = parse_memory_names(
+            r#"["Elena", "Mara"]"#,
+            "Elena has blue eyes. Mara waited by the gate.",
+            &facts,
+        );
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].snippet, "Elena has blue eyes.");
         assert_eq!(candidates[0].attribute_key.as_deref(), Some("eyes"));
@@ -3121,9 +3734,11 @@ use rusqlite::params as _tag_params;
 #[tauri::command]
 pub fn get_doc_tags(db: State<'_, Database>, doc_id: String) -> Result<Vec<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT tag FROM doc_tags WHERE doc_id = ?1 ORDER BY tag")
+    let mut stmt = conn
+        .prepare("SELECT tag FROM doc_tags WHERE doc_id = ?1 ORDER BY tag")
         .map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([&doc_id], |row| row.get::<_, String>(0))
+    let rows = stmt
+        .query_map([&doc_id], |row| row.get::<_, String>(0))
         .map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -3141,7 +3756,8 @@ pub fn add_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> Resu
     conn.execute(
         "INSERT OR IGNORE INTO doc_tags (doc_id, tag) VALUES (?1, ?2)",
         _tag_params![&doc_id, &tag],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -3152,7 +3768,8 @@ pub fn remove_doc_tag(db: State<'_, Database>, doc_id: String, tag: String) -> R
     conn.execute(
         "DELETE FROM doc_tags WHERE doc_id = ?1 AND tag = ?2",
         _tag_params![&doc_id, &tag],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -3163,28 +3780,30 @@ pub fn search_by_tag(db: State<'_, Database>, tag: String) -> Result<Vec<Doc>, S
         "SELECT d.id, d.workspace, d.kind, d.title, d.path, d.parent_id, d.created_at, d.updated_at, d.content, d.word_count, d.reading_position, d.status, d.frontmatter_json, d.activity_score, d.embedding_ref, d.pinned, d.goal_words, d.deadline FROM docs d INNER JOIN doc_tags dt ON dt.doc_id = d.id WHERE dt.tag = ?1 ORDER BY d.updated_at DESC"
     ).map_err(|e| e.to_string())?;
     let tag_lc = tag.trim().to_lowercase();
-    let rows = stmt.query_map([&tag_lc], |row| {
-        Ok(Doc {
-            id: row.get(0)?,
-            workspace: row.get(1)?,
-            kind: row.get(2)?,
-            title: row.get(3)?,
-            path: row.get(4)?,
-            parent_id: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
-            content: row.get(8)?,
-            word_count: row.get(9)?,
-            reading_position: row.get(10)?,
-            status: row.get(11)?,
-            frontmatter_json: row.get(12)?,
-            activity_score: row.get(13)?,
-            embedding_ref: row.get(14)?,
-            pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
-            goal_words: row.get(16)?,
-            deadline: row.get(17)?,
+    let rows = stmt
+        .query_map([&tag_lc], |row| {
+            Ok(Doc {
+                id: row.get(0)?,
+                workspace: row.get(1)?,
+                kind: row.get(2)?,
+                title: row.get(3)?,
+                path: row.get(4)?,
+                parent_id: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                content: row.get(8)?,
+                word_count: row.get(9)?,
+                reading_position: row.get(10)?,
+                status: row.get(11)?,
+                frontmatter_json: row.get(12)?,
+                activity_score: row.get(13)?,
+                embedding_ref: row.get(14)?,
+                pinned: row.get::<_, i64>(15).unwrap_or(0) != 0,
+                goal_words: row.get(16)?,
+                deadline: row.get(17)?,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
@@ -3215,7 +3834,10 @@ mod fs_confinement_tests {
     fn traversal_and_absolute_escapes_are_refused() {
         let base = vault("escape");
         for evil in [
-            base.join("..").join("escaped.md").to_string_lossy().into_owned(),
+            base.join("..")
+                .join("escaped.md")
+                .to_string_lossy()
+                .into_owned(),
             "/etc/hostname".to_string(),
             String::from(""),
             String::from("   "),
@@ -3241,4 +3863,3 @@ mod fs_confinement_tests {
         assert!(check_single_name("renamed.md").is_ok());
     }
 }
-

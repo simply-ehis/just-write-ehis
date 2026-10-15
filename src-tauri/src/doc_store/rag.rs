@@ -1,7 +1,12 @@
-    use super::*;
+use super::*;
 
-    impl Database {
-    pub fn rag_chunk_document(&self, doc_id: &str, chunk_size: usize, overlap: usize) -> Result<Vec<RagChunk>, String> {
+impl Database {
+    pub fn rag_chunk_document(
+        &self,
+        doc_id: &str,
+        chunk_size: usize,
+        overlap: usize,
+    ) -> Result<Vec<RagChunk>, String> {
         let doc = self.get_doc(doc_id)?;
         let content = doc.content;
         let words: Vec<&str> = content.split_whitespace().collect();
@@ -25,7 +30,8 @@
             conn.execute(
                 "INSERT OR REPLACE INTO rag_vec (chunk_id, embedding) VALUES (?1, ?2)",
                 params![chunk.id, embedding.as_bytes()],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
             return Ok(vec![chunk]);
         }
 
@@ -62,7 +68,8 @@
             conn.execute(
                 "INSERT OR REPLACE INTO rag_vec (chunk_id, embedding) VALUES (?1, ?2)",
                 params![chunk.id, emb.as_bytes()],
-            ).map_err(|e| e.to_string())?;
+            )
+            .map_err(|e| e.to_string())?;
         }
 
         Ok(chunks)
@@ -99,9 +106,11 @@
                 "SELECT chunk_id, distance FROM rag_vec WHERE embedding MATCH ?1 ORDER BY distance LIMIT ?2"
             ).map_err(|e| e.to_string())?;
 
-            let rows = stmt.query_map(params![query_emb.as_bytes(), limit as i64], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-            }).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![query_emb.as_bytes(), limit as i64], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+                })
+                .map_err(|e| e.to_string())?;
 
             rows.filter_map(|r| r.ok()).collect()
         };
@@ -113,25 +122,31 @@
             ).map_err(|e| e.to_string())?;
 
             let query_lower = query.to_lowercase();
-            let chunks: Vec<RagChunk> = stmt.query_map(params![query, limit as i64], |row| {
-                Ok(RagChunk {
-                    id: row.get(0)?,
-                    doc_id: row.get(1)?,
-                    chunk_index: row.get(2)?,
-                    content: row.get(3)?,
-                    start_word: row.get(4)?,
-                    end_word: row.get(5)?,
+            let chunks: Vec<RagChunk> = stmt
+                .query_map(params![query, limit as i64], |row| {
+                    Ok(RagChunk {
+                        id: row.get(0)?,
+                        doc_id: row.get(1)?,
+                        chunk_index: row.get(2)?,
+                        content: row.get(3)?,
+                        start_word: row.get(4)?,
+                        end_word: row.get(5)?,
+                    })
                 })
-            }).map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
                 .collect();
 
-            let scored: Vec<(RagChunk, f64)> = chunks.into_iter().map(|c| {
-                let content_lower = c.content.to_lowercase();
-                let matches = content_lower.matches(&query_lower).count();
-                let score = (matches as f64) / (c.content.split_whitespace().count() as f64 + 1.0);
-                (c, score)
-            }).collect();
+            let scored: Vec<(RagChunk, f64)> = chunks
+                .into_iter()
+                .map(|c| {
+                    let content_lower = c.content.to_lowercase();
+                    let matches = content_lower.matches(&query_lower).count();
+                    let score =
+                        (matches as f64) / (c.content.split_whitespace().count() as f64 + 1.0);
+                    (c, score)
+                })
+                .collect();
 
             let mut sorted = scored;
             sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -179,7 +194,9 @@
         for (chunk_id, distance) in semantic_results {
             // A chunk can vanish between the vec scan and this read (a
             // concurrent delete); skip it rather than failing the whole search.
-            let Some(chunk) = by_id.get(&chunk_id) else { continue };
+            let Some(chunk) = by_id.get(&chunk_id) else {
+                continue;
+            };
             // Convert distance to similarity score (lower distance = more similar)
             let score = 1.0 / (1.0 + distance);
             results.push((chunk.clone(), score));
@@ -188,16 +205,26 @@
         Ok(results)
     }
 
-    pub fn rag_get_context(&self, doc_id: &str, query: &str, max_chunks: usize) -> Result<String, String> {
+    pub fn rag_get_context(
+        &self,
+        doc_id: &str,
+        query: &str,
+        max_chunks: usize,
+    ) -> Result<String, String> {
         let results = self.rag_search(query, max_chunks)?;
-        let context: Vec<String> = results.iter()
+        let context: Vec<String> = results
+            .iter()
             .filter(|(c, _)| c.doc_id == doc_id)
             .map(|(c, _)| c.content.clone())
             .collect();
 
         if context.is_empty() {
             let all_results = self.rag_search(query, max_chunks)?;
-            Ok(all_results.into_iter().map(|(c, _)| c.content).collect::<Vec<_>>().join("\n\n"))
+            Ok(all_results
+                .into_iter()
+                .map(|(c, _)| c.content)
+                .collect::<Vec<_>>()
+                .join("\n\n"))
         } else {
             Ok(context.join("\n\n"))
         }

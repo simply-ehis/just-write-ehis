@@ -1,16 +1,16 @@
-mod models;
-mod database;
-mod doc_store;
 mod commands;
 mod convert;
+mod database;
+mod doc_store;
 mod docmodel;
 mod docx;
 mod epub;
+mod ipc;
+mod models;
 mod pdf;
+mod procutil;
 mod sidecar;
 mod windows;
-mod procutil;
-mod ipc;
 
 /// True when the schema is in a state where writes are unsafe (e.g. a failed
 /// migration). Commands that mutate state must check this and refuse with a
@@ -19,9 +19,9 @@ mod ipc;
 pub struct ReadOnlyFlag(pub bool);
 
 use rusqlite::Connection;
-use tauri::Manager;
 #[cfg(target_os = "windows")]
 use std::path::{Path, PathBuf};
+use tauri::Manager;
 #[cfg(desktop)]
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -77,7 +77,9 @@ pub fn run() {
             let boot_ready = commands::BootReady::default();
             app.manage(boot_ready);
 
-            let app_dir = app.path().app_data_dir()
+            let app_dir = app
+                .path()
+                .app_data_dir()
                 .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data directory {:?}: {}", app_dir, e))?;
@@ -154,9 +156,15 @@ pub fn run() {
             app.manage(sidecar::TtsManager::new());
             app.manage(sidecar::LlmManager::new(app.path().resource_dir().ok()));
             let memory_dir = app_dir.join("ai-memory");
-            std::fs::create_dir_all(&memory_dir)
-                .map_err(|e| format!("Failed to create AI memory directory {:?}: {}", memory_dir, e))?;
-            app.manage(sidecar::MemoryManager::new(memory_dir.to_string_lossy().to_string()));
+            std::fs::create_dir_all(&memory_dir).map_err(|e| {
+                format!(
+                    "Failed to create AI memory directory {:?}: {}",
+                    memory_dir, e
+                )
+            })?;
+            app.manage(sidecar::MemoryManager::new(
+                memory_dir.to_string_lossy().to_string(),
+            ));
 
             // System-tray quick capture (§4.8): works app-closed on desktop.
             // Mobile has no tray — Android uses notification/widget/share
@@ -202,12 +210,17 @@ pub fn run() {
                                         Ok(()) => {
                                             let _ = w.emit("widget-tray-visibility", true);
                                             if let Err(e) = w.set_focus() {
-                                                eprintln!("[tray] widget shown without focus: {}", e);
+                                                eprintln!(
+                                                    "[tray] widget shown without focus: {}",
+                                                    e
+                                                );
                                             }
                                         }
                                         Err(e) => eprintln!("[tray] failed to show widget: {}", e),
                                     },
-                                    Err(e) => eprintln!("[tray] failed to read widget visibility: {}", e),
+                                    Err(e) => {
+                                        eprintln!("[tray] failed to read widget visibility: {}", e)
+                                    }
                                 }
                             }
                         }
@@ -232,9 +245,9 @@ pub fn run() {
             commands::autostart_launch,
             commands::app_boot_ready,
             commands::open_default_apps,
-             commands::doc_get,
-             commands::widget_doc_get,
-             commands::widget_doc_save,
+            commands::doc_get,
+            commands::widget_doc_get,
+            commands::widget_doc_save,
             commands::doc_save,
             commands::doc_delete,
             commands::doc_toggle_pin,
@@ -308,16 +321,16 @@ pub fn run() {
             commands::script_role_delete,
             commands::vault_rename_preview,
             commands::vault_rename_execute,
-             commands::atomic_save,
-             commands::widget_atomic_save,
+            commands::atomic_save,
+            commands::widget_atomic_save,
             commands::setup_file_watcher,
             commands::memory_get_streak,
             commands::doc_search_full,
             commands::search_docs_fts,
             commands::reindex_fts,
-             commands::backup_restore,
-             commands::backup_delete,
-             commands::backup_prune,
+            commands::backup_restore,
+            commands::backup_delete,
+            commands::backup_prune,
             commands::doc_get_stats,
             commands::snapshot_create,
             commands::snapshot_list,
@@ -394,20 +407,18 @@ pub fn run() {
             commands::ghost_merge,
             commands::ghost_dismiss,
             commands::atlas_get_stars,
-             commands::secret_set,
-             commands::secret_get,
-             commands::get_doc_tags,
-             commands::add_doc_tag,
-             commands::remove_doc_tag,
-             commands::search_by_tag,
+            commands::secret_set,
+            commands::secret_get,
+            commands::get_doc_tags,
+            commands::add_doc_tag,
+            commands::remove_doc_tag,
+            commands::search_by_tag,
         ])
         .on_window_event(|window, event| {
             // × quits for real: with no close-to-tray interception left, a
             // destroyed main window means the session is over — exit instead
             // of lingering windowless (the companion widget dies with us).
-            if window.label() == "main"
-                && matches!(event, tauri::WindowEvent::Destroyed)
-            {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 window.app_handle().exit(0);
             }
         })

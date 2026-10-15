@@ -61,13 +61,11 @@ pub fn find_text_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
                 return None;
             }
             let text_exts = [
-                "txt", "text", "rtf", "log",
-                "md", "markdown", "mdown", "mkd", "mkdn", "mdwn",
-                "rst", "org", "adoc", "asciidoc",
-                "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "xml", "csv", "tsv",
-                "html", "htm", "css", "js", "ts", "jsx", "tsx",
-                "py", "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt", "scala",
-                "sh", "bash", "zsh", "ps1", "bat", "cmd",
+                "txt", "text", "rtf", "log", "md", "markdown", "mdown", "mkd", "mkdn", "mdwn",
+                "rst", "org", "adoc", "asciidoc", "json", "yaml", "yml", "toml", "ini", "cfg",
+                "conf", "xml", "csv", "tsv", "html", "htm", "css", "js", "ts", "jsx", "tsx", "py",
+                "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt",
+                "scala", "sh", "bash", "zsh", "ps1", "bat", "cmd",
             ];
             text_exts.contains(&extension.as_str()).then_some(candidate)
         })
@@ -82,10 +80,7 @@ mod windows_tests {
         let dir = std::env::temp_dir();
         let probe = dir.join("jwe-probe-notes.md");
         std::fs::write(&probe, "# probe").unwrap();
-        let found = find_text_file(
-            &[probe.to_string_lossy().into_owned()],
-            &dir,
-        );
+        let found = find_text_file(&[probe.to_string_lossy().into_owned()], &dir);
         assert_eq!(found, Some(probe.clone()));
         let _ = std::fs::remove_file(&probe);
     }

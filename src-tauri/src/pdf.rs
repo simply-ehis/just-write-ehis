@@ -72,9 +72,7 @@ fn spans_to_typst(spans: &[Span]) -> String {
     for s in spans {
         match s {
             Span::Text(t) => out.push_str(&escape_text(t)),
-            Span::Code(t) => {
-                out.push_str(&format!("#raw(\"{}\")", escape_typst_string(t)))
-            }
+            Span::Code(t) => out.push_str(&format!("#raw(\"{}\")", escape_typst_string(t))),
             Span::Strong(v) => out.push_str(&format!("*{}*", spans_to_typst(v))),
             Span::Emph(v) => out.push_str(&format!("_{}_", spans_to_typst(v))),
             Span::Strike(v) => out.push_str(&format!("#strike[{}]", spans_to_typst(v))),
@@ -139,11 +137,7 @@ fn blocks_to_typst(blocks: &[Block], out: &mut String, skip_first_h1: bool) {
                             }
                             other => {
                                 let mut nested = String::new();
-                                blocks_to_typst(
-                                    std::slice::from_ref(other),
-                                    &mut nested,
-                                    false,
-                                );
+                                blocks_to_typst(std::slice::from_ref(other), &mut nested, false);
                                 for line in nested.lines() {
                                     if line.trim().is_empty() {
                                         continue;
@@ -289,79 +283,79 @@ pub fn typst_available(resource_dir: Option<PathBuf>) -> bool {
 /// Errors carry the CLI's own stderr, so a bad document reports the same
 /// message an author would see from the command line.
 /// Hard limit on a single typst compile. convert_run/compile_run are sync
-    /// commands, so this runs on the UI thread — an unbounded wait here freezes
-    /// the whole app with no way out.
-    const TYPST_TIMEOUT_SECS: u64 = 120;
+/// commands, so this runs on the UI thread — an unbounded wait here freezes
+/// the whole app with no way out.
+const TYPST_TIMEOUT_SECS: u64 = 120;
 
-    /// Run typst over `source` and return the PDF bytes.
-    ///
-    /// Spawns the child and polls with a hard timeout, so a hung compile is
-    /// killed and reported instead of blocking the UI thread forever.
-    fn compile_with(bin: &Path, source: &str) -> Result<Vec<u8>, String> {
-        use std::time::Instant;
-        let dir = tempfile::tempdir().map_err(|e| format!("Temp dir failed: {}", e))?;
-        let input = dir.path().join("input.typ");
-        let output = dir.path().join("output.pdf");
-        std::fs::write(&input, source).map_err(|e| format!("Temp write failed: {}", e))?;
+/// Run typst over `source` and return the PDF bytes.
+///
+/// Spawns the child and polls with a hard timeout, so a hung compile is
+/// killed and reported instead of blocking the UI thread forever.
+fn compile_with(bin: &Path, source: &str) -> Result<Vec<u8>, String> {
+    use std::time::Instant;
+    let dir = tempfile::tempdir().map_err(|e| format!("Temp dir failed: {}", e))?;
+    let input = dir.path().join("input.typ");
+    let output = dir.path().join("output.pdf");
+    std::fs::write(&input, source).map_err(|e| format!("Temp write failed: {}", e))?;
 
-        let mut compile = Command::new(bin);
-        compile
-            .arg("compile")
-            // Root is the temp dir so no document-relative path can reach the
-            // vault or the wider filesystem.
-            .arg("--root")
-            .arg(dir.path())
-            .arg(&input)
-            .arg(&output)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        crate::procutil::hide_console(&mut compile);
-        let mut child = compile
-            .spawn()
-            .map_err(|e| format!("Failed to run typst: {}", e))?;
+    let mut compile = Command::new(bin);
+    compile
+        .arg("compile")
+        // Root is the temp dir so no document-relative path can reach the
+        // vault or the wider filesystem.
+        .arg("--root")
+        .arg(dir.path())
+        .arg(&input)
+        .arg(&output)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    crate::procutil::hide_console(&mut compile);
+    let mut child = compile
+        .spawn()
+        .map_err(|e| format!("Failed to run typst: {}", e))?;
 
-        let start = Instant::now();
-        let timeout = std::time::Duration::from_secs(TYPST_TIMEOUT_SECS);
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    if !status.success() {
-                        let stderr = child
-                            .stderr
-                            .take()
-                            .map(|mut s| {
-                                let mut buf = String::new();
-                                use std::io::Read;
-                                let _ = s.read_to_string(&mut buf);
-                                buf
-                            })
-                            .unwrap_or_default();
-                        let msg = stderr.trim();
-                        return Err(if msg.is_empty() {
-                            format!("typst failed (exit {:?}).", status.code())
-                        } else {
-                            format!("typst failed: {}", msg)
-                        });
-                    }
-                    return std::fs::read(&output)
-                        .map_err(|e| format!("Failed to read typst output: {}", e));
+    let start = Instant::now();
+    let timeout = std::time::Duration::from_secs(TYPST_TIMEOUT_SECS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    let stderr = child
+                        .stderr
+                        .take()
+                        .map(|mut s| {
+                            let mut buf = String::new();
+                            use std::io::Read;
+                            let _ = s.read_to_string(&mut buf);
+                            buf
+                        })
+                        .unwrap_or_default();
+                    let msg = stderr.trim();
+                    return Err(if msg.is_empty() {
+                        format!("typst failed (exit {:?}).", status.code())
+                    } else {
+                        format!("typst failed: {}", msg)
+                    });
                 }
-                Ok(None) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return Err(format!(
+                return std::fs::read(&output)
+                    .map_err(|e| format!("Failed to read typst output: {}", e));
+            }
+            Ok(None) => {
+                if start.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
                             "typst compile timed out after {}s — the document may be too large or the binary is hung",
                             TYPST_TIMEOUT_SECS
                         ));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
                 }
-                Err(e) => return Err(format!("Failed to wait on typst: {}", e)),
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
+            Err(e) => return Err(format!("Failed to wait on typst: {}", e)),
         }
     }
+}
 
 /// Compile a `Doc` to PDF bytes.
 ///
@@ -377,15 +371,15 @@ mod tests {
     use crate::docmodel::parse;
 
     /// A real PDF starts with the %PDF- header and ends with the %%EOF marker.
-/// The trailer sits at the END of the file, so it must be searched from the
-/// back, not in a fixed window from the front.
-fn is_pdf(b: &[u8]) -> bool {
-    if !b.starts_with(b"%PDF-") {
-        return false;
+    /// The trailer sits at the END of the file, so it must be searched from the
+    /// back, not in a fixed window from the front.
+    fn is_pdf(b: &[u8]) -> bool {
+        if !b.starts_with(b"%PDF-") {
+            return false;
+        }
+        let tail = &b[b.len().saturating_sub(1024)..];
+        tail.windows(5).any(|w| w == b"%%EOF")
     }
-    let tail = &b[b.len().saturating_sub(1024)..];
-    tail.windows(5).any(|w| w == b"%%EOF")
-}
 
     /// The pinned binary, or None when the fetch step has not run. Tests
     /// that need a real compile skip rather than fail so the suite still
@@ -415,7 +409,11 @@ fn is_pdf(b: &[u8]) -> bool {
             "not a PDF: {:?}",
             &bytes[..8.min(bytes.len())]
         );
-        assert!(bytes.len() > 500, "suspiciously small PDF: {} bytes", bytes.len());
+        assert!(
+            bytes.len() > 500,
+            "suspiciously small PDF: {} bytes",
+            bytes.len()
+        );
     }
 
     #[test]
@@ -485,7 +483,10 @@ fn is_pdf(b: &[u8]) -> bool {
 
     #[test]
     fn template_carries_title_author_and_date() {
-        let doc = parse("X", "---\ntitle: \"T\"\nauthor: \"A\"\ndate: \"2026\"\n---\n\nbody");
+        let doc = parse(
+            "X",
+            "---\ntitle: \"T\"\nauthor: \"A\"\ndate: \"2026\"\n---\n\nbody",
+        );
         let src = template(&doc, "");
         assert!(src.contains("title: \"T\""), "{src}");
         assert!(src.contains("author: \"A\""), "{src}");
@@ -505,7 +506,10 @@ fn is_pdf(b: &[u8]) -> bool {
 
     #[test]
     fn title_with_quotes_does_not_break_the_source() {
-        let doc = parse("X", "---\ntitle: \"He said \\\"hi\\\" loudly\"\n---\n\nbody");
+        let doc = parse(
+            "X",
+            "---\ntitle: \"He said \\\"hi\\\" loudly\"\n---\n\nbody",
+        );
         let src = template(&doc, "");
         assert!(src.contains("\\\""), "quote not escaped: {src}");
     }

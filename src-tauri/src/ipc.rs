@@ -16,13 +16,13 @@
 //! there); the connected socket is then wrapped in a TcpStream, whose
 //! Read/Write are plain recv/send and work for any SOCKET.
 
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
 use crate::procutil::{hide_console, sidecar_stderr, terminate_child};
@@ -166,14 +166,14 @@ impl IpcSidecar {
                 .pending
                 .as_ref()
                 .ok_or_else(|| format!("{} sidecar is not running", self.name))?;
-            pending
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(id, tx);
+            pending.lock().map_err(|e| e.to_string())?.insert(id, tx);
             let frame = json!({ "id": id, "method": method, "params": params });
             let mut line = serde_json::to_string(&frame).map_err(|e| e.to_string())?;
             line.push('\n');
-            let stdin = state.stdin.as_mut().ok_or_else(|| format!("{} sidecar stdin closed", self.name))?;
+            let stdin = state
+                .stdin
+                .as_mut()
+                .ok_or_else(|| format!("{} sidecar stdin closed", self.name))?;
             stdin
                 .write_all(line.as_bytes())
                 .map_err(|e| format!("{} sidecar write failed: {}", self.name, e))?;
@@ -185,7 +185,10 @@ impl IpcSidecar {
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(format!("{} sidecar exited while a request was in flight", self.name)),
+            Ok(Err(_)) => Err(format!(
+                "{} sidecar exited while a request was in flight",
+                self.name
+            )),
             Err(_) => {
                 // Evict the stale pending entry so a late frame is dropped.
                 if let Ok(state) = self.state.lock() {
@@ -487,7 +490,9 @@ fn read_http_response(stream: &mut SockStream) -> Result<Value, String> {
     let mut chunked = false;
     let mut content_length: Option<usize> = None;
     for line in lines {
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let key = key.trim().to_ascii_lowercase();
         let value = value.trim();
         if key == "transfer-encoding" && value.to_ascii_lowercase().contains("chunked") {
