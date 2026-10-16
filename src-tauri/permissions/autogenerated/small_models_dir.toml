@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-small-models-dir"
+description = "Enables the small_models_dir command without any pre-configured scope."
+commands.allow = ["small_models_dir"]
+
+[[permission]]
+identifier = "deny-small-models-dir"
+description = "Denies the small_models_dir command without any pre-configured scope."
+commands.deny = ["small_models_dir"]

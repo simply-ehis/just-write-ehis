@@ -112,7 +112,13 @@
   );
 </script>
 
-<div class="dock-split" class:horizontal bind:this={container} onpointerenter={() => (hovered = true)} onpointerleave={() => (hovered = false)}>
+<div class="dock-split"
+    class:horizontal
+    role="region"
+    aria-label="workspace split panels"
+    bind:this={container}
+    onpointerenter={() => (hovered = true)}
+    onpointerleave={() => (hovered = false)}>
   <div
     class="ds-top"
     class:ds-full={!hasBottom}
