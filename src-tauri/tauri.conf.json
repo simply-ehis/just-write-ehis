@@ -76,8 +76,7 @@
       "sidecars/stt_server.py",
       "sidecars/tts_server.py",
       "sidecars/memory_server.py",
-      "sidecars/harness/*",
-      "sidecars/models/**/*"
+      "sidecars/harness/*"
     ]
   },
   "plugins": {

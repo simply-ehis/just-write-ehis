@@ -382,6 +382,8 @@ pub fn run() {
             commands::llm_health,
             commands::llm_completion,
             commands::llm_chat_completion,
+            commands::small_models_dir,
+            commands::scan_small_models,
             commands::app_update_status,
             commands::convert_run,
             commands::compile_run,

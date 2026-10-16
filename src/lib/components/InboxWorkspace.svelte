@@ -217,6 +217,7 @@
     hasBottom={!!viewing}
     topCompact={listCollapsed && !!viewing}
     direction="horizontal"
+    autoReveal
   >
     {#snippet top()}
   <div class="inbox-list" class:collapsed-list={listCollapsed && viewing}>

@@ -820,6 +820,7 @@
         hasBottom={!!selectedBeat}
         direction="horizontal"
         topCompact={boardSidebarCollapsed && !!selectedBeat}
+        autoReveal
       >
         {#snippet top()}
       {#if boardSidebarCollapsed && selectedBeat}

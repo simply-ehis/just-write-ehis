@@ -141,6 +141,8 @@ const COMMANDS: &[&str] = &[
     "llm_health",
     "llm_completion",
     "llm_chat_completion",
+    "small_models_dir",
+    "scan_small_models",
     "app_update_status",
     "convert_run",
     "compile_run",

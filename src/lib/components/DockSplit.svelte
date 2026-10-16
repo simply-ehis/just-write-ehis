@@ -12,6 +12,7 @@
     topLabel,
     hasBottom,
     topCompact = false,
+    autoReveal = false,
     direction = "vertical",
     defaultPct = 42,
     top,
@@ -21,6 +22,10 @@
     topLabel: string;
     hasBottom: boolean;
     topCompact?: boolean;
+    /** When true and the panel is collapsed (horizontal sidebar), moving the
+     * mouse to the edge auto-expands the sidebar, then auto-collapses again
+     * when the mouse leaves. Global workspace sidebars use this. */
+    autoReveal?: boolean;
     direction?: "vertical" | "horizontal";
     defaultPct?: number;
     top: Snippet;
@@ -43,7 +48,10 @@
   let topPct = $state(load());
   let container = $state<HTMLElement | null>(null);
   let dragging = $state(false);
+  let hovered = $state(false);
   let horizontal = $derived(direction === "horizontal");
+  /** Auto-expanded via hover (collapsed sidebar mouse-over). */
+  let autoExpanded = $derived(autoReveal && horizontal && topCompact && hovered);
 
   function clamp(v: number): number {
     return Math.min(MAX, Math.max(MIN, v));
@@ -98,17 +106,18 @@
   let slotStyle = $derived(
     hasBottom && !topCompact
       ? horizontal
-        ? `width: ${topPct}%;`
+        ? `width: ${autoExpanded ? 42 : topPct}%;`
         : `height: ${topPct}%;`
       : undefined
   );
 </script>
 
-<div class="dock-split" class:horizontal bind:this={container}>
+<div class="dock-split" class:horizontal bind:this={container} onpointerenter={() => (hovered = true)} onpointerleave={() => (hovered = false)}>
   <div
     class="ds-top"
     class:ds-full={!hasBottom}
     class:ds-compact={topCompact && hasBottom}
+    class:auto-reveal={autoExpanded}
     style={slotStyle}
   >
     {@render top()}
@@ -215,6 +224,15 @@
   .ds-bar:focus-visible {
     outline: 2px solid var(--accent-primary);
     outline-offset: -2px;
+  }
+
+  /* Auto-reveal: sidebar top panel transitions in/out smoothly on hover. */
+  .ds-top.auto-reveal {
+    transition: width 180ms ease;
+  }
+
+  .dock-split.horizontal:hover .ds-bar.horizontal {
+    border-left-color: var(--accent-primary);
   }
 
   .ds-bottom {

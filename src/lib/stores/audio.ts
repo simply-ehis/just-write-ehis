@@ -399,7 +399,28 @@ export function llmModelReady(health: { status: string }): boolean {
 /** Start the llama.cpp server sidecar (lazy, first ghost autocomplete). */
 export async function ensureLlm(): Promise<boolean> {
   const s = get(settings);
-  
+
+  // ── Auto-discover small model from the fixed app-data models folder ──
+  // The small LLM is NOT bundled. Any .gguf placed in the fixed folder is
+  // auto-detected. The folder path cannot be changed and is re-created if
+  // deleted while the app is installed.
+  let smallModelName = s.smallModelName;
+  if (!smallModelName || !smallModelName.trim()) {
+    try {
+      const models = await api.scanSmallModels();
+      if (models.length > 0) {
+        smallModelName = models[0].name;
+        // Persist the discovered model so it survives restarts
+        // (settings write happens via the settings store elsewhere)
+      } else {
+        // Ensure the folder exists even when empty (routine check)
+        await api.smallModelsDir();
+      }
+    } catch {
+      // Folder will be created on next routine check; fall through to error
+    }
+  }
+
   // Validate quantization setting
   const quant = (s.smallModelQuantization || "q4_k_m") as LlmQuantization;
   const meta = getLlmMetadata(quant);
@@ -411,8 +432,8 @@ export async function ensureLlm(): Promise<boolean> {
   }
   
   // Validate model file matches quantization (if user provided explicit model)
-  if (s.llmModel && s.llmModel.trim()) {
-    const validation = validateModelForTask(s.llmModel.trim(), "llm");
+  if (smallModelName && smallModelName.trim()) {
+    const validation = validateModelForTask(smallModelName.trim(), "llm");
     if (!validation.ok) {
       llmError.set(validation.error || "Invalid LLM model");
       llmRunning.set(false);
@@ -427,7 +448,7 @@ export async function ensureLlm(): Promise<boolean> {
     start: async () => {
       await api.llmStart(
         await getSidecarsDir(),
-        s.llmModel || undefined,
+        smallModelName || undefined,
         s.smallModelContextLength || undefined,
         s.smallModelQuantization || undefined,
       );

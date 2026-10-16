@@ -89,6 +89,8 @@ permissions = [
   "allow-implicit-links-get",
   "allow-llm-chat-completion",
   "allow-llm-completion",
+  "allow-small-models-dir",
+  "allow-scan-small-models",
   "allow-llm-health",
   "allow-llm-is-running",
   "allow-llm-start",

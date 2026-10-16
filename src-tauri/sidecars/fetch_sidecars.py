@@ -282,21 +282,13 @@ def _extract_zip(archive: Path, dest_dir: Path) -> None:
         zf.extractall(dest_dir)
 
 
-def fetch_llm(quant: str = DEFAULT_LLM_QUANT) -> None:
-    """Fetch llama.cpp server binary + LFM 2.5-350M GGUF.
+def fetch_llm() -> None:
+    """Fetch llama.cpp server binary only (no GGUF).
 
-    Args:
-        quant: Quantization to fetch (q4_k_m, q5_k_m, q8_0, q2_k, q3_k_m, q6_k).
-               Defaults to q4_k_m.
+    The LLM model (GGUF) is NOT bundled. It lives in the fixed app-data
+    models folder which the app auto-discovers at runtime. Users place
+    their own .gguf there.
     """
-    quant = quant.lower()
-    if quant not in LLM_QUANTIZATIONS:
-        print(
-            f"[LLM] Unknown quantization '{quant}', falling back to {DEFAULT_LLM_QUANT}",
-            flush=True,
-        )
-        quant = DEFAULT_LLM_QUANT
-
     # 1) llama.cpp server release (contains llama-server.exe + DLLs)
     server_archive = MODELS_DIR / "llama-server.zip"
     _download(LLM_SERVER_URL, server_archive, "LLM-SERVER", SHA256["llm_server"])
@@ -324,15 +316,10 @@ def fetch_llm(quant: str = DEFAULT_LLM_QUANT) -> None:
     # otherwise ride into the app bundle (~150MB of duplicates).
     shutil.rmtree(LLM_SERVER_DIR, ignore_errors=True)
 
-    # 2) LFM 2.5-350M GGUF (selected quantization)
-    gguf_url = _llm_gguf_url(quant)
-    gguf_path = _llm_gguf_path(quant)
-    _download(gguf_url, gguf_path, f"LLM-GGUF({quant})", SHA256.get("llm_gguf", ""))
+    print("[LLM] Done (server only — GGUF lives in the app-data models folder).", flush=True)
 
-    # Create model metadata file for the registry
-    _write_model_metadata(quant, gguf_path)
 
-    def _write_model_metadata(quant: str, gguf_path: Path) -> None:
+def _write_model_metadata(quant: str, gguf_path: Path) -> None:
     """Write model.json metadata for the registry."""
     import json
 
@@ -415,13 +402,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Fetch sidecar assets")
     ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
     ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle)")
-    ap.add_argument(
-        "--llm",
-        nargs="?",
-        const=DEFAULT_LLM_QUANT,
-        default=None,
-        help=f"Fetch LLM (llama.cpp server + LFM 2.5-350M GGUF). Optional quantization: {', '.join(LLM_QUANTIZATIONS.keys())} (default: {DEFAULT_LLM_QUANT})",
-    )
+    ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server only — GGUF lives in the app-data models folder)")
     ap.add_argument("--typst", action="store_true", help=f"Fetch the pinned Typst {TYPST_VERSION} CLI (PDF export)")
     args = ap.parse_args()
 
@@ -439,9 +420,9 @@ def main() -> None:
             fetch_tts()
         except Exception as e:
             failed.append(f"tts: {e}")
-    if args.llm is not None:
+    if args.llm:
         try:
-            fetch_llm(args.llm)
+            fetch_llm()
         except Exception as e:
             failed.append(f"llm: {e}")
     if args.typst:

@@ -143,6 +143,8 @@ check(
 // must still be justified by a comment, so the list cannot quietly grow.
 const EXEMPT = {
   ai_generate_stream: "streaming falls back to one shot; no preview case",
+  small_models_dir: "desktop-only local folder scan; no browser equivalent",
+  scan_small_models: "desktop-only local folder scan; no browser equivalent",
 };
 const unmirrored = [...apiCommands].filter((c) => !mirrored.has(c));
 const unexpected = unmirrored.filter((c) => !(c in EXEMPT));

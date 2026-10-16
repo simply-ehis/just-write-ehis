@@ -886,6 +886,14 @@ export const api = {
   llmChatCompletion: (messages: { role: string; content: string }[], maxTokens: number, temperature: number) =>
     safeInvoke<string>("llm_chat_completion", { messages, maxTokens, temperature }),
 
+  smallModelsDir: () =>
+    // "small_models_dir" browser case exists — folder scan is desktop-only
+    safeInvoke<string>("small_models_dir"),
+
+  scanSmallModels: () =>
+    // "scan_small_models" browser case exists — folder scan is desktop-only
+    safeInvoke<{ name: string; path: string }[]>("scan_small_models"),
+
   appUpdateStatus: () =>
     safeInvoke<UpdateStatus>("app_update_status"),
 

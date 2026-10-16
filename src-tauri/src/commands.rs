@@ -3284,6 +3284,60 @@ pub fn llm_stop(llm: State<'_, sidecar::LlmManager>) -> Result<(), String> {
     llm.stop()
 }
 
+/// Fixed folder for unbundled small-model GGUFs. The path is derived from
+/// the app data dir and cannot be changed by the user. The folder is
+/// created eagerly on boot and re-created on routine checks if deleted.
+/// Only .gguf files directly inside are auto-discovered as small models.
+#[tauri::command]
+pub fn small_models_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Cannot resolve app data dir: {e}"))?
+        .join("models");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        format!(
+            "Failed to create small-models folder {:?}: {}",
+            dir, e
+        )
+    })?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+/// Auto-discover small-model GGUFs in the fixed models folder.
+/// Returns a list of {name, path} for every .gguf found directly inside.
+#[tauri::command]
+pub fn scan_small_models(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let dir = match small_models_dir(app.clone()) {
+        Ok(d) => d,
+        Err(e) => return Err(e),
+    };
+    let mut models: Vec<serde_json::Value> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("gguf") {
+                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                            models.push(serde_json::json!({
+                                "name": name,
+                                "path": path.to_string_lossy().to_string(),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    models.sort_by(|a, b| {
+        a.get("name")
+            .and_then(|v| v.as_str())
+            .cmp(&b.get("name").and_then(|v| v.as_str()))
+    });
+    Ok(models)
+}
+
 #[tauri::command]
 pub fn llm_is_running(llm: State<'_, sidecar::LlmManager>) -> bool {
     llm.is_running()
