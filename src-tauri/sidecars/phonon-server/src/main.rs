@@ -5,8 +5,9 @@
 //! Methods: `health`, `synthesize`, `stop`.
 //!
 //! The model directory is argv[1] when provided, otherwise
-//! `$JWE_SIDECARS_DIR/models/phonon`. Voices live beside the model and are
-//! auto-registered at startup.
+//! `$JWE_SIDECARS_DIR/models/phonon-31m-en` — the model registry key IS
+//! the directory name (legacy `models/phonon` layouts still work). Voices
+//! live in `voices/` beside the model and are auto-registered at startup.
 
 use std::env;
 use std::io::{BufRead, Write};
@@ -32,13 +33,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Vec<String> = env::args().collect();
 
-    // Model directory: argv[1] when provided, otherwise $JWE_SIDECARS_DIR/models/phonon
+    // Model directory: argv[1] when provided (the backend passes
+    // `<sidecars_dir>/models/<registry key>`), otherwise
+    // $JWE_SIDECARS_DIR/models/phonon-31m-en with a legacy fallback.
     let model_dir = if args.len() > 1 {
         PathBuf::from(&args[1])
     } else {
         let sidecars_dir = env::var("JWE_SIDECARS_DIR")
             .unwrap_or_else(|_| std::env::current_dir().unwrap().to_string_lossy().to_string());
-        PathBuf::from(sidecars_dir).join("models").join("phonon")
+        let models = PathBuf::from(sidecars_dir).join("models");
+        let named = models.join("phonon-31m-en");
+        let legacy = models.join("phonon");
+        if named.is_dir() {
+            named
+        } else if legacy.is_dir() {
+            eprintln!("[phonon] using legacy models/phonon layout");
+            legacy
+        } else {
+            named
+        }
     };
 
     let model_dir = model_dir.canonicalize().unwrap_or_else(|_| model_dir.clone());
