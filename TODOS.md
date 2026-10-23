@@ -40,9 +40,11 @@
      build green, `tests/tts-timeline.mjs` (34 checks) green, full sweep
      47/47 + all variants. Remaining: **phase 4** — WSOLA speed and
      pill progress % DONE (2026-10-23, see CHANGELOG); still open:
-     follow-scroll listen pass, delete leftovers (incl. the dead
-     `tts_stream_*` commands — `cargo check` warns they are never
-     registered in `generate_handler`).
+     follow-scroll listen pass. (The `tts_stream_*` "leftovers" are
+     NOT dead — the Phonon pass registered them in `generate_handler`
+     and wired `TtsManager` stream methods + live ReadAloudButton
+     callers. Audited 2026-10-23: cargo check 0 warnings, all 14
+     `tts_*` commands registered and referenced. Nothing to delete.)
   3. **Listen-test harness — DONE (2026-10-22)**: desktop QA page for the
      manual Windows listen pass (gaps / mid-page skips / speed changes).
      Command palette → "TTS listen harness (dev)" (or boot with
