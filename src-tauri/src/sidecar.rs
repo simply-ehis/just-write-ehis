@@ -418,6 +418,18 @@ impl SttManager {
 
 // ── Phonon TTS sidecar (stdio) ────────────────────────────────────
 
+/// Model registry key → on-disk directory for the phonon-server exe.
+/// The registry convention (src/lib/modelRegistry.ts) is that a model
+/// key IS its directory/file name, so this is a plain join — callers
+/// must run `check_model_name` first (it rejects separators and `..`).
+fn tts_model_dir(sidecars_dir: &str, model_name: &str) -> String {
+    std::path::Path::new(sidecars_dir)
+        .join("models")
+        .join(model_name)
+        .to_string_lossy()
+        .to_string()
+}
+
 pub struct TtsManager {
     proc: IpcSidecar,
     auth_token: String,
@@ -439,20 +451,40 @@ impl TtsManager {
         }
     }
 
-    /// argv is now [model_dir?] — no port.
+    /// argv is now [model_dir?] — no port. The `model` argument is a
+    /// model **registry key** (e.g. `phonon-31m-en`); the exe expects
+    /// its DIRECTORY, so the exe path passes
+    /// `<sidecars_dir>/models/<key>` (registry convention: key ==
+    /// on-disk name). The Python fallback keeps the bare key — it
+    /// resolves models itself. Passing no model lets the exe fall back
+    /// to `$JWE_SIDECARS_DIR/models/phonon-31m-en`.
     pub fn start(
         &self,
         python_path: &str,
         sidecars_dir: &str,
         model: Option<&str>,
     ) -> Result<(), String> {
-        let mut args = Vec::new();
-        if let Some(m) = model.filter(|m| !m.trim().is_empty()) {
-            check_model_name(m)?;
-            args.push(m.to_string());
-        }
+        let model_name = model
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(|m| {
+                check_model_name(m)?;
+                Ok::<String, String>(m.to_string())
+            })
+            .transpose()?;
         let token = ("JWE_SIDECAR_TOKEN", self.auth_token.as_str());
         if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "phonon-server.exe") {
+            let mut args = Vec::new();
+            if let Some(name) = &model_name {
+                let dir = tts_model_dir(sidecars_dir, name);
+                if !std::path::Path::new(&dir).is_dir() {
+                    return Err(format!(
+                        "TTS model '{name}' is not fetched — expected {dir} \
+                         (run `python src-tauri/sidecars/fetch_sidecars.py --phonon`)"
+                    ));
+                }
+                args.push(dir);
+            }
             let working_dir = sidecar_root_from_executable(&executable);
             let working_dir_text = working_dir.to_string_lossy();
             return self.proc.start_with_env(
@@ -467,7 +499,9 @@ impl TtsManager {
             .parent()
             .unwrap_or(std::path::Path::new(sidecars_dir));
         let mut python_args = vec![script.to_string_lossy().to_string()];
-        python_args.extend(args);
+        if let Some(name) = &model_name {
+            python_args.push(name.clone());
+        }
         let working_dir_text = working_dir.to_string_lossy().to_string();
         self.proc
             .start_with_env(python_path, &python_args, &working_dir_text, &[token])
@@ -1326,5 +1360,29 @@ mod managed_tests {
             LlmManager::friendly("bad health response: x".to_string()),
             "bad health response: x"
         );
+    }
+}
+
+#[cfg(test)]
+mod tts_model_mapping_tests {
+    use super::*;
+
+    #[test]
+    fn tts_model_dir_joins_registry_key_under_models() {
+        let dir = tts_model_dir("C:/app/sidecars", "phonon-31m-en");
+        assert!(
+            dir.ends_with("models/phonon-31m-en") || dir.ends_with("models\\phonon-31m-en"),
+            "{dir}"
+        );
+    }
+
+    #[test]
+    fn model_names_reject_path_traversal_before_join() {
+        // tts_model_dir is only ever called after check_model_name,
+        // which keeps separators and `..` out of the join.
+        assert!(check_model_name("phonon-31m-en").is_ok());
+        assert!(check_model_name("../etc").is_err());
+        assert!(check_model_name(r"a\b").is_err());
+        assert!(check_model_name("a/b").is_err());
     }
 }
