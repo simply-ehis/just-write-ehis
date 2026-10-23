@@ -25,7 +25,7 @@ pub struct ExternalBinaryPreview {
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ExternalFileOpen {
-    Document { doc: Doc },
+    Document { doc: Box<Doc> },
     Preview { preview: ExternalBinaryPreview },
 }
 
@@ -134,7 +134,7 @@ pub fn open_external_file(
                 serde_json::json!({ "source_path": path.to_string_lossy() }).to_string(),
             ),
         })?;
-        Ok(Some(ExternalFileOpen::Document { doc }))
+        Ok(Some(ExternalFileOpen::Document { doc: Box::new(doc) }))
     }
 }
 
@@ -3476,10 +3476,7 @@ pub fn small_models_dir(app: tauri::AppHandle) -> Result<String, String> {
 /// Returns a list of {name, path} for every .gguf found directly inside.
 #[tauri::command]
 pub fn scan_small_models(app: tauri::AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let dir = match small_models_dir(app.clone()) {
-        Ok(d) => d,
-        Err(e) => return Err(e),
-    };
+    let dir = small_models_dir(app.clone())?;
     let mut models: Vec<serde_json::Value> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {

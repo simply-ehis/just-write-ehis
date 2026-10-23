@@ -338,7 +338,7 @@ async function modelWiring() {
   check("TTS lazy-load gate fixed", audioStore.includes("ttsModelReady") && audioStore.includes("health.ready ?? health.model_loaded"));
   check("running sidecars still health-check", audioStore.includes("result.value ?? await spec.health()"));
   const sidecarRust = await readFile(join(root, "src-tauri/src/sidecar.rs"), "utf8");
-  check("release prefers bundled native Python runtimes", sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') && sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "tts-server.exe")') && sidecarRust.indexOf('if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') < sidecarRust.indexOf('let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")') && sidecarRust.includes("JWE_SIDECARS_DIR"));
+  check("release prefers bundled native sidecar executables", sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') && sidecarRust.includes('resolve_sidecar_executable(sidecars_dir, "phonon-server.exe")') && sidecarRust.indexOf('if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "stt-server.exe")') < sidecarRust.indexOf('let script = resolve_sidecar_script(sidecars_dir, "stt_server.py")') && sidecarRust.indexOf('if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "phonon-server.exe")') < sidecarRust.indexOf('let script = resolve_sidecar_script(sidecars_dir, "tts_server.py")') && sidecarRust.includes("JWE_SIDECARS_DIR"));
   check("stdio transport (no TCP port reclaim in sidecar)", !sidecarRust.includes("fn port_owner") && !sidecarRust.includes("reclaim_stale_port"));
   const nativeCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("renderer cannot choose arbitrary sidecar roots", nativeCommands.includes("trusted_sidecars_dir") && nativeCommands.includes("outside the application resource root"));
@@ -356,7 +356,7 @@ async function modelWiring() {
   check("Rust passes model to sidecars", commands.includes("model: Option<String>"));
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");
   check("STT honors model override (argv[1])", stt.includes("sys.argv[1]"));
-  const phonon = await readFile(join(root, "sidecars", "phonon-server", "src", "main.rs"), "utf8");
+  const phonon = await readFile(join(root, "src-tauri", "sidecars", "phonon-server", "src", "main.rs"), "utf8");
   check("Phonon honors model override (argv[1])", phonon.includes("args[1]"));
 }
 

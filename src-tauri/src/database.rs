@@ -78,21 +78,15 @@ impl Database {
                 while let Ok(first) = rx.recv() {
                     let mut pending = HashMap::new();
                     pending.insert(first.doc_id.clone(), first);
-                    loop {
-                        match rx.recv_timeout(std::time::Duration::from_millis(300)) {
-                            Ok(job) => {
-                                if let Some(previous) = pending.get_mut(&job.doc_id) {
-                                    previous.content = job.content;
-                                    previous.refresh_rag |= job.refresh_rag;
-                                    previous
-                                        .refresh_backlink_titles
-                                        .extend(job.refresh_backlink_titles);
-                                } else {
-                                    pending.insert(job.doc_id.clone(), job);
-                                }
-                            }
-                            Err(mpsc::RecvTimeoutError::Timeout)
-                            | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    while let Ok(job) = rx.recv_timeout(std::time::Duration::from_millis(300)) {
+                        if let Some(previous) = pending.get_mut(&job.doc_id) {
+                            previous.content = job.content;
+                            previous.refresh_rag |= job.refresh_rag;
+                            previous
+                                .refresh_backlink_titles
+                                .extend(job.refresh_backlink_titles);
+                        } else {
+                            pending.insert(job.doc_id.clone(), job);
                         }
                     }
 

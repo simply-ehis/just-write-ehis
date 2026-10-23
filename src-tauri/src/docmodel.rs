@@ -443,14 +443,13 @@ impl Builder {
         while self.stack.len() > 1 {
             match self.stack.pop() {
                 Some(Container::Blocks(inner)) => self.push_block(Block::Quote(inner)),
-                Some(Container::List(list)) => {
-                    if !list.items.is_empty() {
-                        self.push_block(Block::List {
-                            ordered: list.ordered,
-                            items: list.items,
-                        })
-                    }
+                Some(Container::List(list)) if !list.items.is_empty() => {
+                    self.push_block(Block::List {
+                        ordered: list.ordered,
+                        items: list.items,
+                    })
                 }
+                Some(Container::List(_)) => {}
                 None => {}
             }
         }

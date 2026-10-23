@@ -9,6 +9,14 @@ use crate::engine::{EngineError, Result, TtsEngine};
 
 /// Register every voice found in `model_dir` with the engine.
 pub fn register_all(engine: &TtsEngine, model_dir: &Path) -> Result<()> {
+    // `default-voice.safetensors` lives in the model root (not voices/) and
+    // is the voice used when a request omits `voice`. Register it as "default"
+    // so bare `synthesize` calls work out of the box.
+    let default_voice = model_dir.join("default-voice.safetensors");
+    if default_voice.is_file() {
+        engine.register_voice_file("default", &default_voice)?;
+    }
+
     let voices_dir = model_dir.join("voices");
     if voices_dir.is_dir() {
         if let Ok(entries) = std::fs::read_dir(&voices_dir) {

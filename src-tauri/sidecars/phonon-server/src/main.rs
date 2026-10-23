@@ -107,7 +107,9 @@ fn handle_request(engine: &TtsEngine, request: &Request) -> protocol::Response {
                 ready,
                 model_loaded: ready,
                 sample_rate: engine.sample_rate(),
-                default_voice: engine.default_voice_name(),
+                default_voice: engine
+                    .default_voice_name()
+                    .or_else(|| voices::default_voice_name(engine)),
                 voices: engine.voice_names(),
                 error: if ready { None } else { Some("model not loaded".to_string()) },
             };

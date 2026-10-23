@@ -113,7 +113,7 @@ fn compute_disk_path(
                     .join("logs")
                     .join(&parts[0])
                     .join(&parts[1])
-                    .join(format!("{}.md", sanitize_component(&date_part, id)))
+                    .join(format!("{}.md", sanitize_component(date_part, id)))
             } else {
                 vault.join("logs").join(format!("{}.md", id))
             }
@@ -574,7 +574,7 @@ impl Database {
         };
 
         drop(conn);
-        self.update_derived_indexes(&doc.id, &doc.content, false, &[doc.title.clone()]);
+        self.update_derived_indexes(&doc.id, &doc.content, false, std::slice::from_ref(&doc.title));
         Ok(doc)
     }
 

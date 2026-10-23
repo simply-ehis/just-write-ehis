@@ -156,7 +156,7 @@ impl PageAssembler {
 
         // Silence is generated, not synthesized: cheap and exact.
         let silence = samples_for_ms(pause_after_ms);
-        self.page.extend(std::iter::repeat(0i16).take(silence as usize));
+        self.page.extend(std::iter::repeat_n(0i16, silence as usize));
         self.total += silence;
 
         let page_len = self.total - self.page_start;
@@ -235,7 +235,7 @@ pub fn decode_wav(data: &[u8]) -> Result<(Vec<i16>, u32), String> {
         if body_end <= pos {
             break; // corrupt size field — stop rather than loop forever
         }
-        pos = body_end + (size & 1) as usize; // chunks are word-aligned
+        pos = body_end + (size & 1); // chunks are word-aligned
     }
     let (_, channels, rate, _) = fmt.ok_or("WAV missing fmt chunk")?;
     let pcm = pcm.ok_or("WAV missing data chunk")?;

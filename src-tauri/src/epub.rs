@@ -238,11 +238,11 @@ fn build(doc: &Doc) -> Result<Vec<u8>, String> {
     // Chapter documents.
     let mut manifest = String::new();
     let mut spine = String::new();
-    for i in 0..chapters.len() {
+    for (i, chapter_doc) in chapter_docs.iter().enumerate() {
         let name = format!("ch{:02}.xhtml", i + 1);
         z.start_file(format!("EPUB/{name}"), deflated)
             .map_err(|e| format!("EPUB write failed: {}", e))?;
-        z.write_all(chapter_docs[i].as_bytes())
+        z.write_all(chapter_doc.as_bytes())
             .map_err(|e| format!("EPUB write failed: {}", e))?;
         // properties="scripted" is REQUIRED by epubcheck for XHTML content
         // documents in a spine (even though we ship no scripts). Omitting it
