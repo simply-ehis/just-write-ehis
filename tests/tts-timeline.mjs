@@ -206,5 +206,19 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
   check("set_speed registered + permitted", libSrc.includes("commands::tts_render_set_speed") && permSrc.includes("allow-tts-render-set-speed"));
 }
 
+// ── Model registry key → on-disk directory mapping (tts_start) ───────
+{
+  const fs = await import("node:fs/promises");
+  const read = async (p) => (await fs.readFile(join(root, p), "utf8")).replace(/\r\n/g, "\n");
+  const sidecarSrc = await read("src-tauri/src/sidecar.rs");
+  const phononMain = await read("src-tauri/sidecars/phonon-server/src/main.rs");
+
+  check("tts_model_dir joins the registry key under models/", sidecarSrc.includes("fn tts_model_dir(sidecars_dir: &str, model_name: &str)") && sidecarSrc.includes('.join("models")'));
+  check("exe path passes the model dir, python keeps the bare name", sidecarSrc.includes("let dir = tts_model_dir(sidecars_dir, name);") && sidecarSrc.includes("is not fetched"));
+  check("missing model dir errors actionably", sidecarSrc.includes("fetch_sidecars.py --phonon"));
+  check("phonon default dir is the registry key", phononMain.includes('models.join("phonon-31m-en")'));
+  check("phonon legacy models/phonon still resolves", phononMain.includes("legacy") && phononMain.includes('models.join("phonon")'));
+}
+
 console.log(failures === 0 ? "\nTTS-TIMELINE ALL PASS" : `\n${failures} check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

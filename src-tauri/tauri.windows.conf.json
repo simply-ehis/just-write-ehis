@@ -13,7 +13,7 @@
       "sidecars/models/llama-server.exe",
       "sidecars/models/*.dll",
       "sidecars/models/moonshine-base-Q8_0.gguf",
-      "sidecars/models/phonon/**/*",
+      "sidecars/models/phonon-31m-en/**/*",
       "sidecars/bin/**/*"
     ],
     "fileAssociations": [

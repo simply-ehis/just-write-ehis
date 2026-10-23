@@ -280,18 +280,22 @@ def fetch_tts() -> None:
 def fetch_phonon() -> None:
     """Fetch the Gradium Phonon 31M English checkpoint + voices.
 
-    Model layout expected by ptts:
-        models/phonon/
+    Model layout expected by phonon-server:
+        models/phonon-31m-en/          (dir name == model registry key)
             config.json
             model.q8.gguf
             tokenizer.json
             default-voice.safetensors
             voices.jsonl
-            voices/<id>.safetensors   (optional, from phonon-voices repo)
+            voices/<id>.safetensors   (from phonon-voices repo)
 
     Only the q8 quantization is fetched (CPU-only, no torch).
     """
-    model_dir = MODELS_DIR / "phonon"
+    model_dir = MODELS_DIR / "phonon-31m-en"
+    legacy_dir = MODELS_DIR / "phonon"
+    if legacy_dir.is_dir() and not model_dir.exists():
+        print("[PHONON] Migrating legacy models/phonon → models/phonon-31m-en …", flush=True)
+        legacy_dir.rename(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
 
     # 1) model weights (q8 GGUF)
@@ -315,7 +319,7 @@ def fetch_phonon() -> None:
 
     # 6) individual voice embeddings — parse voices.jsonl, download each.
     #    Catalog filenames carry a `voices/` prefix (the repo path); files
-    #    land flat under models/phonon/voices/, where phonon-server's
+    #    land flat under models/phonon-31m-en/voices/, where phonon-server's
     #    directory scan and voices.jsonl catalog handler both look for them.
     voice_pins = _phonon_voice_pins()
     voices_dir = model_dir / "voices"

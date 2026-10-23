@@ -357,7 +357,7 @@ async function modelWiring() {
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");
   check("STT honors model override (argv[1])", stt.includes("sys.argv[1]"));
   const phonon = await readFile(join(root, "src-tauri", "sidecars", "phonon-server", "src", "main.rs"), "utf8");
-  check("Phonon honors model override (argv[1])", phonon.includes("args[1]"));
+  check("Phonon honors model override (argv[1]) + registry-key default dir", phonon.includes("args[1]") && phonon.includes("phonon-31m-en"));
 }
 
 async function modelsDocWiring() {

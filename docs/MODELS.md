@@ -124,7 +124,7 @@ This downloads:
 
 ## TTS — Gradium Phonon q8 (Rust sidecar, torch-free)
 
-- **Default (bundled)**: `models/phonon/model.q8.gguf` + voices —
+- **Default (bundled)**: `models/phonon-31m-en/model.q8.gguf` + voices —
   fetched by `fetch_sidecars.py --phonon`.
   - `phonon-40m-multilingual` (default): en, fr, de, es, pt — CC BY-NC 4.0
     (personal use; see Settings notice).
@@ -162,9 +162,11 @@ python src-tauri/sidecars/fetch_sidecars.py --phonon --phonon-model phonon-31m-e
 ```
 
 This downloads:
-- `model.q8.gguf` (71 MB for 40m, 61 MB for 31m) → `models/phonon/`
-- `config.json`, `tokenizer.json`, `default-voice.safetensors` → `models/phonon/`
-- `voices.jsonl` + `voices/*.safetensors` → `models/phonon/voices/`
+- `model.q8.gguf` (71 MB for 40m, 61 MB for 31m) → `models/phonon-31m-en/`
+  (directory name == model registry key; legacy `models/phonon/` still
+  resolves — the fetch script migrates it on next run)
+- `config.json`, `tokenizer.json`, `default-voice.safetensors` → `models/phonon-31m-en/`
+- `voices.jsonl` + `voices/*.safetensors` → `models/phonon-31m-en/voices/`
 ## Testing a slot
 
 Settings → AI & Providers exposes **Test STT**, **Test TTS**, and **Test

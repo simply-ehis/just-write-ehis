@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## Unreleased (Phonon model name — directory mapping)
+
+**Decision: the model registry key IS the on-disk directory name** — the
+registry already documents "metadata by filename or directory name", so
+`tts_start(model)` now works end-to-end with no alias table. The phonon
+model dir is `models/phonon-31m-en/` (was `models/phonon/`).
+
+- `sidecar.rs`: new `tts_model_dir` joins `<sidecars_dir>/models/<key>`
+  for the exe (after `check_model_name` keeps separators/`..` out); a
+  missing dir errors actionably (names `fetch_sidecars.py --phonon`);
+  the python fallback keeps the bare key; no model — exe default.
+- `phonon-server`: default `$JWE_SIDECARS_DIR/models/phonon-31m-en`,
+  legacy `models/phonon` still resolves; the fetch script migrates
+  the old dir on next run (local install migrated + re-verified).
+- Bundle resource glob and docs/MODELS.md follow the new path.
+
+Tests: 2 new Rust tests (join + traversal rejection), 5 tts-timeline
+wiring pins, e2e model-override pin extended. Gates: cargo 154/0,
+e2e 217/217, tts-timeline 51/51, svelte-check 0/0, build, source
+359/359; pinned fetch re-run exit 0 post-migration; pipe smoke on
+all three launch paths (explicit dir, env default, legacy fallback)
+synthesizes valid WAV and exits 0.
+
 ## Unreleased (Phonon TTS swap — owner pass verified end-to-end)
 
 **The swap (owner commits 6a1aca2/b461a33).** Kokoro/sherpa-onnx is

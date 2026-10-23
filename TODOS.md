@@ -19,9 +19,8 @@
      verified end-to-end, see CHANGELOG)**: `phonon-server.exe` is the
      live TTS engine; `tts_server.py` remains only as an unbundled
      transition fallback. Open follow-ups:
-     (a) `tts_start(model)` passes the model NAME but phonon-server
-     treats argv[1] as a model DIR — dormant today (no caller passes
-     `model`), decide a name → dir mapping when multi-model lands;
+     (a) RESOLVED 2026-10-23: registry key == dir name; `tts_start`
+     passes `<sidecars_dir>/models/<key>` to the exe (see CHANGELOG);
      (b) the python fallback is absent from bundle resources, so
      releases ship exe-only — add `sidecars/tts_server.py` + kokoro
      weights to resources only if the fallback must actually ship;
