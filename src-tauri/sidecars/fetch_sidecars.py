@@ -7,6 +7,7 @@ One-shot fetcher for STT/TTS offline sidecar weights + binaries.
 Usage:
   python src-tauri/sidecars/fetch_sidecars.py --stt   # moonshine-base GGUF
   python src-tauri/sidecars/fetch_sidecars.py --tts   # kokoro-multi-lang-v1_0 bundle
+  python src-tauri/sidecars/fetch_sidecars.py --llm   # llama.cpp server only
 
 All downloads are pinned to specific releases/SHAs; no network at runtime.
 Release fetches refuse unpinned artifacts unless JWE_ALLOW_UNPINNED_SIDECARS=1 is set for local-only development.
@@ -43,41 +44,27 @@ TTS_BUNDLE_URL = (
 )
 TTS_BUNDLE_DIR = MODELS_DIR / "kokoro-multi-lang-v1_0"
 
-# LLM (llama.cpp server + LFM 2.5-350M GGUF). NOTE: b4970 predates LFM2
-# support (unknown architecture 'lfm2'); use a current build.
+# ── Phonon (Gradium) — Rust TTS sidecar weights ─────────────────────
+# model.q8.gguf is ~61MB for 31m-en (English only).
+# Voices live in gradium/phonon-voices (Apache-2.0), independent of the
+# weight licence (Apache-2.0 for 31m).
+PHONON_BASE = "https://huggingface.co/gradium/"
+PHONON_31M_EN_Q8 = (
+    f"{PHONON_BASE}phonon-31m-en/resolve/main/model.q8.gguf"
+)
+PHONON_VOICES_JSONL = (
+    f"{PHONON_BASE}phonon-voices/resolve/main/voices.jsonl"
+)
+PHONON_VOICE_BASE = (
+    f"{PHONON_BASE}phonon-voices/resolve/main/voices/"
+)
+
+# LLM server. Keep the release pinned; model GGUFs are user-provided.
 LLM_SERVER_URL = (
     "https://github.com/ggml-org/llama.cpp/releases/download/"
     "b11047/llama-b11047-bin-win-vulkan-x64.zip"
 )
 LLM_SERVER_DIR = MODELS_DIR / "llama-server"
-
-# Available quantizations for LFM2.5-350M on HuggingFace LiquidAI/LFM2.5-350M-GGUF
-# Q4_K_M  — balanced, default (~267MB)
-# Q5_K_M  — higher quality (~320MB)
-# Q8_0    — near-fp16 quality (~420MB)
-# Q2_K    — smallest, fastest (~160MB)
-# Q3_K_M  — fast, lower quality (~200MB)
-# Q6_K    — high quality (~380MB)
-LLM_QUANTIZATIONS = {
-    "q4_k_m": "LFM2.5-350M-Q4_K_M.gguf",
-    "q5_k_m": "LFM2.5-350M-Q5_K_M.gguf",
-    "q8_0": "LFM2.5-350M-Q8_0.gguf",
-    "q2_k": "LFM2.5-350M-Q2_K.gguf",
-    "q3_k_m": "LFM2.5-350M-Q3_K_M.gguf",
-    "q6_k": "LFM2.5-350M-Q6_K.gguf",
-}
-DEFAULT_LLM_QUANT = "q4_k_m"
-
-def _llm_gguf_url(quant: str) -> str:
-    fname = LLM_QUANTIZATIONS.get(quant, LLM_QUANTIZATIONS[DEFAULT_LLM_QUANT])
-    return (
-        "https://huggingface.co/LiquidAI/LFM2.5-350M-GGUF/resolve/main/"
-        f"{fname}"
-    )
-
-def _llm_gguf_path(quant: str) -> Path:
-    fname = LLM_QUANTIZATIONS.get(quant, LLM_QUANTIZATIONS[DEFAULT_LLM_QUANT])
-    return MODELS_DIR / fname.lower()
 
 # Typst CLI - PDF export only. Bundled via Tauri `externalBin` (not the
 # sidecar server list: it is a one-shot compiler, not a listening service).
@@ -103,6 +90,9 @@ SHA256 = {
     "llm_server": "",
     "llm_gguf": "",
     "typst_cli": "19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736",
+    "phonon_31m_q8": "",
+    "phonon_voices_jsonl": "",
+    "phonon_voice": "",  # per-voice, verified individually
 }
 ALLOW_UNPINNED = os.environ.get("JWE_ALLOW_UNPINNED_SIDECARS") == "1"
 
@@ -272,6 +262,65 @@ def fetch_tts() -> None:
     print("[TTS] Done.", flush=True)
 
 
+def fetch_phonon() -> None:
+    """Fetch the Gradium Phonon 31M English checkpoint + voices.
+
+    Model layout expected by ptts:
+        models/phonon/
+            config.json
+            model.q8.gguf
+            tokenizer.json
+            default-voice.safetensors
+            voices.jsonl
+            voices/<id>.safetensors   (optional, from phonon-voices repo)
+
+    Only the q8 quantization is fetched (CPU-only, no torch).
+    """
+    model_dir = MODELS_DIR / "phonon"
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) model weights (q8 GGUF)
+    gguf_path = model_dir / "model.q8.gguf"
+    _download(PHONON_31M_EN_Q8, gguf_path, "PHONON-31M-EN", SHA256["phonon_31m_q8"])
+
+    # 2) config.json — needed by ptts checkpoint loader
+    config_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/config.json"
+    _download(config_url, model_dir / "config.json", "PHONON-31M-EN-CONFIG", SHA256["phonon_31m_q8"])
+
+    # 3) tokenizer.json — needed by ptts with `hf` feature
+    tok_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/tokenizer.json"
+    _download(tok_url, model_dir / "tokenizer.json", "PHONON-31M-EN-TOK", SHA256["phonon_31m_q8"])
+
+    # 4) default-voice.safetensors — auto-discovered as "default" voice
+    dv_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/default-voice.safetensors"
+    _download(dv_url, model_dir / "default-voice.safetensors", "PHONON-31M-EN-DV", SHA256["phonon_31m_q8"])
+
+    # 5) voices.jsonl — catalog of available voices
+    _download(PHONON_VOICES_JSONL, model_dir / "voices.jsonl", "PHONON-VOICES-JSONL", SHA256["phonon_voices_jsonl"])
+
+    # 6) individual voice embeddings — parse voices.jsonl, download each
+    import json as _json
+    voices_dir = model_dir / "voices"
+    voices_dir.mkdir(parents=True, exist_ok=True)
+    with (model_dir / "voices.jsonl").open() as vf:
+        for line in vf:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            entry = _json.loads(line)
+            name = entry.get("name", "")
+            filename = entry.get("filename", "")
+            if not name or not filename:
+                continue
+            voice_path = voices_dir / filename
+            if voice_path.exists():
+                continue
+            voice_url = PHONON_VOICE_BASE + filename
+            _download(voice_url, voice_path, f"PHONON-VOICE-{name}", SHA256["phonon_voice"])
+
+    print(f"[PHONON] {model} ready → {model_dir}", flush=True)
+
+
 def _extract_zip(archive: Path, dest_dir: Path) -> None:
     import zipfile
 
@@ -317,29 +366,6 @@ def fetch_llm() -> None:
     shutil.rmtree(LLM_SERVER_DIR, ignore_errors=True)
 
     print("[LLM] Done (server only — GGUF lives in the app-data models folder).", flush=True)
-
-
-def _write_model_metadata(quant: str, gguf_path: Path) -> None:
-    """Write model.json metadata for the registry."""
-    import json
-
-    meta = {
-        "name": f"LFM 2.5-350M {quant.upper()}",
-        "type": "llm",
-        "quantization": quant,
-        "architecture": "lfm2",
-        "tags": ["chat", "completion", "writing"],
-        "context_limit": 8192,
-        "recommended_threads": 4,
-        "recommended_gpu_layers": 0,
-        "description": f"LFM 2.5-350M {quant.upper()} quantization",
-        "filename": gguf_path.name,
-        "size_bytes": gguf_path.stat().st_size if gguf_path.exists() else 0,
-    }
-    meta_path = gguf_path.with_suffix(".json")
-    with meta_path.open("w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-    print(f"[LLM] Wrote model metadata → {meta_path}", flush=True)
 
 
 def fetch_typst() -> None:
@@ -401,13 +427,14 @@ def main() -> None:
         pass
     ap = argparse.ArgumentParser(description="Fetch sidecar assets")
     ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
-    ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle)")
+    ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle — deprecated, use --phonon)")
+    ap.add_argument("--phonon", action="store_true", help="Fetch TTS (Gradium Phonon 31M English)")
     ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server only — GGUF lives in the app-data models folder)")
     ap.add_argument("--typst", action="store_true", help=f"Fetch the pinned Typst {TYPST_VERSION} CLI (PDF export)")
     args = ap.parse_args()
 
-    if not (args.stt or args.tts or args.llm or args.typst):
-        ap.error("Choose --stt, --tts, --llm, and/or --typst")
+    if not (args.stt or args.tts or args.phonon or args.llm or args.typst):
+        ap.error("Choose --stt, --tts, --phonon, --llm, and/or --typst")
 
     failed: list[str] = []
     if args.stt:
@@ -420,6 +447,11 @@ def main() -> None:
             fetch_tts()
         except Exception as e:
             failed.append(f"tts: {e}")
+    if args.phonon:
+        try:
+            fetch_phonon()
+        except Exception as e:
+            failed.append(f"phonon: {e}")
     if args.llm:
         try:
             fetch_llm()

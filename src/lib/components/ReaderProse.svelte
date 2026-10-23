@@ -116,6 +116,14 @@
     margin: 0 0 1em;
   }
 
+  .reader-prose :global(.tts-active-sentence) {
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    outline-offset: 3px;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+  }
+
   .reader-prose :global(ul),
   .reader-prose :global(ol) {
     margin: 0 0 1em 1.5em;

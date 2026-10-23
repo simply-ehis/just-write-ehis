@@ -9,7 +9,7 @@
  * Every model in the bundle carries a metadata file (model.json) with:
  *   type: "llm" | "tts" | "stt"
  *   quantization: "q4_k_m" | "q5_k_m" | "q8_0" | ...
- *   architecture: "lfm2" | "moonshine" | "kokoro" | ...
+ *   architecture: "lfm2" | "moonshine" | "phonon" | ...
  *   tags: string[] — e.g. ["chat", "completion"], ["synthesis"], ["transcription"]
  *   context_limit: number — max tokens the model was trained for
  *   recommended_threads: number
@@ -87,18 +87,18 @@ export const MODEL_REGISTRY: Record<string, ModelMetadata> = {
     filename: "moonshine-base-Q8_0.gguf",
     size_bytes: 77_476_480,
   },
-  "kokoro-multi-lang-v1_0": {
-    name: "Kokoro v1.0 Multi-Lang",
+  "phonon-31m-en": {
+    name: "Phonon 31M English",
     type: "tts",
-    quantization: "int8",
-    architecture: "kokoro",
-    tags: ["synthesis", "text-to-speech", "multilingual"],
+    quantization: "q8_0",
+    architecture: "phonon",
+    tags: ["synthesis", "text-to-speech", "english"],
     context_limit: 0,
-    recommended_threads: 2,
+    recommended_threads: 4,
     recommended_gpu_layers: 0,
-    description: "Fast multilingual TTS, int8 ONNX + voices.bin",
-    filename: "kokoro-multi-lang-v1_0",
-    size_bytes: 150_000_000,
+    description: "Gradium Phonon 31M English TTS, q8 GGUF + Rust runtime (Apache-2.0)",
+    filename: "phonon-31m-en",
+    size_bytes: 61_000_000,
   },
 };
 

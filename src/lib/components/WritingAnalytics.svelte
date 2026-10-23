@@ -5,17 +5,31 @@
   let open = $state(false);
   let totalDocs = $state(0);
   let totalWords = $state(0);
-  let todayWords = $state(0);
+  let totalBacklinks = $state(0);
   let streakDays = $state(0);
   let loading = $state(false);
 
   async function loadStats() {
     loading = true;
     try {
-      const stats = await api.docGetStats();
+      const [stats, writingDays] = await Promise.all([
+        api.docGetStats(),
+        api.dashboardWritingDays(),
+      ]);
       totalDocs = stats[0];
       totalWords = stats[1];
-      todayWords = stats[2];
+      totalBacklinks = stats[2];
+
+      const activeDays = new Set(writingDays);
+      const day = new Date();
+      day.setUTCHours(0, 0, 0, 0);
+      const today = day.toISOString().slice(0, 10);
+      if (!activeDays.has(today)) day.setUTCDate(day.getUTCDate() - 1);
+      streakDays = 0;
+      while (activeDays.has(day.toISOString().slice(0, 10))) {
+        streakDays += 1;
+        day.setUTCDate(day.getUTCDate() - 1);
+      }
     } catch {
     } finally {
       loading = false;
@@ -60,11 +74,11 @@
             </div>
             <div class="stat-card">
               <span class="stat-number">{formatNumber(totalWords)}</span>
-              <span class="stat-label">Total Words</span>
+              <span class="stat-label">Words in Library</span>
             </div>
             <div class="stat-card">
-              <span class="stat-number">{formatNumber(todayWords)}</span>
-              <span class="stat-label">Today</span>
+              <span class="stat-number">{formatNumber(totalBacklinks)}</span>
+              <span class="stat-label">Backlinks</span>
             </div>
             <div class="stat-card">
               <span class="stat-number">{streakDays}</span>
@@ -72,7 +86,7 @@
             </div>
           </div>
           <div class="analytics-hint">
-            <p>Your writing so far, counted from every document in this vault.</p>
+            <p>Words in Library includes imported documents. Day Streak counts days with saved writing activity.</p>
           </div>
         {/if}
       </div>

@@ -79,7 +79,15 @@ longer applies to distributed artefacts.
 ## Runtime sidecars
 
 The STT, TTS, memory and LLM sidecars fetch their own upstream components
-(llama.cpp, sherpa-onnx, Moonshine, Kokoro) at install time rather than being
-bundled. Their licences apply to those downloaded artefacts, not to this
+(llama.cpp, ptts/xn, Moonshine, Gradium Phonon) at install time rather than
+being bundled. Their licences apply to those downloaded artefacts, not to this
 repository. See `src-tauri/sidecars/requirements.txt` and the upstream
 projects for details.
+
+### Phonon (TTS)
+
+Gradium Phonon-40m-multilingual / phonon-31m-en — Apache-2.0 / CC BY-NC 4.0
+(per checkpoint). Models: `gradium/phonon-40m-multilingual`,
+`gradium/phonon-31m-en`. Voices: `gradium/phonon-voices` — Apache-2.0.
+Built on Kyutai Pocket-TTS (CC BY-4.0). Runtime: `gradium-ai/xn-ptts`
+(MIT OR Apache-2.0), tensor runtime `LaurentMazare/xn` (MIT/Apache-2.0).

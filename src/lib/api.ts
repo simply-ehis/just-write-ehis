@@ -88,6 +88,9 @@ function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   const timed = <U>(p: Promise<U>): Promise<U> =>
     p.finally(() => {
       const ms = performance.now() - t0;
+      if (["doc_save", "widget_doc_save", "atomic_save", "widget_atomic_save"].includes(cmd)) {
+        console.debug(`[save] ${cmd} completed in ${Math.round(ms)}ms`);
+      }
       if (shouldRecordSlowCall(ms)) recordSlowCall(cmd, ms);
     });
   if (isBrowserPreview()) return timed(browserInvoke<T>(cmd, fullArgs));
@@ -128,6 +131,46 @@ export interface Doc {
   goal_words?: number | null;
   deadline?: string | null;
 }
+
+/** One segment handed to the render-ahead job (see tts_render.rs). */
+export interface TtsRenderSegment {
+  id: number;
+  text: string;
+  /** Silence appended after this segment's audio, in ms. */
+  pauseAfterMs: number;
+  boundary: "sentence" | "paragraph" | "section";
+}
+
+export interface TtsRenderParams {
+  voice: string;
+  speed: number;
+  langCode: string;
+}
+
+export interface TtsRenderTiming {
+  segId: number;
+  startSample: number;
+  endSample: number;
+}
+
+/** `tts://render-page` event payload (PCM is pulled separately as i16le). */
+export interface TtsRenderPageEvent {
+  renderId: number;
+  pageIdx: number;
+  startSample: number;
+  endSample: number;
+  timings: TtsRenderTiming[];
+}
+
+export interface ExternalBinaryPreview {
+  fileName: string;
+  extension: string;
+  dataBase64: string;
+}
+
+export type ExternalFileOpen =
+  | { kind: "document"; doc: Doc }
+  | { kind: "preview"; preview: ExternalBinaryPreview };
 
 export interface Backlink {
   source_id: string;
@@ -417,7 +460,7 @@ export const api = {
   // read of any .txt/.md on the machine, outside the vault confinement every
   // other fs command enforces.
   openExternalFile: () =>
-    safeInvoke<Doc | null>("open_external_file"),
+    safeInvoke<ExternalFileOpen | null>("open_external_file"),
 
   takeLaunchFile: () =>
     safeInvoke<string | null>("take_launch_file"),
@@ -658,6 +701,9 @@ export const api = {
   fsReadFile: (path: string) =>
     safeInvoke<string>("fs_read_file", { path }),
 
+  fsReadBinary: (path: string) =>
+    safeInvoke<string>("fs_read_binary", { path }),
+
   fsRename: (oldPath: string, newName: string) =>
     safeInvoke<string>("fs_rename", { oldPath, newName }),
 
@@ -714,7 +760,7 @@ export const api = {
     safeInvoke<string[]>("dashboard_writing_days"),
 
   dashboardPatterns: () =>
-    safeInvoke<{ peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number; avg_session_minutes: number }>("dashboard_patterns"),
+    safeInvoke<{ peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number }>("dashboard_patterns"),
 
   dashboardGoals: () =>
     safeInvoke<{ id: string; title: string; workspace: string; goal_words: number; word_count: number; deadline: string | null }[]>("dashboard_goals"),
@@ -722,8 +768,8 @@ export const api = {
   // Usage Memory (8.3)
   getReopenNeverFinish: () =>
     safeInvoke<Array<{ doc: Doc; openCount: number; lastOpened: string }>>("get_reopen_never_finish"),
-  dashboardStreakHeatmap: () =>
-    safeInvoke<{ date: string; words: number }[]>("dashboard_streak_heatmap"),
+  dashboardActivityHeatmap: () =>
+    safeInvoke<{ date: string; activity: number }[]>("dashboard_activity_heatmap"),
   dashboardWritingTimePatterns: () =>
     safeInvoke<{ hour: number; count: number }[]>("dashboard_writing_time_patterns"),
 
@@ -734,10 +780,10 @@ export const api = {
     safeInvoke<number>("vault_rename_execute", { oldTitle, newTitle }),
 
   atomicSave: (docId: string, body: string) =>
-    safeInvoke<void>("atomic_save", { docId, body }),
+    safeInvoke<Doc>("atomic_save", { docId, body }),
 
   widgetAtomicSave: (docId: string, body: string) =>
-    safeInvoke<void>("widget_atomic_save", { docId, body }),
+    safeInvoke<Doc>("widget_atomic_save", { docId, body }),
 
   setupFileWatcher: () =>
     safeInvoke<void>("setup_file_watcher"),
@@ -848,7 +894,7 @@ export const api = {
   sttStreamStop: () =>
     safeInvoke<string>("stt_stream_stop"),
 
-  // ── TTS: Kokoro-82M ──────────────────────────────────────────
+  // ── TTS: Phonon ──────────────────────────────────────────
   ttsStart: (pythonPath: string, sidecarsDir: string, model?: string) =>
     safeInvoke<void>("tts_start", { pythonPath, sidecarsDir, model }),
 
@@ -867,9 +913,36 @@ export const api = {
   ttsStopPlayback: () =>
     safeInvoke<void>("tts_stop_playback"),
 
+  // ── TTS stream-ahead: PCM chunks pushed from Phonon sidecar ──
+  ttsStreamStart: (text: string, voice: string) =>
+    safeInvoke<[number, number]>("tts_stream_start", { text, voice }),
+  ttsStreamChunk: (streamId: number) =>
+    safeInvoke<[Uint8Array, number] | null>("tts_stream_chunk", { stream_id: streamId }),
+  ttsStreamStop: (streamId: number) =>
+    safeInvoke<void>("tts_stream_stop", { stream_id: streamId }),
+
+  // ── TTS render-ahead: pages + sample-accurate timeline ─────────
+  ttsRenderStart: (segments: TtsRenderSegment[], params: TtsRenderParams) =>
+    safeInvoke<number>("tts_render_start", { segments, params }),
+
+  ttsRenderCancel: (renderId: number) =>
+    safeInvoke<void>("tts_render_cancel", { renderId }),
+
+  /** Absolute render budget in seconds from stream start (playhead + ahead). */
+  ttsRenderDemand: (renderId: number, seconds: number) =>
+    safeInvoke<void>("tts_render_demand", { renderId, seconds }),
+
+  /** Phase 4: live WSOLA speed for a running render (0.5–2.0). */
+  ttsRenderSetSpeed: (renderId: number, speed: number) =>
+    safeInvoke<void>("tts_render_set_speed", { renderId, speed }),
+
+  /** One page as raw i16le bytes (ArrayBuffer — no base64 tax). */
+  ttsRenderPage: (renderId: number, pageIdx: number) =>
+    safeInvoke<ArrayBuffer>("tts_render_page", { renderId, pageIdx }),
+
   // ── LLM: llama.cpp server (LFM 2.5-350M) ───────────────────────────
-  llmStart: (sidecarsDir: string, model?: string, ctxSize?: number, quantization?: string) =>
-    safeInvoke<void>("llm_start", { sidecarsDir, model, ctxSize, quantization }),
+  llmStart: (sidecarsDir: string, model?: string, ctxSize?: number) =>
+    safeInvoke<void>("llm_start", { sidecarsDir, model, ctxSize }),
 
   llmStop: () =>
     safeInvoke<void>("llm_stop"),
@@ -943,8 +1016,8 @@ export const api = {
   memoryLearn: (text: string) =>
     safeInvoke<number>("memory_learn", { text }),
 
-  memoryRecall: (query: string) =>
-    safeInvoke<string>("memory_recall", { query }),
+  memoryRecall: (query: string, prefetch = true) =>
+    safeInvoke<string>("memory_recall", { query, prefetch }),
 
   memoryRedact: (text: string) =>
     safeInvoke<string>("memory_redact", { text }),
@@ -958,10 +1031,10 @@ export const api = {
 
   // ── Import/Export ────────────────────────────────────────────────
 // Telemetry/Analytics (only commands with live callers stay surfaced)
-  dashboardProductivityScore: () =>
-    safeInvoke<{ score: number; totalWords: number; totalDocs: number; activeDays: number; avgWords: number }>("dashboard_productivity_score"),
-  dashboardWritingVelocity: () =>
-    safeInvoke<{ date: string; words: number }[]>("dashboard_writing_velocity"),
+  dashboardLibraryStats: () =>
+    safeInvoke<{ totalWords: number; totalDocs: number; activeDays: number; avgWords: number }>("dashboard_library_stats"),
+  dashboardWritingActivity: () =>
+    safeInvoke<{ date: string; activity: number }[]>("dashboard_writing_activity"),
 
   // Role Assignment for Scripts
   scriptRoleList: (docId: string) =>

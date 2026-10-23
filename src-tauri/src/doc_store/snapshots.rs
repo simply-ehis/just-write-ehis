@@ -212,9 +212,7 @@ impl Database {
         // here leaves the DB with the restored text and the .md with the old
         // text, and the caller sees Ok.
         drop(conn);
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let full_path = resolve_in_vault(&vault, &doc.path)?;
-        drop(vault);
+        let full_path = resolve_in_vault(&self.vault_path, &doc.path)?;
         write_to_disk(&full_path, &doc.content)?;
 
         // Re-extract backlinks

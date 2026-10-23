@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-render-start"
+description = "Enables the tts_render_start command without any pre-configured scope."
+commands.allow = ["tts_render_start"]
+
+[[permission]]
+identifier = "deny-tts-render-start"
+description = "Denies the tts_render_start command without any pre-configured scope."
+commands.deny = ["tts_render_start"]

@@ -78,21 +78,32 @@ impl Database {
     /// Rebuild one doc's retrieval chunks after a meaningful edit.
     /// Best-effort by design: a stale index is worse than none, but a
     /// failed re-chunk must never fail the save that triggered it.
-    pub(super) fn refresh_rag_chunks(&self, doc_id: &str) {
+    pub(crate) fn refresh_rag_chunks(&self, doc_id: &str) {
         let count = match self.rag_chunk_document(doc_id, 200, 50) {
             Ok(chunks) => chunks.len() as i64,
-            Err(_) => return,
+            Err(error) => {
+                eprintln!("[derived-index] RAG refresh failed for {doc_id}: {error}");
+                return;
+            }
         };
-        if let Ok(conn) = self.conn.lock() {
-            // Drop chunks orphaned by shrinkage + vectors pointing nowhere.
-            let _ = conn.execute(
-                "DELETE FROM rag_chunks WHERE doc_id = ?1 AND chunk_index >= ?2",
-                params![doc_id, count],
-            );
-            let _ = conn.execute(
-                "DELETE FROM rag_vec WHERE chunk_id NOT IN (SELECT id FROM rag_chunks)",
-                [],
-            );
+        match self.conn.lock() {
+            Ok(conn) => {
+                // Drop chunks orphaned by shrinkage + vectors pointing nowhere.
+                if let Err(error) = conn.execute(
+                    "DELETE FROM rag_chunks WHERE doc_id = ?1 AND chunk_index >= ?2",
+                    params![doc_id, count],
+                ) {
+                    eprintln!("[derived-index] RAG cleanup failed for {doc_id}: {error}");
+                    return;
+                }
+                if let Err(error) = conn.execute(
+                    "DELETE FROM rag_vec WHERE chunk_id NOT IN (SELECT id FROM rag_chunks)",
+                    [],
+                ) {
+                    eprintln!("[derived-index] RAG vector cleanup failed for {doc_id}: {error}");
+                }
+            }
+            Err(error) => eprintln!("[derived-index] RAG lock failed for {doc_id}: {error}"),
         }
     }
 

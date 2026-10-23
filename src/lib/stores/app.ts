@@ -1,9 +1,10 @@
 import { writable } from "svelte/store";
-import type { Doc, TabState } from "$lib/api";
+import type { Doc, ExternalBinaryPreview, TabState } from "$lib/api";
 
 export const currentWorkspace = writable<string>("home");
 export const currentDoc = writable<Doc | null>(null);
 export const openTabs = writable<Doc[]>([]);
+export const externalFilePreview = writable<(ExternalBinaryPreview & { id: string }) | null>(null);
 
 /** Persisted chrome prefs: sidebar/AI/inspector survive restart. */
 function loadPanels(): { sidebar: boolean; ai: boolean; inspector: boolean } {

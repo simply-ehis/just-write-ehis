@@ -47,8 +47,9 @@ reproduced before being fixed.
       original test titles had only one dash-separated segment before byte 10, so they
       landed in the id-based branch even with the bug present. Both now normalise via
       `normalize_lexically`, and the traversing shape is pinned separately.
-- [ ] `src-tauri/target` was cleared at the user's request after verification, so the
-      above native re-checks await the next build (~10 min).
+- Historical note (2026-10-01): `src-tauri/target` was cleared after that native
+  verification. The compile and runtime results above describe that dated pass;
+  they do not verify source changes made afterward.
 
 ## Phase 1: Core Engine ✅
 
@@ -103,11 +104,11 @@ reproduced before being fixed.
 
 ## Remaining
 
-- [ ] Companion widget native verification — source/type/static gates pass; `tauri build --debug`, cold-open timing, RSS delta, crash recovery, theme propagation, and workspace/theme/size matrix remain pending because builds are explicitly skipped
-- [ ] Local STT/TTS/LLM release verification — source contracts, model resolution, and packaging pipeline pass; PyInstaller executables, Tauri resource layout, fresh-machine launch, real model self-tests, and Rust compilation remain pending explicit build permission
-- [ ] App PIN native verification — browser-backed create/confirm/enable/unlock/remove state machine passes; OS-keychain persistence, launch gate, retry countdown, and Lock-app-now flow require the desktop shell
+- [ ] Companion widget native verification — source/type/static gates pass; native Windows startup, selected-workspace content, cold-open timing, RSS delta, crash recovery, theme propagation, and workspace/theme/size behavior remain unverified.
+- [ ] Local STT/TTS/LLM release verification — source contracts and model resolution pass; packaged executables, Tauri resource layout, fresh-machine launch, real model self-tests, and Rust compilation remain unverified.
 
-- [ ] Rust backend compilation and Tauri packaging remain deferred in this source-only pass; no native build was run
+- [ ] Rust backend compilation and Tauri packaging were not run in the 2026-10-21
+      source verification; see `docs/SPEC-STATUS.md` for current evidence and limits.
 - [x] sqlite-vec vector embeddings for semantic RAG — **DONE** (sqlite-vec 0.1.9, zerocopy IntoBytes, TF-IDF text_to_embedding, rag_vec virtual table, semantic + keyword fallback search)
 - [x] Chat → Editor write-back (§A3) — **DONE** (writeBack store, EditorPane listener, 4 actions, keyboard shortcuts)
 - [x] AI Structurizer / Blueprint Mode (§A1) — **DONE** (`ai_structurize` command, Structurize mode tab, `{directive}` highlighting, workspace-aware system prompt, accept/insert/append/copy review actions)
@@ -121,10 +122,10 @@ reproduced before being fixed.
 
 - [x] In-app self-updates (Tauri updater) — **WIRED, NOT YET Runnable** (plugin init + `app_update_status` command + `capabilities/default.json` + `updates.ts` + Settings → About → App Updates UI with check/download-progress/install/relaunch + silent startup check with opt-out + `docs/UPDATES.md` release flow; one-time maintainer setup still required: keypair, pubkey, endpoint — UI reports "not configured" until then)
 - [x] Manuscript export pipeline — **DONE where verifiable** (Rust `convert.rs`: md/txt/html built in via pulldown-cmark, docx/epub/pdf via pandoc sidecar-or-PATH with install guidance; `convert_run` / `compile_run(board order)` / `convert_status`; editor export menu lists live formats; Novel Compile dialog downloads in-format; browser mirror for md/txt/html; `docs/EXPORT.md`; self-test covers export round-trip; Rust side uncompiled per no-exe constraint)
-- [x] Per-doc lock excludes AI + Patterns — **DONE where verifiable** (`locked` column + migration; filtered from search/RAG/workspace-context/all Home stats/smart-tabs in both backends; TabBar Lock/Unlock with PIN gate; session-only unlocks; App pane gate; AI gates in chat/composer/ghost; inbox preview redaction; rule: titles stay visible in structural views, content is invisible)
+- [—] Per-document locks and app PIN — implemented in an earlier pass, then removed on 2026-10-09 because the session gate did not encrypt files; historical lock checks below are not current behavior.
 - [x] Craft skill nudge — **DONE** (repaired `craft_metrics` schema mismatch that made all recording fail; editors record filter-word ratio + write heartbeat ≤1/min — this also wakes up streaks/heatmaps/patterns, which had zero `write` events; SkillNudges surfaces a once-ever gentle warning on genuine creep)
 - [x] Board arrangement = Compile order — **DONE** (frontmatter `order` sort in beat board + backend compile; scene drag-reorder within/across sequences and act reorder, persisted; fixed Novel Studio being unreachable — `projectId` was never assigned — with a project picker + auto-follow of the open doc; freeform Canvas board itself still unbuilt, this covers the ordering need)
-- [x] Home pinned quick-launch — **DONE** (`doc_list_pinned`, Pinned section with lock badges)
+- [x] Home pinned quick-launch — **DONE** (`doc_list_pinned`, Pinned section with pin indicators)
 - [x] Per-workspace last place — **DONE** (`lastPlace.ts`, restore on visit for write/novel/script/projects/reader; Logs stays on today per spec §8.1)
 - [x] Streak sparkline — **DONE** (`today_rhythm` 24-bucket query, SVG sparkline with tooltip in StatusBar)
 - [x] Canvas board (A11.1) — **DONE where verifiable** (freeform cards + labeled connections + doc links; pan/zoom/fit, drag persist, connect mode, per-card inspector, keyboard delete; sidebar/palette/mobile/Home wiring; Rust side uncompiled per no-exe constraint)
@@ -176,8 +177,7 @@ reproduced before being fixed.
 - [x] Settings exposes real STT load, TTS synthesis, and bundled-LLM completion checks
 - [x] Windows release pipeline is wired to preflight assets and package native STT/TTS/memory runtimes through `tauri.windows.conf.json`; the platform overlay retains every base resource and adds the native bin bundle; no executable was produced in this pass
 - [x] Development fallback accepts only `python`, `python3`, or `py` from PATH; renderer-supplied executable paths are rejected, and native executables bypass interpreter validation
-- [x] PIN locking defaults off, requires create+confirm in the lock store, fails closed on unknown/invalid keychain state, gates the main and widget shells, and resumes startup after explicit recovery
-- [x] PIN retry/backoff state is shared by main/widget through the managed backend and mirrored in browser preview; empty/whitespace-only PINs cannot verify
+- [—] Historical PIN implementation notes — superseded by the 2026-10-09 removal recorded above.
 - [x] Stale-port cleanup terminates only verified sidecar executable names; unknown/Python holders fail closed
 - [x] Memory sidecar uses a per-launch token and rejects unauthenticated loopback calls
 - [x] Release asset fetches refuse missing SHA-256 pins unless the explicit local-only override is set
@@ -187,6 +187,6 @@ reproduced before being fixed.
 - [x] `test:widget` and `test:widget-proof`: pass; native two-window behavior remains unmeasured
 - [x] Build-gated UI probes (`onboard`, workspace toggles, Reader surface, theme mount, mobile behavior) report explicit `SKIP` when fresh `dist` is unavailable; they are not source evidence
 - [x] `build_sidecars.py` and all sidecar Python sources parse successfully; no PyInstaller/Tauri/native executable was produced
-- [ ] Rust compilation and PyInstaller output are intentionally deferred until explicit build permission
+- [ ] Rust compilation and PyInstaller output were not run in this source verification; the offline Cargo test could not resolve a dependency absent from the local cache.
 - [ ] `cargo fmt --check` remains blocked by broad pre-existing formatting drift across Rust files; no mass reformat was applied during this focused repair
-- [ ] Fresh-machine STT/TTS/LLM, OS-keychain PIN, Tauri resource layout, and updater-signature flows remain manual release-gate checks
+- [ ] Fresh-machine STT/TTS/LLM, OS-keychain secret migration, Tauri resource layout, and updater-signature flows remain manual release-gate checks

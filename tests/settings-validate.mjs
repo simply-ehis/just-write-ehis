@@ -30,7 +30,8 @@ check("valid passes", r.valid.theme === "brutalist" && r.valid.themeMode === "li
 check("unknown rejected", r.rejected.includes("notARealKey"));
 check("removed key rejected", r.rejected.includes("fileWatcherEnabled"));
 r = v.validateSettings({ companionWidgetVisible: true, widgetWorkspace: "logs", associatedFileExtensions: ["txt", "md"], widgetAutostartPromptShown: true });
-check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs" && r.valid.associatedFileExtensions.length === 2 && r.valid.widgetAutostartPromptShown === true);
+check("widget settings pass", r.valid.companionWidgetVisible === true && r.valid.widgetWorkspace === "logs" && r.valid.widgetAutostartPromptShown === true);
+check("removed file association preference is rejected", r.rejected.includes("associatedFileExtensions"));
 r = v.validateSettings({ companionWidgetVisible: "yes", widgetWorkspace: "unknown" });
 check("bad widget settings rejected", r.rejected.includes("companionWidgetVisible") && r.rejected.includes("widgetWorkspace"));
 
@@ -56,9 +57,9 @@ check("legacy theme + empty accent rejected", r.rejected.includes("theme"));
 check("empty accent passes", v.validateSettings({ accentOverride: "" }).valid.accentOverride === "");
 
 // Out-of-range numbers clamped, reported, present in valid.
-r = v.validateSettings({ fontSize: 99, streakGoal: -5, ttsSpeed: 9, snapshotRetentionDays: 3 });
+r = v.validateSettings({ fontSize: 99, focusContextLines: -5, ttsSpeed: 9, snapshotRetentionDays: 3 });
 check("high clamp", r.valid.fontSize === 32 && r.clamped.includes("fontSize"));
-check("low clamp", r.valid.streakGoal === 0 && r.clamped.includes("streakGoal"));
+check("low clamp", r.valid.focusContextLines === 0 && r.clamped.includes("focusContextLines"));
 check("float clamp", r.valid.ttsSpeed === 4 && r.clamped.includes("ttsSpeed"));
 check("int clamp", r.valid.snapshotRetentionDays === 7 && r.clamped.includes("snapshotRetentionDays"));
 
@@ -105,6 +106,24 @@ check("full custom untouched", m.migrated.length === 0 && m.patch.mainModelName 
 
 check("only apiKey is a secret", v.SECRET_KEYS.length === 1 && v.SECRET_KEYS[0] === "apiKey");
 check("lock keys are out of the schema", v.clampNumber("lockEnabled", true) === null && v.clampNumber("appLockPin", "1234") === null);
+
+// Widget: a registered kind passes, a retired/unknown one is rejected, size clamps.
+r = v.validateSettings({ widgetKind: "reader", widgetGeometry: "10,20,340,240", widgetReaderSize: 18 });
+check("widget kind, geometry and reader size pass", r.valid.widgetKind === "reader" && r.valid.widgetGeometry === "10,20,340,240" && r.valid.widgetReaderSize === 18);
+r = v.validateSettings({ widgetKind: "calendar" });
+check("unknown widget kind is rejected", r.rejected.includes("widgetKind"));
+r = v.validateSettings({ widgetReaderSize: 99 });
+check("reader widget size is clamped", r.valid.widgetReaderSize === 28 && r.clamped.includes("widgetReaderSize"));
+
+// Interface size: in-range kept, out-of-range clamped, junk rejected (never zoom the app to 900%).
+r = v.validateSettings({ uiScale: 1.25 });
+check("uiScale in range is kept", r.valid.uiScale === 1.25);
+r = v.validateSettings({ uiScale: 9 });
+check("uiScale too large is clamped to 1.6", r.valid.uiScale === 1.6 && r.clamped.includes("uiScale"));
+r = v.validateSettings({ uiScale: 0.1 });
+check("uiScale too small is clamped to 0.8", r.valid.uiScale === 0.8 && r.clamped.includes("uiScale"));
+r = v.validateSettings({ uiScale: "big" });
+check("uiScale non-number is rejected", r.rejected.includes("uiScale"));
 
 if (failures > 0) {
   console.error(`${failures} failure(s)`);

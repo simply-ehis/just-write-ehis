@@ -39,8 +39,12 @@
   import BottomBar from "$lib/components/BottomBar.svelte";
   import BootLoader from "$lib/components/BootLoader.svelte";
   import { applyAppearance, applyEditorTypography, applyFocusDimStyle, watchSystemTheme } from "$lib/appearance";
+  import { applyUiScale } from "$lib/uiScale";
   import HelpOverlay from "$lib/components/HelpOverlay.svelte";
+  import ListenHarness from "$lib/components/ListenHarness.svelte";
+  import { listenHarnessOpen } from "$lib/stores/devHarness";
   import { showConflict } from "$lib/stores/conflict";
+  import { notifyConflictFound } from "$lib/osNotifications";
   import { settingsCategory } from "$lib/stores/settings";
   import { consumeLaunchParams, setupLaunchBridge } from "$lib/launch";
   import { consumeNativeLaunchFile, listenForNativeFileOpen } from "$lib/nativeLaunch";
@@ -327,6 +331,11 @@ import { waitForBackendReady } from "$lib/bootGate";
     );
   });
 
+  // Whole-interface size (Settings → Appearance). Native webview zoom, desktop only.
+  $effect(() => {
+    void applyUiScale($settings.uiScale);
+  });
+
   // Per-workspace last place: remember the open doc when leaving a
   // workspace, restore it when coming back empty-handed. Open-doc flows
   // set workspace + doc together, so they never trigger a restore.
@@ -550,6 +559,9 @@ import { waitForBackendReady } from "$lib/bootGate";
             const changedPath = event.payload;
             if ($currentDoc && changedPath.includes($currentDoc.id)) {
               showConflict($currentDoc.id, changedPath, new Date().toISOString());
+              // The docked banner covers the visible case; the OS
+              // notification reaches the user while the app is hidden.
+              notifyConflictFound(changedPath);
             }
           })),
           bootStep("tray-capture-listener", 8000, () => listen("tray-capture", () => {
@@ -646,8 +658,12 @@ import { waitForBackendReady } from "$lib/bootGate";
 
       // Landing workspace (onboarding choice, default "home"): applies
       // only when nothing restores over it â€” open tabs and launch
-      // intents below both win.
-      $currentWorkspace = $settings.defaultWorkspace || "home";
+      // intents below both win. Unknown ids fall back to home so a stale
+      // landing (e.g. "map" before the v6 migration) never lands on an
+      // unrouted workspace.
+      $currentWorkspace = workspaces.some((w) => w.id === $settings.defaultWorkspace)
+        ? $settings.defaultWorkspace
+        : "home";
 
       // Restore pre-restart tabs before first paint of the shell.
       await bootStep("restore-tabs", 15000, () => restoreTabs());
@@ -829,6 +845,9 @@ import { waitForBackendReady } from "$lib/bootGate";
     <BottomBar />
   {/if}
   <HelpOverlay />
+  {#if $listenHarnessOpen}
+    <ListenHarness />
+  {/if}
   {#if showOnboarding}
     <OnboardingOverlay onComplete={() => { showOnboarding = false; }} />
   {/if}

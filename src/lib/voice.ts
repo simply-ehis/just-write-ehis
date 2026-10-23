@@ -1,7 +1,7 @@
 /**
  * voice — browser speech for web capture and read-aloud surfaces.
  *
- * The desktop app keeps using its local Moonshine/Kokoro sidecars. The web
+ * The desktop app keeps using its local Moonshine/Phonon sidecars. The web
  * build has no sidecars, so it uses the browser's built-in speech
  * recognition and synthesis instead. Both paths are feature-detected.
  */

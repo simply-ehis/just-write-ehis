@@ -46,7 +46,7 @@ if (openFn) {
 
 check(
   "api.openExternalFile sends no path argument",
-  /openExternalFile: \(\) =>\s*\n?\s*safeInvoke<Doc \| null>\("open_external_file"\)/.test(api),
+  /openExternalFile: \(\) =>\s*\n?\s*safeInvoke<ExternalFileOpen \| null>\("open_external_file"\)/.test(api),
   (api.match(/openExternalFile[\s\S]{0,120}?;/)?.[0] || "").replace(/\s+/g, " ")
 );
 check(

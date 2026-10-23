@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-render-page"
+description = "Enables the tts_render_page command without any pre-configured scope."
+commands.allow = ["tts_render_page"]
+
+[[permission]]
+identifier = "deny-tts-render-page"
+description = "Denies the tts_render_page command without any pre-configured scope."
+commands.deny = ["tts_render_page"]

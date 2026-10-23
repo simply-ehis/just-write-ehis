@@ -2,8 +2,7 @@
  * dashboard — single truth for Home cards + Stats (UsageMemory).
  *
  * Both surfaces read the same backend commands; this store is the one
- * frontend cache so they can never disagree. Commands underneath are
- * unchanged — only the callers consolidate here. Refresh is explicit
+ * frontend cache so they can never disagree. Refresh is explicit
  * (doc/workspace change, manual invalidate), never polled.
  */
 import { writable } from "svelte/store";
@@ -17,11 +16,10 @@ export interface ReopenItem {
 
 export interface DashboardStats {
   reopenNeverFinish: ReopenItem[];
-  streakHeatmap: { date: string; words: number }[];
+  activityHeatmap: { date: string; activity: number }[];
   writingTimePatterns: { hour: number; count: number }[];
-  writingVelocity: { date: string; words: number }[];
-  productivityScore: {
-    score: number;
+  writingActivity: { date: string; activity: number }[];
+  libraryStats: {
     totalWords: number;
     totalDocs: number;
     activeDays: number;
@@ -32,10 +30,10 @@ export interface DashboardStats {
 
 const EMPTY: DashboardStats = {
   reopenNeverFinish: [],
-  streakHeatmap: [],
+  activityHeatmap: [],
   writingTimePatterns: [],
-  writingVelocity: [],
-  productivityScore: null,
+  writingActivity: [],
+  libraryStats: null,
   loadedAt: 0,
 };
 
@@ -47,19 +45,19 @@ let inflight: Promise<void> | null = null;
 export function refreshDashboardStats(): Promise<void> {
   if (!inflight) {
     inflight = (async () => {
-      const [reopen, streak, patterns, velocity, productivity] = await Promise.all([
+      const [reopen, heatmap, patterns, activity, libraryStats] = await Promise.all([
         api.getReopenNeverFinish(),
-        api.dashboardStreakHeatmap(),
+        api.dashboardActivityHeatmap(),
         api.dashboardWritingTimePatterns(),
-        api.dashboardWritingVelocity(),
-        api.dashboardProductivityScore(),
+        api.dashboardWritingActivity(),
+        api.dashboardLibraryStats(),
       ]);
       dashboardStats.set({
         reopenNeverFinish: reopen ?? [],
-        streakHeatmap: streak ?? [],
+        activityHeatmap: heatmap ?? [],
         writingTimePatterns: patterns ?? [],
-        writingVelocity: velocity ?? [],
-        productivityScore: productivity,
+        writingActivity: activity ?? [],
+        libraryStats,
         loadedAt: Date.now(),
       });
     })();

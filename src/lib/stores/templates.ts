@@ -34,6 +34,99 @@ export interface Snippet {
 
 const builtinTemplates: Template[] = [
   {
+    id: "letter",
+    name: "Letter",
+    description: "A clear, adaptable personal or professional letter",
+    content: `{{date}}
+
+Dear {{recipient}},
+
+{{opening}}
+
+{{message}}
+
+{{closing}},
+{{sender}}`,
+    variables: [
+      { name: "date", label: "Date", type: "date", default: "", required: true },
+      { name: "recipient", label: "Recipient", type: "text", default: "Name", required: true },
+      { name: "opening", label: "Opening", type: "text", default: "I am writing to…", required: false },
+      { name: "message", label: "Main message", type: "textarea", default: "", required: true },
+      { name: "closing", label: "Closing", type: "text", default: "Kind regards", required: false },
+      { name: "sender", label: "Your name", type: "text", default: "", required: true },
+    ],
+    workspace: "write",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: "poem",
+    name: "Poem",
+    description: "A lightweight page for drafting a poem",
+    content: `# {{title}}
+
+{{poem}}
+`,
+    variables: [
+      { name: "title", label: "Title", type: "text", default: "Untitled", required: true },
+      { name: "poem", label: "First lines", type: "textarea", default: "", required: false },
+    ],
+    workspace: "write",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: "short-story",
+    name: "Short Story Draft",
+    description: "A simple story structure that leaves room to write",
+    content: `# {{title}}
+
+{{premise}}
+
+## Opening
+
+## Turn
+
+## Ending
+`,
+    variables: [
+      { name: "title", label: "Story title", type: "text", default: "Untitled Story", required: true },
+      { name: "premise", label: "Premise", type: "textarea", default: "", required: false },
+    ],
+    workspace: "write",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
+    id: "memo",
+    name: "Memo",
+    description: "A concise office memo with a clear purpose and next steps",
+    content: `# {{subject}}
+
+**To:** {{to}}
+**From:** {{from}}
+**Date:** {{date}}
+
+## Purpose
+
+{{purpose}}
+
+## Details
+
+## Next steps
+`,
+    variables: [
+      { name: "subject", label: "Subject", type: "text", default: "", required: true },
+      { name: "to", label: "To", type: "text", default: "", required: false },
+      { name: "from", label: "From", type: "text", default: "", required: false },
+      { name: "date", label: "Date", type: "date", default: "", required: true },
+      { name: "purpose", label: "Purpose", type: "textarea", default: "", required: false },
+    ],
+    workspace: "write",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  },
+  {
     id: "daily-note",
     name: "Daily Note",
     description: "A structured daily journal entry",
@@ -202,7 +295,13 @@ const SNIPPETS_KEY = "jw-snippets";
 function loadTemplates(): Template[] {
   try {
     const stored = localStorage.getItem(TEMPLATES_KEY);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const saved = JSON.parse(stored) as Template[];
+      if (Array.isArray(saved)) {
+        const savedIds = new Set(saved.map((template) => template.id));
+        return [...builtinTemplates.filter((template) => !savedIds.has(template.id)), ...saved];
+      }
+    }
   } catch (e) {
     console.warn("Templates: stored data unreadable, using builtins:", e);
   }

@@ -4,7 +4,7 @@ READ-WHEN: AI answers badly, swapping STT/TTS/LLM models, adding a new slot
 KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/build_sidecars.py
 INVARIANTS: small slot = ghost/light tasks; main slot = chat/composer/structurize; voice swaps apply on next sidecar start
 GOTCHAS: release builds package Python runtimes and weights; source runs need a PATH Python command plus requirements; TTS is ready before its lazy first synthesis; model swaps require a sidecar restart
-UPDATED: 2026-09-25
+UPDATED: 2026-10-20
 
 # MODELS.md — picks per job (researched Sept 2026)
 
@@ -15,10 +15,13 @@ UPDATED: 2026-09-25
 | Small | Ghost autocomplete, light tasks | Small endpoint + name |
 | Main | Chat, Composer, Structurize | Main endpoint + name |
 | STT | MicButton dictation | `sttModel` path → `stt_server.py argv[2]` |
-| TTS | Read-aloud | `ttsModel` dir → `tts_server.py argv[2]` |
+| TTS | Read-aloud | `ttsModel` dir → `tts_server.py argv[2]` (called per sentence from the render-ahead job in `tts_render.rs`; the sidecar itself never plays audio) |
 
-Swapping is paste-a-path: model names/ids/repos are strings end to end.
-Restart the sidecar (toggle the feature or restart the app) after a voice swap.
+For the local LLM, place a `.gguf` file directly in the app data `models`
+folder, refresh the list in Settings → AI, and select its filename. The app
+loads the file as-is; it does not quantize or convert it. Remote providers
+still use an endpoint and model id. Restart the sidecar after changing a
+model.
 Web exception: the browser build uses built-in speech recognition/synthesis,
 so STT/TTS model fields only affect the desktop sidecars.
 
@@ -41,10 +44,13 @@ Python installation after a release build.
 
 ## Model selection contract
 
-Changeability contract (every pick below must satisfy all three, verified):
-1. paste the name/id/repo into its Settings field — no code change;
-2. Settings → AI → **Test** confirms the endpoint serves it;
-3. release builds include the selected default weights; fresh source checkouts fetch defaults once with `fetch_sidecars.py`, and custom weights never enter git.
+- Local LLMs are discovered from `.gguf` files directly inside the fixed app
+  data `models` folder. Settings stores the selected filename; the backend
+  resolves it inside that folder or the bundled resources folder.
+- The local runner passes GGUFs through unchanged. Its runtime flags are
+  Flash Attention on, K/V cache `q8_0`, and one server slot.
+- Remote slots use an OpenAI-compatible endpoint and model id. Settings → AI
+  → **Test** checks the configured endpoint.
 
 ## Light LLM (small slot)
 
@@ -54,8 +60,9 @@ title/tag suggestions, craft-metric notes. All want instruction-following
 
 Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
-1. **Bundled local endpoint** — default, keep. The small-model sidecar
-   serves it over a per-session AF_UNIX socket (zero config, no key);
+1. **Local model endpoint** — default. The small-model sidecar serves it over
+   a per-session AF_UNIX socket (zero config, no key). Add a GGUF to the app
+   data models folder and choose it in Settings;
    the frontend's `is_local_llm_sentinel` matches the legacy
    `http://127.0.0.1:8093/v1` / `http://localhost:8093/v1` values and
    routes those to the socket transparently.
@@ -69,11 +76,9 @@ Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
 ### Provider notes
 
-Both slots speak the same contract: `{base}/chat/completions` with a
-Bearer key, verified up front by `{base}/models`. If Test lists your model
-id, the slot works — provider-agnostic. No local-model tags, Ollama
-commands, or GGUF paths are listed here on purpose; the bundled sidecar
-is the only local exception and it needs no model pick.
+Remote providers speak `{base}/chat/completions` with a Bearer key and are
+verified by `{base}/models`. The local model is started through its private
+socket and must be a GGUF selected from the app data models folder.
 
 ## Main LLM (main slot)
 
@@ -117,48 +122,49 @@ The fetcher requires pinned SHA-256 values in `fetch_sidecars.py` for release do
 This downloads:
 - `moonshine-base-Q8_0.gguf` → `models/moonshine-base-Q8_0.gguf`
 
-## TTS — Kokoro-82M only (locked, torch-free)
+## TTS — Gradium Phonon q8 (Rust sidecar, torch-free)
 
-- **Default (bundled)**: `models/kokoro-multi-lang-v1_0/` — 53 speakers,
-  fetched by `fetch_sidecars.py --tts`.
-- **Swap**: paste a local bundle directory containing `model.onnx`,
-  `voices.bin`, `tokens.txt`, `espeak-ng-data/` into Settings → AI →
+- **Default (bundled)**: `models/phonon/model.q8.gguf` + voices —
+  fetched by `fetch_sidecars.py --phonon`.
+  - `phonon-40m-multilingual` (default): en, fr, de, es, pt — CC BY-NC 4.0
+    (personal use; see Settings notice).
+  - `phonon-31m-en`: English only — Apache-2.0 (commercial-safe).
+  Switch checkpoint in Settings → AI & Providers → TTS Model.
+- **Swap**: paste a local checkpoint directory containing `model.q8.gguf`,
+  `tokenizer.json`, `config.json`, `default-voice.safetensors`, and
+  optional `voices/*.safetensors` into Settings → AI →
   TTS Weights Repo. Empty = vendored default.
-- The TTS sidecar uses **sherpa-onnx `OfflineTtsKokoroModelConfig`** —
-  no PyTorch, no HuggingFace download at runtime, CPU-only wheels.
-- Voices available in v1.0 bundle (53 total):
-
-  | Lang | Voices |
-  |---|---|
-  | `a` (en-US) | `af_alloy`, `af_aoede`, `af_bella`, `af_heart`, `af_jessica`, `af_kore`, `af_nicole`, `af_nova`, `af_river`, `af_sarah`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_fenrir`, `am_liam`, `am_michael`, `am_onyx`, `am_puck`, `am_santa` |
-  | `b` (en-GB) | `bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`, `bm_george`, `bm_lewis` |
-  | `j` (ja) | `jf_alpha`, `jf_gongitsune`, `jf_nezumi`, `jf_tebukuro`, `jm_kumo` |
-  | `z` (zh) | `zf_xiaobei`, `zf_xiaoni`, `zf_xiaoxiao`, `zf_xiaoyi`, `zm_yunjian`, `zm_yunxi`, `zm_yunxia`, `zm_yunyang` |
-  | `e` (es) | `ef_dora`, `em_alex` |
-  | `f` (fr) | `ff_siwis` |
-  | `h` (hi) | `hf_alpha`, `hf_beta`, `hm_omega`, `hm_psi` |
-  | `i` (it) | `if_sara`, `im_nicola` |
-  | `p` (pt) | `pf_dora`, `pm_alex`, `pm_santa` |
-
-  **Missing from v1.0 (fall back to `af_heart` with warning):** `jf_never`,
-  `fm_alpha`, `hf_baya`, `hm_pratik`, `it_paola`, `pm_mario`, all `kf_*`,
-  `km_*`. Korean has no v1.0 voice — see SHERPA docs for updates.
-- Model source: sherpa-onnx release `tts-models/kokoro-multi-lang-v1_0.tar.bz2`
+- The TTS sidecar is **`sidecars/phonon-server/`** — a Rust binary built
+  with `cargo build --release`, driven by the `ptts`/`xn` crate.
+  No PyTorch, no ONNX Runtime, no HuggingFace download at runtime,
+  CPU-only, fully offline.
+- Voices: 102 catalog voices from `gradium/phonon-voices` (Apache-2.0),
+  including 37 English voices (25 standard + 12 character voices) and
+  65 voices across fr, de, es, pt. See
+  `src/lib/components/SettingsPane.svelte` PHONON_VOICES for the listed
+  subset; the full catalog is at `gradium/phonon-voices`.
+- Model source: `gradium/phonon-40m-multilingual` or
+  `gradium/phonon-31m-en` on Hugging Face.
 - Evaluated and rejected, on record: Pocket TTS v2.1 and Sopro v1.5
-  (2026, smaller, cloning — but different architectures, need new sidecar
-  servers, not repo swaps); Chatterbox (MIT, expressive cloning, ~0.5B +
-  GPU); XTTS v2 (non-commercial); Fish Speech open variant
-  (non-commercial); Piper (clear quality step down).
+  (2026, smaller, cloning — but different architectures); Chatterbox
+  (MIT, expressive cloning, ~0.5B + GPU); XTTS v2 (non-commercial);
+  Fish Speech open variant (non-commercial); Piper (clear quality step
+  down); Kokoro-82M via sherpa-onnx (replaced by Phonon — Kokoro’s own
+  espeak-ng wrapper path degraded English pronunciation; Phonon’s native
+  tokenizer is more accurate).
 
 ### TTS fetch (one-time)
 
 ```bash
-python src-tauri/sidecars/fetch_sidecars.py --tts
+python src-tauri/sidecars/fetch_sidecars.py --phonon
+# or
+python src-tauri/sidecars/fetch_sidecars.py --phonon --phonon-model phonon-31m-en
 ```
 
 This downloads:
-- `kokoro-multi-lang-v1_0.tar.bz2` → extracts to `models/kokoro-multi-lang-v1_0/`
-
+- `model.q8.gguf` (71 MB for 40m, 61 MB for 31m) → `models/phonon/`
+- `config.json`, `tokenizer.json`, `default-voice.safetensors` → `models/phonon/`
+- `voices.jsonl` + `voices/*.safetensors` → `models/phonon/voices/`
 ## Testing a slot
 
 Settings → AI & Providers exposes **Test STT**, **Test TTS**, and **Test

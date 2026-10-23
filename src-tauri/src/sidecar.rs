@@ -3,6 +3,7 @@ use serde_json::json;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
+use base64::engine::{general_purpose::STANDARD as BASE64, Engine as _};
 
 use crate::ipc::{IpcSidecar, SockClient};
 use crate::procutil::{hide_console, sidecar_stdio, terminate_child};
@@ -415,7 +416,7 @@ impl SttManager {
     }
 }
 
-// ── Kokoro TTS sidecar (stdio) ────────────────────────────────────
+// ── Phonon TTS sidecar (stdio) ────────────────────────────────────
 
 pub struct TtsManager {
     proc: IpcSidecar,
@@ -451,7 +452,7 @@ impl TtsManager {
             args.push(m.to_string());
         }
         let token = ("JWE_SIDECAR_TOKEN", self.auth_token.as_str());
-        if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "tts-server.exe") {
+        if let Some(executable) = resolve_sidecar_executable(sidecars_dir, "phonon-server.exe") {
             let working_dir = sidecar_root_from_executable(&executable);
             let working_dir_text = working_dir.to_string_lossy();
             return self.proc.start_with_env(
@@ -528,6 +529,74 @@ impl TtsManager {
     pub async fn stop_playback(&self) -> Result<(), String> {
         self.proc
             .request("stop", json!({}), CONTROL_TIMEOUT)
+            .await?;
+        Ok(())
+    }
+
+    /// Start a streaming TTS session. Returns (stream_id, sample_rate).
+    pub async fn stream_start(
+        &self,
+        text: &str,
+        voice: &str,
+    ) -> Result<(u64, u32), String> {
+        let value = self
+            .proc
+            .request(
+                "stream_start",
+                json!({ "text": text, "voice": voice }),
+                MEDIA_TIMEOUT,
+            )
+            .await?;
+        let stream_id = value
+            .get("stream_id")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| "stream_start missing stream_id".to_string())?;
+        let sample_rate = value
+            .get("sample_rate")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| "stream_start missing sample_rate".to_string())?
+            as u32;
+        Ok((stream_id, sample_rate))
+    }
+
+    /// Receive the next PCM chunk from a streaming session.
+    pub async fn stream_chunk(
+        &self,
+        stream_id: u64,
+    ) -> Result<Option<(Vec<u8>, u32)>, String> {
+        let value = self
+            .proc
+            .request(
+                "stream_chunk",
+                json!({ "stream_id": stream_id }),
+                CONTROL_TIMEOUT,
+            )
+            .await?;
+        if value.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Ok(None);
+        }
+        let audio_b64 = value
+            .get("audio")
+            .and_then(|a| a.as_str())
+            .ok_or_else(|| "stream_chunk missing audio".to_string())?;
+        let sample_rate = value
+            .get("sample_rate")
+            .and_then(|s| s.as_u64())
+            .ok_or_else(|| "stream_chunk missing sample_rate".to_string())?
+            as u32;
+        let wav_bytes = BASE64.decode(audio_b64)
+            .map_err(|e| format!("stream_chunk base64 decode failed: {e}"))?;
+        Ok(Some((wav_bytes, sample_rate)))
+    }
+
+    /// Stop and drop a streaming session.
+    pub async fn stream_stop(&self, stream_id: u64) -> Result<(), String> {
+        self.proc
+            .request(
+                "stream_stop",
+                json!({ "stream_id": stream_id }),
+                CONTROL_TIMEOUT,
+            )
             .await?;
         Ok(())
     }
@@ -614,10 +683,10 @@ impl MemoryManager {
             .ok_or_else(|| "bad learn response".to_string())
     }
 
-    pub async fn recall(&self, query: &str) -> Result<String, String> {
+    pub async fn recall(&self, query: &str, prefetch: bool) -> Result<String, String> {
         let value = self
             .proc
-            .request("recall", json!({ "q": query }), CONTROL_TIMEOUT)
+            .request("recall", json!({ "q": query, "prefetch": prefetch }), CONTROL_TIMEOUT)
             .await?;
         value
             .get("facts")
@@ -649,28 +718,19 @@ impl MemoryManager {
 // ── LLM sidecar (llama.cpp server over AF_UNIX) ───────────────────
 
 fn resolve_llm_model_path(
-    path: Option<&str>,
+    path: &str,
     asset_root: &std::path::Path,
     models_dir: &std::path::Path,
+    user_models_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    let requested = path.map(str::trim).filter(|value| !value.is_empty());
-    let Some(requested) = requested else {
-        let default_path = models_dir.join("lfm2.5-350m-q4_k_m.gguf");
-        if !default_path.is_file() {
-            return Err(format!(
-                "LLM model not found: {}",
-                default_path.to_string_lossy()
-            ));
-        }
-        return Ok(default_path);
-    };
+    let requested = path.trim();
     if !requested.to_ascii_lowercase().ends_with(".gguf") {
         return Err("LLM model must be a .gguf file".to_string());
     }
     let requested_path = std::path::Path::new(requested);
     if requested_path.is_absolute() {
-        // Absolute model paths are confined to the bundled/known model
-        // roots: an arbitrary .gguf anywhere on disk must not be mmap'd
+        // Absolute model paths are confined to the bundled and app-data
+        // model roots: an arbitrary .gguf anywhere on disk must not be mmap'd
         // into the backend on renderer input (info disclosure via crafted
         // files, network-share hangs on probe).
         let canon = requested_path
@@ -681,7 +741,7 @@ fn resolve_llm_model_path(
                 .map(|base| canon.starts_with(&base))
                 .unwrap_or(false)
         };
-        if !(inside(models_dir) || inside(asset_root)) {
+        if !(inside(user_models_dir) || inside(models_dir) || inside(asset_root)) {
             return Err("LLM model must live inside the app models directory".to_string());
         }
         if !canon.is_file() {
@@ -701,7 +761,18 @@ fn resolve_llm_model_path(
     {
         return Err("LLM model path must stay inside the bundled models directory".to_string());
     }
-    let candidate = if requested_path.starts_with("models") {
+    // User models are scanned directly inside the app-data models folder.
+    // Resolve a selected filename there first, matching that picker contract.
+    let candidate = if requested_path.components().count() == 1 {
+        let user_model = user_models_dir.join(requested_path);
+        if user_model.is_file() {
+            user_model
+        } else if requested_path.starts_with("models") {
+            asset_root.join(requested_path)
+        } else {
+            models_dir.join(requested_path)
+        }
+    } else if requested_path.starts_with("models") {
         asset_root.join(requested_path)
     } else {
         models_dir.join(requested_path)
@@ -712,7 +783,18 @@ fn resolve_llm_model_path(
             candidate.to_string_lossy()
         ));
     }
-    Ok(candidate)
+    let canon = candidate
+        .canonicalize()
+        .map_err(|_| format!("LLM model not found: {}", candidate.to_string_lossy()))?;
+    let inside = |dir: &std::path::Path| {
+        dir.canonicalize()
+            .map(|base| canon.starts_with(&base))
+            .unwrap_or(false)
+    };
+    if !(inside(user_models_dir) || inside(models_dir) || inside(asset_root)) {
+        return Err("LLM model must live inside the app models directory".to_string());
+    }
+    Ok(canon)
 }
 
 pub struct LlmManager {
@@ -727,6 +809,8 @@ pub struct LlmManager {
     /// Packaged resource root, captured at startup so a backend-initiated
     /// start resolves sidecars exactly like the renderer's `llm_start`.
     resource_dir: Option<std::path::PathBuf>,
+    /// Fixed app-data model folder shared with `scan_small_models`.
+    user_models_dir: std::path::PathBuf,
     /// What the renderer last asked to run. `ensure_ready` reuses it so a
     /// fallback start picks the configured model/ctx, not the defaults.
     start_params: Mutex<Option<StartParams>>,
@@ -738,7 +822,6 @@ pub struct StartParams {
     pub sidecars_dir: String,
     pub model: Option<String>,
     pub ctx_size: Option<u32>,
-    pub quantization: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -749,12 +832,16 @@ pub struct LlmHealth {
 }
 
 impl LlmManager {
-    pub fn new(resource_dir: Option<std::path::PathBuf>) -> Self {
+    pub fn new(
+        resource_dir: Option<std::path::PathBuf>,
+        user_models_dir: std::path::PathBuf,
+    ) -> Self {
         Self {
             proc: ManagedSidecar::new("llm"),
             auth_token: uuid::Uuid::new_v4().to_string(),
             sock_path: std::env::temp_dir().join(format!("jwe-llm-{}.sock", uuid::Uuid::new_v4())),
             resource_dir,
+            user_models_dir,
             start_params: Mutex::new(None),
         }
     }
@@ -768,7 +855,6 @@ impl LlmManager {
         sidecars_dir: &str,
         model_path: Option<&str>,
         ctx_size: Option<u32>,
-        quantization: Option<&str>,
     ) -> Result<(), String> {
         // Idempotent: a second start must not unlink the socket a live
         // llama-server is already bound to (that would strand every later
@@ -815,22 +901,46 @@ impl LlmManager {
             .to_path_buf();
         let models_dir = asset_root.join("models");
 
-        // Determine model file: if quantization is specified, use that;
-        // otherwise fall back to the provided model_path or default.
-        let quant = quantization
-            .filter(|q| !q.trim().is_empty())
-            .unwrap_or("q4_k_m");
-        let model_file = if model_path.is_some() {
-            // User explicitly provided a model path — respect it.
-            resolve_llm_model_path(model_path, &asset_root, &models_dir).map_err(|error| {
+        let requested_model = model_path.map(str::trim).filter(|name| !name.is_empty());
+        let model_file = if let Some(requested_model) = requested_model {
+            resolve_llm_model_path(
+                requested_model,
+                &asset_root,
+                &models_dir,
+                &self.user_models_dir,
+            )
+            .map_err(|error| {
                 format!(
                     "{} Fetch it with sidecars/fetch_sidecars.py (see docs/MODELS.md).",
                     error
                 )
             })?
         } else {
-            // Auto-resolve based on quantization.
-            models_dir.join(format!("lfm2.5-350m-{}.gguf", quant))
+            let list_models = |dir: &std::path::Path| {
+                let Ok(entries) = std::fs::read_dir(dir) else {
+                    return Vec::new();
+                };
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.is_file()
+                            && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let mut models = list_models(&self.user_models_dir);
+            if models.is_empty() {
+                models = list_models(&models_dir);
+            }
+            models.sort();
+            models.into_iter().next().ok_or_else(|| {
+                format!(
+                    "No GGUF models found in {} or {}",
+                    self.user_models_dir.display(),
+                    models_dir.display()
+                )
+            })?
         };
 
         // Unlink a stale socket file from a previous crashed run: llama-
@@ -868,19 +978,24 @@ impl LlmManager {
             "--api-key".to_string(),
             self.auth_token.clone(),
             "--ctx-size".to_string(),
-            ctx_size.unwrap_or(8192).to_string(),
+            ctx_size.unwrap_or(16384).to_string(),
             "--n-gpu-layers".to_string(),
             gpu_layers.to_string(),
             "--threads".to_string(),
             threads.to_string(),
             "--parallel".to_string(),
-            "2".to_string(),
+            "1".to_string(),
             "--batch-size".to_string(),
             "512".to_string(),
             "--ubatch-size".to_string(),
             "512".to_string(),
             "--flash-attn".to_string(),
-            "1".to_string(),
+            "on".to_string(),
+            "--cache-type-k".to_string(),
+            "q8_0".to_string(),
+            "--cache-type-v".to_string(),
+            "q8_0".to_string(),
+            "--jinja".to_string(),
         ];
         let server_dir = server_exe.parent().unwrap_or(&sidecars);
         let server_dir_text = server_dir.to_string_lossy().to_string();
@@ -892,12 +1007,11 @@ impl LlmManager {
         );
         if result.is_ok() {
             // Remember the renderer's choice so a later backend-initiated
-            // `ensure_ready` boots the same model/ctx/quant, not the defaults.
+            // `ensure_ready` boots the same model and context, not defaults.
             *self.start_params.lock().unwrap_or_else(|e| e.into_inner()) = Some(StartParams {
                 sidecars_dir: sidecars_dir.to_string(),
                 model: model_path.map(|m| m.to_string()),
                 ctx_size,
-                quantization: quantization.map(|q| q.to_string()),
             });
         }
         result
@@ -1023,12 +1137,11 @@ impl LlmManager {
         }
         if !self.is_running() {
             let remembered = self.start_params.lock().map_err(|e| e.to_string())?.clone();
-            let (sidecars_dir, model, ctx_size, quantization) = match remembered {
+            let (sidecars_dir, model, ctx_size) = match remembered {
                 Some(params) => (
                     params.sidecars_dir,
                     params.model,
                     params.ctx_size,
-                    params.quantization,
                 ),
                 // Never started by the renderer: resolve the same directory
                 // `llm_start` would have been handed and use the defaults.
@@ -1036,10 +1149,9 @@ impl LlmManager {
                     crate::commands::resolve_sidecars_dir(self.resource_dir.clone())?,
                     None,
                     None,
-                    None,
                 ),
             };
-            self.start(&sidecars_dir, model.as_deref(), ctx_size, quantization.as_deref())?;
+            self.start(&sidecars_dir, model.as_deref(), ctx_size)?;
         }
         // llama-server binds only after the model is loaded, so poll for
         // readiness instead of racing the first request against that load.
@@ -1179,7 +1291,7 @@ mod managed_tests {
     #[test]
     fn model_name_allows_bare_names_only() {
         assert!(check_model_name("moonshine-base.gguf").is_ok());
-        assert!(check_model_name("kokoro-v1.0").is_ok());
+        assert!(check_model_name("phonon-31m-en").is_ok());
         assert!(check_model_name("../evil").is_err());
         assert!(check_model_name("sub/dir").is_err());
         assert!(check_model_name("C:\\models\\x").is_err());

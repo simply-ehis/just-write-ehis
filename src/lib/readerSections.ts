@@ -167,6 +167,284 @@ export function chunkText(text: string, maxChars = 6000): string[] {
   return chunks.filter(Boolean);
 }
 
+/** Split speech into sentence-sized items while joining soft line wraps. */
+export function sentenceChunks(text: string, maxChars = 5000): string[] {
+  const normalized = text
+    .replace(/\r\n?/g, "\n")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n/g, " ").replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+  const sentences = normalized.match(/[^.!?。！？]+[.!?。！？]+["'”’)]*|[^.!?。！？]+$/g) ?? [];
+  const out: string[] = [];
+  for (const sentence of sentences) {
+    let rest = sentence.trim();
+    while (rest.length > maxChars) {
+      let cut = rest.lastIndexOf(" ", maxChars);
+      if (cut < Math.floor(maxChars * 0.6)) cut = maxChars;
+      out.push(rest.slice(0, cut).trim());
+      rest = rest.slice(cut).trim();
+    }
+    if (rest) out.push(rest);
+  }
+  return out;
+}
+
+// ── Render-ahead segmentation ─────────────────────────────────────
+// Segments carry char offsets into the source snapshot plus a pause
+// flag, so the backend can record a sample-accurate timeline and the
+// highlight can map back to the document later.
+
+export interface TtsSegment {
+  /** Index within the final segment list — the render job's segId. */
+  id: number;
+  /** Speech text (markdown stripped, soft wraps joined). */
+  text: string;
+  /** Caller section this segment belongs to (-1 = plain/selection text). */
+  sectionIdx: number;
+  /** Inclusive start / exclusive end offsets into the source text. */
+  charStart: number;
+  charEnd: number;
+  /** Silence class the renderer appends after this segment's audio. */
+  pauseAfter: "sentence" | "paragraph" | "section";
+}
+
+/** Hard cap per segment (renderer wants ~sentence-sized units; long
+ * sentences split at commas/semicolons, then spaces, then a hard cut). */
+export const SEGMENT_MAX_CHARS = 200;
+
+/** Speech text alongside the source index of every character — the
+ * round-trip invariant: stripForTts(source.slice(charStart, charEnd))
+ * contains the segment's spoken words. */
+interface MappedText {
+  text: string;
+  map: number[];
+}
+
+/** Apply one of stripForTts's removal rules, keeping the source map:
+ * replacement characters borrow source positions from the match. */
+function mapReplace(
+  m: MappedText,
+  re: RegExp,
+  repl: (match: RegExpExecArray) => string,
+): MappedText {
+  const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
+  const rx = new RegExp(re.source, flags);
+  let out = "";
+  const outMap: number[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = rx.exec(m.text))) {
+    if (match[0].length === 0) {
+      rx.lastIndex++;
+      continue;
+    }
+    out += m.text.slice(last, match.index);
+    outMap.push(...m.map.slice(last, match.index));
+    const replacement = repl(match);
+    out += replacement;
+    for (let j = 0; j < replacement.length; j++) {
+      // Cycle match positions: replacement chars stay inside the match's
+      // source span, which is all segment boundaries need.
+      const src = match.index + (j < match[0].length ? j : match[0].length - 1);
+      outMap.push(m.map[src]);
+    }
+    last = match.index + match[0].length;
+    // Overlapping-empty protection is handled above; advance for zero-width.
+    if (match.index === rx.lastIndex) rx.lastIndex++;
+  }
+  out += m.text.slice(last);
+  outMap.push(...m.map.slice(last));
+  return { text: out, map: outMap };
+}
+
+/** Same rule set, same order as stripForTts — so offsets and the
+ * reader's spoken text can never diverge. Applied per line, exactly as
+ * stripForTts does, so ^-anchored rules behave identically. */
+function stripLine(m: MappedText): MappedText {
+  const rules: [RegExp, (x: RegExpExecArray) => string][] = [
+    [/^#{1,6}\s+/, () => ""],
+    [/^>\s?/, () => ""],
+    [/^(\s*[-*]|\s*\d+\.)\s+/, () => ""],
+    [/\*\*(.+?)\*\*/g, (x) => x[1]],
+    [/__(.+?)__/g, (x) => x[1]],
+    [/\*(.+?)\*/g, (x) => x[1]],
+    [/`(.+?)`/g, (x) => x[1]],
+    [/!\[([^\]]*)\]\([^)]*\)/g, (x) => x[1]],
+    [/\[([^\]]*)\]\([^)]*\)/g, (x) => x[1]],
+  ];
+  for (const [re, repl] of rules) m = mapReplace(m, re, repl);
+  return m;
+}
+
+function stripMapped(m: MappedText): MappedText {
+  // Split into lines (keeping maps), strip each exactly like stripForTts,
+  // drop empties, join with a mapped "\n" — the spoken text then matches
+  // stripForTts(source) character for character except for whitespace
+  // runs.
+  const lines: MappedText[] = [];
+  let start = 0;
+  const pushLine = (end: number) => {
+    lines.push({ text: m.text.slice(start, end), map: m.map.slice(start, end) });
+    start = end;
+  };
+  for (let i = 0; i <= m.text.length; i++) {
+    if (i === m.text.length || m.text[i] === "\n") {
+      pushLine(i);
+      start = i + 1;
+    }
+  }
+  const kept: MappedText[] = [];
+  for (const line of lines) {
+    const stripped = trimMapped(stripLine(line));
+    if (stripped.text.trim()) kept.push(stripped);
+  }
+  const out: MappedText = { text: "", map: [] };
+  kept.forEach((line, i) => {
+    if (i > 0) {
+      // The join character borrows the source index right after the line.
+      const src = line.map[0] - 1;
+      out.text += "\n";
+      out.map.push(src >= 0 ? src : line.map[0]);
+    }
+    out.text += line.text;
+    out.map.push(...line.map);
+  });
+  return out;
+}
+
+function mappedSlice(m: MappedText, start: number, end: number): MappedText {
+  return { text: m.text.slice(start, end), map: m.map.slice(start, end) };
+}
+
+function trimMapped(m: MappedText): MappedText {
+  let s = 0;
+  let e = m.text.length;
+  while (s < e && /\s/.test(m.text[s])) s++;
+  while (e > s && /\s/.test(m.text[e - 1])) e--;
+  return mappedSlice(m, s, e);
+}
+
+/** Soft-wrap reflow inside a sentence: \n → space, char-for-char, so
+ * the map survives untouched. Applied AFTER sentence slicing so line
+ * boundaries can't swallow sentence terminators. */
+function joinSoftWraps(m: MappedText): MappedText {
+  const text = m.text.replace(/\n/g, " ");
+  return { text, map: m.map }; // 1:1 in length per \n → space
+}
+
+const SENTENCE_RE = /[^.!?。！？]+[.!?。！？]+["'”’)]*|[^.!?。！？]+$/g;
+
+/** Split mapped text on sentence terminators, preserving the map. */
+function sentenceSlices(m: MappedText): MappedText[] {
+  const out: MappedText[] = [];
+  SENTENCE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SENTENCE_RE.exec(m.text))) {
+    if (match[0].trim()) out.push(trimMapped(mappedSlice(m, match.index, match.index + match[0].length)));
+    if (match.index === SENTENCE_RE.lastIndex) SENTENCE_RE.lastIndex++;
+  }
+  return out;
+}
+
+/** Hard cap: cut at the last comma/semicolon/dash before maxChars when
+ * it's late enough, else the last space, else a hard cut. */
+function capSegment(m: MappedText, maxChars: number): MappedText[] {
+  if (m.text.length <= maxChars) return [m];
+  const parts: MappedText[] = [];
+  let rest = m;
+  while (rest.text.length > maxChars) {
+    const window = rest.text.slice(0, maxChars);
+    let cut = -1;
+    for (const punct of [",", ";", "—", "–", ":"]) {
+      const at = window.lastIndexOf(punct);
+      if (at >= Math.floor(maxChars * 0.6) && at > cut) cut = at + 1;
+    }
+    if (cut < 0) {
+      const at = window.lastIndexOf(" ");
+      cut = at >= Math.floor(maxChars * 0.6) ? at : maxChars;
+    }
+    const head = trimMapped(mappedSlice(rest, 0, cut));
+    if (head.text) parts.push(head);
+    rest = trimMapped(mappedSlice(rest, cut, rest.text.length));
+  }
+  if (rest.text) parts.push(rest);
+  return parts;
+}
+
+/**
+ * Split one source text into render segments with source offsets.
+ * Paragraph breaks become "paragraph" pauses; everything else is a
+ * sentence pause. Ids are assigned in list order (reassembled by
+ * `segmentsForSections` when several sources are concatenated).
+ */
+export function splitSegments(
+  source: string,
+  opts: { sectionIdx?: number } = {},
+): Omit<TtsSegment, "id">[] {
+  const sectionIdx = opts.sectionIdx ?? -1;
+  // Paragraph spans: runs separated by 2+ newlines, offsets into source.
+  const spans: { start: number; end: number }[] = [];
+  const sep = /\n{2,}/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = sep.exec(source))) {
+    spans.push({ start: last, end: m.index });
+    last = m.index + m[0].length;
+  }
+  spans.push({ start: last, end: source.length });
+
+  const out: Omit<TtsSegment, "id">[] = [];
+  for (const span of spans) {
+    const raw = source.slice(span.start, span.end);
+    if (!raw.trim()) continue;
+    const mapped: MappedText = {
+      text: raw,
+      map: raw.split("").map((_, i) => span.start + i),
+    };
+    const stripped = trimMapped(stripMapped(mapped));
+    if (!stripped.text.trim()) continue;
+    const sentences = sentenceSlices(stripped);
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = trimMapped(joinSoftWraps(sentences[i]));
+      for (const piece of capSegment(sentence, SEGMENT_MAX_CHARS)) {
+        if (!piece.text.trim()) continue;
+        out.push({
+          text: piece.text,
+          sectionIdx,
+          charStart: piece.map[0],
+          charEnd: piece.map[piece.map.length - 1] + 1,
+          pauseAfter: i === sentences.length - 1 ? "paragraph" : "sentence",
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Concatenate per-section segment lists; ids become global indexes and
+ * the last segment of each section pauses like a section break. */
+export function segmentsForSections(
+  sections: { text: string }[],
+): TtsSegment[] {
+  const flat: TtsSegment[] = [];
+  if (sections.length === 0) return flat;
+  sections.forEach((section, sectionIdx) => {
+    const segs = splitSegments(section.text, { sectionIdx });
+    for (const s of segs) flat.push({ ...s, id: flat.length });
+    const lastOfSection = flat[flat.length - 1];
+    if (lastOfSection && lastOfSection.sectionIdx === sectionIdx) {
+      lastOfSection.pauseAfter = "section";
+    }
+  });
+  return flat;
+}
+
+/** Build segments from plain text (selection / docs without sections). */
+export function segmentsForText(text: string): TtsSegment[] {
+  return splitSegments(text).map((s, i) => ({ ...s, id: i }));
+}
+
 /**
  * Anchor from a scroll snapshot: nearest section whose top is at/above
  * the viewport anchor line, plus the ratio within it. Pure math over

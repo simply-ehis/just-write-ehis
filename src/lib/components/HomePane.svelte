@@ -11,7 +11,7 @@
   let recentDocs: [string, string, string][] = $state([]);
   let workspaceCounts: [string, number][] = $state([]);
   let writingDays: string[] = $state([]);
-  let patterns: { peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number; avg_session_minutes: number } | null = $state(null);
+  let patterns: { peak_hour: string | null; most_active_workspace: { workspace: string; this_week: number; last_week: number } | null; momentum: number } | null = $state(null);
   let goals: { id: string; title: string; workspace: string; goal_words: number; word_count: number; deadline: string | null }[] = $state([]);
   let pinnedDocs: Doc[] = $state([]);
   let suggestedDocs: Doc[] = $state([]);
@@ -469,12 +469,6 @@
             </span>
             <span class="pattern-delta">vs 4-week average</span>
           </div>
-          {#if patterns.avg_session_minutes > 0}
-            <div class="pattern-card">
-              <span class="pattern-label">Avg Session</span>
-              <span class="pattern-value">{Math.round(patterns.avg_session_minutes)} min</span>
-            </div>
-          {/if}
         </div>
       </section>
     {/if}

@@ -54,6 +54,14 @@ fn snippet_of(s: &str, max_bytes: usize) -> String {
     }
 }
 
+/// Keep derived-index failures visible without reporting a durable file save
+/// as failed after the file and document row have already been written.
+fn report_index_error(index: &str, doc_id: &str, result: Result<(), String>) {
+    if let Err(error) = result {
+        eprintln!("[derived-index] {index} refresh failed for {doc_id}: {error}");
+    }
+}
+
 /// True only for a strict ASCII `YYYY-MM-DD` date — the shape the Logs calendar
 /// produces and the only shape `compute_disk_path` splits into `YYYY/MM`.
 ///
@@ -528,11 +536,9 @@ impl Database {
         // vault entirely — and quick capture feeds raw typed text in as the
         // title, making this reachable from ordinary UI, not just a hostile
         // webview.
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let proposed = compute_disk_path(&vault, &req.workspace, &req.kind, &req.title, &id);
-        let disk_path = resolve_in_vault(&vault, proposed.to_string_lossy().as_ref())?;
+        let proposed = compute_disk_path(&self.vault_path, &req.workspace, &req.kind, &req.title, &id);
+        let disk_path = resolve_in_vault(&self.vault_path, proposed.to_string_lossy().as_ref())?;
         let path_str = disk_path.to_string_lossy().to_string();
-        drop(vault);
 
         // Write content to disk
         if !content.is_empty() {
@@ -567,6 +573,8 @@ impl Database {
             deadline: None,
         };
 
+        drop(conn);
+        self.update_derived_indexes(&doc.id, &doc.content, false, &[doc.title.clone()]);
         Ok(doc)
     }
 
@@ -637,18 +645,40 @@ impl Database {
         }
     }
 
+    fn update_derived_indexes(
+        &self,
+        doc_id: &str,
+        content: &str,
+        refresh_rag: bool,
+        refresh_backlink_titles: &[String],
+    ) {
+        if self.schedule_derived_indexes(doc_id, content, refresh_rag, refresh_backlink_titles) {
+            return;
+        }
+        report_index_error("entities", doc_id, self.refresh_entities(doc_id, content));
+        report_index_error("backlinks", doc_id, self.extract_backlinks(doc_id, content));
+        if refresh_rag {
+            self.refresh_rag_chunks(doc_id);
+        }
+        if !refresh_backlink_titles.is_empty() {
+            report_index_error(
+                "backlinks title refresh",
+                doc_id,
+                self.refresh_backlinks_for_titles(refresh_backlink_titles),
+            );
+        }
+    }
+
     pub fn save_doc(&self, req: SaveDocRequest) -> Result<Doc, String> {
         // Refuse writes when the schema is in a known-unsafe state (e.g. a
         // failed migration). Writing to a half-migrated schema can corrupt it
         // further; the user is better off with a clear error and read-only
         // access to their files.
-        if let Ok(flag) = self.read_only.lock() {
-            if flag.0 {
-                return Err(
-                    "Database is read-only: a migration failed. Your files are safe but writes are disabled."
-                        .into(),
-                );
-            }
+        if self.read_only {
+            return Err(
+                "Database is read-only: a migration failed. Your files are safe but writes are disabled."
+                    .into(),
+            );
         }
         let content_changed = req.content.is_some();
         // Read the PREVIOUS content before the UPDATE overwrites it. The
@@ -671,6 +701,8 @@ impl Database {
         } else {
             None
         };
+        let mut title_changed = false;
+        let mut previous_title = None;
         {
             let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
             let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -689,6 +721,17 @@ impl Database {
             };
 
             if let Some(title) = &req.title {
+                let old_title: String = tx
+                    .query_row(
+                        "SELECT title FROM docs WHERE id = ?1",
+                        params![&req.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                title_changed = old_title != *title;
+                if title_changed {
+                    previous_title = Some(old_title);
+                }
                 tx.execute(
                     "UPDATE docs SET title = ?1, updated_at = ?2 WHERE id = ?3",
                     params![title, now, req.id],
@@ -739,7 +782,16 @@ impl Database {
             tx.commit().map_err(|e| e.to_string())?;
         }
 
-        // Write content to disk if changed + auto-snapshot on meaningful diff
+        let changed_titles = if title_changed {
+            previous_title
+                .into_iter()
+                .chain(req.title.iter().cloned())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        // Write content to disk if changed and refresh derived indexes later.
         if content_changed {
             let doc = self.get_doc(&req.id)?;
 
@@ -767,44 +819,23 @@ impl Database {
                     // invisible safety net the guard exists to provide.
                     let prior = old_content_before_update.unwrap_or_default();
                     self.snapshot_create_from(&req.id, &prior)?;
-                    // Derived index stays best-effort.
-                    let _ = self.refresh_rag_chunks(&req.id);
                 }
             }
 
-            let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-            let full_path = resolve_in_vault(&vault, &doc.path)?;
-            drop(vault);
+            let full_path = resolve_in_vault(&self.vault_path, &doc.path)?;
             // Files are the source of truth (ARCHITECTURE.md): a failed
             // disk write must surface, never pass as a successful save.
             // (Derived indexes stay best-effort below.)
             write_to_disk(&full_path, &doc.content)?;
-            // refresh_entities is per-doc and fast — keep it on the save path.
-            // extract_backlinks is O(docs × content) and holds self.conn for
-            // the duration, so it stays off the hot path; call
-            // reindex_entities explicitly after batch imports or renames.
-            let _ = self.refresh_entities(&req.id, &doc.content);
-            // extract_backlinks is needed for the entity graph to be correct.
-            // It is O(docs × content) and holds the DB lock, which is a real
-            // performance concern on large vaults — but a missing backlink is
-            // a correctness bug. Keep it on the save path for now; the proper
-            // fix is an incremental index or a debounced background task.
-            let _ = self.extract_backlinks(&req.id, &doc.content);
+            // Every content save re-chunks retrieval: files are the source of
+            // truth, and Ask-your-docs must never serve the pre-edit text.
+            self.update_derived_indexes(&req.id, &doc.content, true, &changed_titles);
+        } else if title_changed {
+            let doc = self.get_doc(&req.id)?;
+            self.update_derived_indexes(&req.id, &doc.content, false, &changed_titles);
         }
 
         self.get_doc(&req.id)
-    }
-
-    /// Rebuild the entity + backlink index for one doc. Explicit because the
-    /// save path no longer does it automatically: extract_backlinks is
-    /// O(docs × content) and holds the DB lock, which froze the UI on large
-    /// vaults. Call this after a batch import or a vault rename.
-    #[allow(dead_code)] // wired to a Tauri command in a follow-up
-    pub fn reindex_entities(&self, doc_id: &str) -> Result<(), String> {
-        let doc = self.get_doc(doc_id)?;
-        self.extract_backlinks(doc_id, &doc.content)?;
-        self.refresh_entities(doc_id, &doc.content)?;
-        Ok(())
     }
 
     pub fn delete_doc(&self, id: &str) -> Result<(), String> {
@@ -840,7 +871,7 @@ impl Database {
         //    The old order removed files first, so a failure after the unlink
         //    deleted the user's .md while the row (and its content column)
         //    survived — permanent data loss with an error returned.
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
+        let vault = self.vault_path.clone();
         let mut removed_paths: Vec<std::path::PathBuf> = Vec::new();
         {
             let mut conn = self.conn.lock().map_err(|e| e.to_string())?;
@@ -1097,7 +1128,7 @@ impl Database {
     pub fn move_doc(&self, req: MoveDocRequest) -> Result<Doc, String> {
         // Validate the destination before mutating the row: a path that
         // escapes the vault must fail loudly, not rewrite the index.
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
+        let vault = self.vault_path.clone();
         if let Some(path) = &req.new_path {
             resolve_in_vault(&vault, path)?;
         }
@@ -1481,6 +1512,37 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         }
 
         tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub(crate) fn refresh_backlinks_for_titles(&self, titles: &[String]) -> Result<(), String> {
+        let titles = titles
+            .iter()
+            .map(|title| title.to_lowercase())
+            .filter(|title| !title.is_empty())
+            .collect::<Vec<_>>();
+        if titles.is_empty() {
+            return Ok(());
+        }
+
+        let docs: Vec<(String, String)> = {
+            let conn = self.conn.lock().map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare("SELECT id, content FROM docs")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map_err(|e| e.to_string())?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(|e| e.to_string())?
+        };
+
+        for (doc_id, content) in docs {
+            let content_lower = content.to_lowercase();
+            if titles.iter().any(|title| content_lower.contains(title)) {
+                self.extract_backlinks(&doc_id, &content)?;
+            }
+        }
         Ok(())
     }
 
@@ -2557,57 +2619,47 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
 
         let most_active_ws: Option<(String, i64, i64)> = conn
             .query_row(
-                "SELECT workspace, \
-                 SUM(CASE WHEN created_at >= date('now', '-7 days') THEN 1 ELSE 0 END) as this_week, \
-                 SUM(CASE WHEN created_at >= date('now', '-14 days') AND created_at < date('now', '-7 days') THEN 1 ELSE 0 END) as last_week \
-                 FROM docs WHERE updated_at >= date('now', '-14 days') GROUP BY workspace ORDER BY this_week DESC LIMIT 1",
+                "SELECT d.workspace, \
+                 SUM(CASE WHEN u.ts >= date('now', '-7 days') THEN 1 ELSE 0 END) as this_week, \
+                 SUM(CASE WHEN u.ts >= date('now', '-14 days') AND u.ts < date('now', '-7 days') THEN 1 ELSE 0 END) as last_week \
+                 FROM usage_events u JOIN docs d ON d.id = u.doc_id \
+                 WHERE u.event = 'write' AND u.ts >= date('now', '-14 days') \
+                 GROUP BY d.workspace ORDER BY this_week DESC LIMIT 1",
                 [],
                 |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
             )
             .ok();
 
-        let this_week_words: i64 = conn
+        let this_week_activity: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(word_count), 0) FROM docs WHERE updated_at >= date('now', '-7 days')",
+                "SELECT COUNT(*) FROM usage_events WHERE event = 'write' AND ts >= date('now', '-7 days')",
                 [],
                 |r| r.get(0),
             )
             .unwrap_or(0);
 
-        let avg_weekly_words: f64 = conn
+        let avg_weekly_activity: f64 = conn
             .query_row(
                 "SELECT COALESCE(AVG(weekly_total), 0) FROM ( \
-                 SELECT date(updated_at) as day, SUM(word_count) as weekly_total FROM docs \
-                 WHERE updated_at >= date('now', '-35 days') GROUP BY strftime('%W', updated_at) \
+                 SELECT strftime('%Y-%W', ts) as week, COUNT(*) as weekly_total FROM usage_events \
+                 WHERE event = 'write' AND ts >= date('now', '-35 days') AND ts < date('now', '-7 days') \
+                 GROUP BY week \
                  )",
                 [],
                 |r| r.get(0),
             )
             .unwrap_or(0.0);
 
-        let momentum = if avg_weekly_words > 0.0 {
-            ((this_week_words as f64 - avg_weekly_words) / avg_weekly_words * 100.0).round()
+        let momentum = if avg_weekly_activity > 0.0 {
+            ((this_week_activity as f64 - avg_weekly_activity) / avg_weekly_activity * 100.0).round()
         } else {
             0.0
         };
-
-        let avg_session_min: f64 = conn
-            .query_row(
-                "SELECT COALESCE(AVG(CAST((julianday(ended_at) - julianday(started_at)) * 1440 AS REAL)), 0) FROM ( \
-                 SELECT MIN(u.ts) as started_at, MAX(u.ts) as ended_at FROM usage_events u JOIN docs d ON d.id = u.doc_id \
-                  WHERE u.event = 'write' AND u.ts >= date('now', '-30 days') \
-                  GROUP BY date(u.ts) \
-                 )",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0.0);
 
         Ok(serde_json::json!({
             "peak_hour": peak_hour,
             "most_active_workspace": most_active_ws.map(|(ws, tw, lw)| serde_json::json!({"workspace": ws, "this_week": tw, "last_week": lw})),
             "momentum": momentum,
-            "avg_session_minutes": avg_session_min.round(),
         }))
     }
 
@@ -2689,11 +2741,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
-    /// Words per day, oldest first. Powers the streak heatmap.
-    pub fn dashboard_streak_heatmap(&self) -> Result<Vec<(String, i64)>, String> {
+    /// Saved writing updates per day. Imported document size does not affect it.
+    pub fn dashboard_activity_heatmap(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT date(updated_at) as day, SUM(word_count) FROM docs GROUP BY day ORDER BY day"
+            "SELECT date(ts) as day, COUNT(*) FROM usage_events WHERE event = 'write' GROUP BY day ORDER BY day"
         ).map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
@@ -2703,11 +2755,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         rows.filter_map(|r| r.ok()).collect::<Vec<_>>().pipe(Ok)
     }
 
-    /// Usage-event counts per hour (0-23), all events, last 90 days.
+    /// Saved writing updates per hour (0-23), last 90 days.
     pub fn dashboard_writing_time_patterns(&self) -> Result<Vec<(i64, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT CAST(strftime('%H', ts) AS INTEGER) AS hour, COUNT(*) FROM usage_events WHERE ts >= date('now', '-90 days') GROUP BY hour"
+            "SELECT CAST(strftime('%H', ts) AS INTEGER) AS hour, COUNT(*) FROM usage_events WHERE event = 'write' AND ts >= date('now', '-90 days') GROUP BY hour"
         ).map_err(|e| e.to_string())?;
         let mut buckets = vec![0i64; 24];
         let rows = stmt
@@ -2725,11 +2777,11 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             .collect())
     }
 
-    /// Words per day for the last 7 days. Zero-filled.
-    pub fn dashboard_writing_velocity(&self) -> Result<Vec<(String, i64)>, String> {
+    /// Saved writing updates per day for the last 7 days. Zero-filled.
+    pub fn dashboard_writing_activity(&self) -> Result<Vec<(String, i64)>, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT date(updated_at) as day, SUM(word_count) FROM docs WHERE updated_at >= date('now', '-7 days') GROUP BY day"
+            "SELECT date(ts) as day, COUNT(*) FROM usage_events WHERE event = 'write' AND ts >= date('now', '-7 days') GROUP BY day"
         ).map_err(|e| e.to_string())?;
         let mut by_day = std::collections::HashMap::new();
         let rows = stmt
@@ -2751,8 +2803,8 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         Ok(out)
     }
 
-    /// Composite productivity score + totals. Mirrors the browser backend formula.
-    pub fn dashboard_productivity_score(&self) -> Result<serde_json::Value, String> {
+    /// Library totals and days with saved writing activity.
+    pub fn dashboard_library_stats(&self) -> Result<serde_json::Value, String> {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let total_words: i64 = conn
             .query_row("SELECT COALESCE(SUM(word_count), 0) FROM docs", [], |r| {
@@ -2764,7 +2816,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
             .map_err(|e| e.to_string())?;
         let active_days: i64 = conn
             .query_row(
-                "SELECT COUNT(DISTINCT date(updated_at)) FROM docs",
+                "SELECT COUNT(DISTINCT date(ts)) FROM usage_events WHERE event = 'write'",
                 [],
                 |r| r.get(0),
             )
@@ -2774,13 +2826,7 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         } else {
             0
         };
-        let score = ((total_words as f64 / 10000.0) * 30.0
-            + active_days as f64 * 2.0
-            + total_docs as f64 * 0.5)
-            .round()
-            .min(100.0) as i64;
         Ok(serde_json::json!({
-            "score": score,
             "totalWords": total_words,
             "totalDocs": total_docs,
             "activeDays": active_days,
@@ -2850,62 +2896,22 @@ FROM docs WHERE workspace = 'logs' AND kind = 'daily'
         Ok(count as u64)
     }
 
-    pub fn atomic_save(&self, doc_id: &str, body: &str) -> Result<(), String> {
-        // Same read-only guard as save_doc: refuse writes when the schema is
-        // in a known-unsafe state.
-        if let Ok(flag) = self.read_only.lock() {
-            if flag.0 {
-                return Err(
-                    "Database is read-only: a migration failed. Your files are safe but writes are disabled."
-                        .into(),
-                );
-            }
-        }
-        let doc = self.get_doc(doc_id)?;
-
-        // Auto-snapshot on a meaningful diff (>20 words) per A10.2.
-        // `doc.content` is read BEFORE the UPDATE below, so the delta is real
-        // here — unlike the same guard in save_doc. Snapshot the pre-edit body
-        // explicitly so the restore point is the text being replaced, and
-        // propagate failure rather than losing the safety net silently.
-        let old_word_count = doc.content.split_whitespace().count() as i64;
-        let new_word_count = body.split_whitespace().count() as i64;
-        let word_delta = (old_word_count - new_word_count).abs();
-        if word_delta > SNAPSHOT_WORD_THRESHOLD as i64 {
-            self.snapshot_create_from(doc_id, &doc.content)?;
-        }
-
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?;
-        let full_path = resolve_in_vault(&vault, &doc.path)?;
-        drop(vault);
-
-        write_to_disk(&full_path, body)?;
-
-        let word_count = body.split_whitespace().count() as i64;
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "UPDATE docs SET content = ?1, word_count = ?2, updated_at = ?3 WHERE id = ?4",
-            params![body, word_count, now_iso(), doc_id],
-        )
-        .map_err(|e| e.to_string())?;
-        drop(conn);
-
-        // Re-extract backlinks
-        let _ = self.extract_backlinks(doc_id, body);
-
-        // Same >20-word throttle as above: keep the retrieval index fresh.
-        if word_delta > SNAPSHOT_WORD_THRESHOLD as i64 {
-            self.refresh_rag_chunks(doc_id);
-        }
-
-        Ok(())
+    pub fn atomic_save(&self, doc_id: &str, body: &str) -> Result<Doc, String> {
+        self.save_doc(SaveDocRequest {
+            id: doc_id.to_string(),
+            title: None,
+            content: Some(body.to_string()),
+            status: None,
+            frontmatter_json: None,
+            parent_id: None,
+        })
     }
 
     pub fn setup_file_watcher(&self, app_handle: tauri::AppHandle) -> Result<(), String> {
         use notify::{Event, EventKind, RecursiveMode, Watcher};
         use std::sync::mpsc;
 
-        let vault = self.vault_path.lock().map_err(|e| e.to_string())?.clone();
+        let vault = self.vault_path.clone();
 
         if !vault.exists() {
             return Ok(());
@@ -3914,7 +3920,7 @@ mod vault_confinement_tests {
     #[test]
     fn inside_vault_paths_resolve() {
         let db = test_db("inside");
-        let vault = db.vault_path.lock().unwrap().clone();
+        let vault = db.vault_path.clone();
         let resolved = resolve_in_vault(&vault, "novels/Book/chapter.md").unwrap();
         assert!(resolved.starts_with(&vault), "{resolved:?} left {vault:?}");
     }
@@ -3922,7 +3928,7 @@ mod vault_confinement_tests {
     #[test]
     fn traversal_and_absolute_escapes_are_refused() {
         let db = test_db("escape");
-        let vault = db.vault_path.lock().unwrap().clone();
+        let vault = db.vault_path.clone();
         for evil in [
             "../escaped.md",
             "novels/../../escaped.md",
@@ -4189,7 +4195,7 @@ mod vault_confinement_tests {
     #[test]
     fn create_doc_confines_the_path_it_writes() {
         let db = test_db("create-confine");
-        let vault = db.vault_path.lock().unwrap().clone();
+        let vault = db.vault_path.clone();
         // The gap this guards: create_doc used to skip resolve_in_vault, unlike
         // every other write path in the file.
         //
@@ -4256,7 +4262,7 @@ mod save_path_tests {
                 frontmatter_json: None,
             })
             .unwrap();
-        let vault = db.vault_path.lock().unwrap().clone();
+        let vault = db.vault_path.clone();
         let full = resolve_in_vault(&vault, &doc.path).unwrap();
         (doc.id, full)
     }
@@ -4322,7 +4328,7 @@ mod save_path_tests {
                 new_path: Some("Moving.md".into()),
             })
             .unwrap();
-        let vault = db.vault_path.lock().unwrap().clone();
+        let vault = db.vault_path.clone();
         let new_file = resolve_in_vault(&vault, &moved.path).unwrap();
         assert!(!old_file.exists(), "old file still present after move");
         assert!(

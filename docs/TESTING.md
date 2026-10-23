@@ -30,7 +30,7 @@ Seven layers cover the contracts; release verification also requires an explicit
 - tauri.conf updater wiring, capability grants, Cargo/npm plugin deps,
 - **real parsing**: esbuild-bundles `src/lib/bookparse.ts` and extracts
   text from committed binary fixtures (epub/docx/pdf),
-- UI wiring markers per feature slice (lock, canvas, streaming, …).
+- UI wiring markers per feature slice (canvas, streaming, …).
 
 Rebuild (`npm run build`) before running — it tests `dist/`.
 
@@ -59,11 +59,11 @@ allowlisted — no canvas package in the harness, never in app code).
 ## 6. In-app self-test — behavior with a backend
 
 Settings → About → **Run Feature Self-Test**: create/save/search/link/
-snapshot/restore/graph/log/lock-exclusion/pinned/metrics/rhythm/export/
+snapshot/restore/graph/log/pinned/metrics/rhythm/export/
 canvas through the **live** backend (works in preview and in the shell).
 Extend it with every user-flow change (see `DEVELOPMENT.md` step 6).
 
-## 7. Local model + PIN source regressions
+## 7. Local model and settings source regressions
 
 Run these without producing an application or sidecar executable:
 
@@ -78,13 +78,12 @@ npm run test:source
 ```
 
 `test:source` is the CI-safe aggregate (settings, sidecar validation/readiness,
-write-back queue, window state, and support units). `test:sidecar` rejects traversal and renderer-selected Python executables while accepting the supported PATH interpreter names. `test:settings` also exercises the shared browser PIN retry state and recovery path. `test:ensure` proves running processes are still
+write-back queue, window state, and support units). `test:sidecar` rejects traversal and renderer-selected Python executables while accepting the supported PATH interpreter names. `test:ensure` proves running processes are still
 health-checked, readiness is not faked, and TTS lazy loading is represented
 honestly. `test:resolve` executes the STT/TTS model-path guards against the
 local asset tree. `test:assets` runs the release preflight without creating a
-venv or executable. `test:settings` executes validation plus the PIN
-create/confirm-enable/session unlock/remove state machine against the browser
-secret backend. `test:e2e` checks the Settings self-tests and packaged-runtime
+venv or executable. `test:settings` validates setting shapes, secret
+exclusion, migrations, and numeric bounds. `test:e2e` checks the Settings self-tests and packaged-runtime
 preference markers.
 
 These tests do not replace an explicitly authorized desktop build. The final

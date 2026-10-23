@@ -139,11 +139,14 @@ function check(name, ok, detail = "") {
 // to settle. That effect fires as soon as the bookshelf resolves and immediately
 // opens the active doc, so the shelf card is never observable from outside — the
 // shelf is only reachable once the user navigates back out of the book.
+// Wait for the condition the check actually asserts (>= 3 sections):
+// breaking at >0 raced mid-render partials, and a 3s budget starved to 0
+// under concurrent CPU load. The assertion itself is unchanged.
 let sections = [];
-const bootDeadline = Date.now() + 3000;
+const bootDeadline = Date.now() + 8000;
 while (Date.now() < bootDeadline) {
   sections = qa(".reader-workspace section[data-section]");
-  if (sections.length > 0) break;
+  if (sections.length >= 3) break;
   await sleep(100);
 }
 

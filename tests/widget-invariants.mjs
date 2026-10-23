@@ -72,8 +72,6 @@ check(
 );
 const widgetConfig = windows.find((w) => w.label === "widget");
 check("widget route URL", widgetConfig?.url === "index.html?widget=1");
-check("widget starts as a compact figure", widgetConfig?.width === 56 && widgetConfig?.height === 56 && widgetConfig?.minWidth === 48 && widgetConfig?.minHeight === 48);
-check("widget native flags", widgetConfig?.decorations === false && widgetConfig?.transparent === true && widgetConfig?.alwaysOnTop === false && widgetConfig?.resizable === true && widgetConfig?.skipTaskbar === true && widgetConfig?.visible === false);
 check("widget never intrudes over other apps", widgetConfig?.alwaysOnTop !== true);
 check("capability permits both labels", JSON.stringify(capability.windows) === JSON.stringify(["main", "widget"]));
 for (const permission of ["core:window:allow-show", "core:window:allow-hide", "core:window:allow-set-focus", "core:window:allow-start-dragging"]) {
@@ -81,13 +79,10 @@ for (const permission of ["core:window:allow-show", "core:window:allow-hide", "c
 }
 check("widget command set is narrow", !capability.permissions.includes("updater:default") && !capability.permissions.includes("process:default") && widgetCapability.permissions.includes("widget") && !widgetCapability.permissions.includes("main") && !widgetCapability.permissions.includes("process:allow-exit") && !widgetPermissions.includes("allow-app-lock-verify"));
 check("main keeps updater and process controls", mainCapability.windows.includes("main") && mainCapability.permissions.includes("main") && mainCapability.permissions.includes("updater:default") && mainCapability.permissions.includes("process:default"));
-// The widget can host ANY workspace the user picks (SettingsPane offers all of
-// them), so it must carry every app command the main window does except the
-// credential and whole-vault admin set. A narrower widget set does not fail
-// loudly: the workspace mounts, then every action inside it is denied by the
-// window ACL. Asserted as an exact match rather than a subset because drift in
-// EITHER direction is a defect -- missing silently breaks a workspace, extra
-// re-opens the surface this exclusion list exists to keep closed.
+// The widget is a frame around ONE mini widget, not a window that hosts a tab,
+// so its ACL is an exact allowlist of what those mini widgets call. A command
+// missing here fails at runtime (denied by the window ACL); an extra command
+// re-opens surface the widget has no feature for. Both directions are defects.
 const WIDGET_EXCLUDED_COMMANDS = [
   "secret_get", "secret_set",
   "backup_create", "backup_list", "backup_restore", "backup_delete", "backup_prune",
@@ -99,26 +94,41 @@ const mainGranted = allowEntries(mainPermissions);
 const widgetGranted = allowEntries(widgetPermissions);
 const expectedWidget = mainGranted.filter((c) => !WIDGET_EXCLUDED_COMMANDS.includes(c)).sort();
 const actualWidget = [...widgetGranted].sort();
-check("widget carries main's workspace surface minus the credential/admin set", JSON.stringify(expectedWidget) === JSON.stringify(actualWidget), `${actualWidget.length}/${expectedWidget.length}`);
 check("widget still withholds credentials and vault admin", WIDGET_EXCLUDED_COMMANDS.every((c) => !widgetGranted.includes(c)));
 check("every withheld command is a real registered command", WIDGET_EXCLUDED_COMMANDS.every((c) => mainGranted.includes(c)));
 check("query route avoids static full app", main.includes('get("widget") === "1"') && main.includes('import("./WidgetApp.svelte")') && main.includes('import("./App.svelte")'));
-check("minimal widget shell", widget.includes("LazyWorkspace") && !widget.includes("Sidebar") && !widget.includes("TabBar") && !widget.includes("InspectorPanel") && !widget.includes("CommandPalette") && !widget.includes("QuickCaptureInput"));
-check("all canonical workspace surfaces are lazy", ["HomePane", "LogsWorkspace", "EditorPane", "InboxWorkspace", "NodeMapWorkspace", "CanvasWorkspace", "NovelWorkspace", "ScriptWorkspace", "ProjectsWorkspace", "ReaderWorkspace", "LibraryWorkspace"].every((name) => widget.includes(name)) && appStores.includes('export type WorkspaceId'));
 check("lazy workspace supports component props", lazyWorkspace.includes("componentProps") && lazyWorkspace.includes("<C {...componentProps} />"));
-check("files deep-links into library", widget.includes('initialTab: "files"') && libraryWorkspace.includes("initialTab"));
 check("widget never inits forbidden systems", !widget.includes("setupFileWatcher") && !widget.includes("sidecarStart") && !widget.includes("api.rag") && !widget.includes("llmStart") && !widget.includes("sttStart") && !widget.includes("ttsStart"));
-check("widget has collapsed/expanded geometry", widget.includes("setCollapsed") && widget.includes("placeWidget") && widget.includes("widgetDockEdge") && widget.includes("widgetDockOffset") && widget.includes("onMoved"));
   check("widget has no locked-state recovery path", !widget.includes("widgetLocked"));
-  check("write uses the existing companion editor", widget.includes('companionMode: true') && editor.includes("!companionMode && $settings.ghostEnabled") && editor.includes("{#if !companionMode}") && editor.includes("if (companionMode) return false"));
   check("main watcher stays call-once", (app.match(/api\.setupFileWatcher\(\)/g) ?? []).length === 1 && !settingsPane.includes("setupFileWatcher"));
-  check("settings own widget state", settings.includes("companionWidgetVisible") && settings.includes("widgetWorkspace") && settings.includes("widgetCollapsed") && settings.includes("widgetDockEdge") && settings.includes("widgetDockOffset") && settings.includes("widgetLaunchAtStartup"));
   check("widget never hydrates secrets", settings.includes("function isWidgetRoute()") && !settings.includes("api.appLockConfigured()") && !widget.includes("secretGet") && !widget.includes("secretSet") && !widgetPermissions.includes("allow-secret"));
-  check("widget does not filter docs by lock", widget.includes('api.docSearchFull("", workspace)') && !widget.includes(".filter((doc) => !doc.locked)"));
   check("open-in-app validates workspace, not lock", bridge.includes("widgetDocGet") && !bridge.includes("doc.locked") && bridge.includes("isWidgetWorkspace") && bridge.includes("workspaces") && !bridge.includes("appLockConfigured"));
+// --- The widget is a frame around ONE mini widget, never a window that hosts a tab ---
+const WIDGET_ALLOWED_COMMANDS = ["app_boot_ready", "doc_save", "log_get_or_create", "reader_get_bookshelf"];
+const registry = await read("src/lib/widgets/registry.ts");
+const quickNoteWidget = await read("src/lib/components/widgets/QuickNoteWidget.svelte");
+const readerWidget = await read("src/lib/components/widgets/ReaderWidget.svelte");
+check("widget is a real rectangle with a hard minimum size", widgetConfig?.minWidth === 280 && widgetConfig?.minHeight === 180 && widgetConfig?.width >= 280 && widgetConfig?.height >= 180, `${widgetConfig?.width}x${widgetConfig?.height} min ${widgetConfig?.minWidth}x${widgetConfig?.minHeight}`);
+check("registry floor matches the window config floor", registry.includes("WIDGET_MIN = { w: 280, h: 180 }"));
+check("widget native flags", widgetConfig?.decorations === false && widgetConfig?.transparent === false && widgetConfig?.alwaysOnTop === false && widgetConfig?.resizable === true && widgetConfig?.skipTaskbar === true && widgetConfig?.visible === false);
+check("widget command set is exactly what the mini widgets call", JSON.stringify([...widgetGranted].sort()) === JSON.stringify([...WIDGET_ALLOWED_COMMANDS].sort()), `${widgetGranted.length} granted`);
+check("every widget command is a real main command", WIDGET_ALLOWED_COMMANDS.every((c) => mainGranted.includes(c)));
+check("widget grants no AI, voice, memory, search or file-system commands", widgetGranted.every((c) => !/^(ai_|llm_|stt_|tts_|memory_|rag_|fs_|doc_search|search_|graph_|backup_|vault_|secret_)/.test(c)));
+check("widget hosts no workspace", !widget.includes("LazyWorkspace") && !widget.includes("workspaceLoader") && !widget.includes("companionMode") && !/Workspace\.svelte/.test(widget));
+check("widget renders only registered mini widgets", widget.includes("QuickNoteWidget") && widget.includes("ReaderWidget") && registry.includes("WIDGET_KINDS") && registry.includes('"quicknote"') && registry.includes('"reader"'));
+check("widget remembers size and position", widget.includes("widgetGeometry") && widget.includes("onMoved") && widget.includes("onResized") && widget.includes("scheduleGeometrySave"));
+check("widget only restores a position the user can reach", widget.includes("reachable("));
+check("own placement is not mistaken for a user move", widget.includes("PLACE_ECHO_MS") && widget.includes("placingUntil"));
+check("placement is serialised", widget.includes("placeQueue"));
+check("widget bar has open-in-app and hide", widget.includes("onclick={openInApp}") && widget.includes('aria-label="Hide widget"'));
+check("widget settings keys exist", ["companionWidgetVisible", "widgetKind", "widgetGeometry", "widgetReaderDocId", "widgetReaderSection", "widgetReaderSize", "widgetLaunchAtStartup"].every((k) => settings.includes(k)));
+check("settings pick the widget type", settingsPane.includes("setting-companion-widget") && settingsPane.includes("setting-widget-kind") && settingsPane.includes("setting-widget-startup") && !settingsPane.includes("setting-widget-dock"));
+check("widget hands off to the main app by workspace", widget.includes('emitTo("main", "widget-open-workspace"'));
+check("quick note writes the Logs format and keeps unsent drafts", quickNoteWidget.includes("appendNote") && quickNoteWidget.includes("DRAFT_KEY") && quickNoteWidget.includes("logGetOrCreate"));
+check("quick note re-reads today's log right before appending", quickNoteWidget.indexOf("logGetOrCreate") !== -1 && quickNoteWidget.indexOf("logGetOrCreate") < quickNoteWidget.indexOf("docSave"));
+check("quick note keeps the text when a save fails", quickNoteWidget.indexOf("text = \"\"") > quickNoteWidget.indexOf("docSave"));
+check("reader widget never writes the main reader's state", !readerWidget.includes("readerUpdatePosition") && !readerWidget.includes("readerSetShelfStatus") && !readerWidget.includes("docSave"));
 check("cross-window settings sync", settings.includes('window.addEventListener("storage"') && settings.includes('event.key !== "writing-app-settings"') && widget.includes("applyAppearance($settings.theme, $settings.themeMode, $settings.accentOverride)"));
-check("settings toggle and dock controls wired", settingsPane.includes("setting-companion-widget") && settingsPane.includes("setting-widget-workspace") && settingsPane.includes("setting-widget-dock-edge") && settingsPane.includes("setting-widget-dock-offset") && settingsPane.includes("setting-widget-startup"));
-check("widget emits doc and workspace handoffs", widget.includes('emitTo("main", "widget-open-doc"') && widget.includes('emitTo("main", "widget-open-workspace"'));
 check("widget waits for handoff acknowledgement", widget.includes('listen("main-window-shown"') && widget.includes('listen<string>("widget-open-failed"'));
 check("main opens and focuses routed doc or workspace", bridge.includes('listen<string>("widget-open-doc"') && bridge.includes('listen<string>("widget-open-workspace"') && bridge.includes("setFocus()"));
 check("tray show/hide entry", rust.includes('MenuItemBuilder::with_id("widget"') && rust.includes('get_webview_window("widget")'));
@@ -129,7 +139,7 @@ const singleInstance = rust.slice(rust.indexOf("single_instance::init"));
 check(
   "relaunch resurfaces hidden main window",
   singleInstance.indexOf("unminimize()") !== -1 &&
-    singleInstance.indexOf("unminimize()") < singleInstance.indexOf("find_text_file") &&
+    singleInstance.indexOf("unminimize()") < singleInstance.indexOf("find_supported_file") &&
     singleInstance.includes("main.show()") &&
     singleInstance.includes("main.set_focus()")
 );
@@ -140,7 +150,7 @@ const handlerCommands = [...handlerBlock.matchAll(/commands::([a-z0-9_]+)/g)].ma
 const manifestCommands = [...build.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]).filter((name) => handlerCommands.includes(name));
 check("app ACL manifest covers every handler", handlerCommands.length > 0 && manifestCommands.length === handlerCommands.length && handlerCommands.every((command) => manifestCommands.includes(command)), `${manifestCommands.length}/${handlerCommands.length}`);
 check("main command permissions cover handler set", handlerCommands.every((command) => mainPermissions.includes(`allow-${command.replaceAll("_", "-")}`)));
-for (const command of ["widget_doc_get", "doc_create", "widget_doc_save", "doc_search_full", "log_get_or_create", "usage_record", "widget_atomic_save", "bible_get_facts", "snapshot_list"]) {
+for (const command of WIDGET_ALLOWED_COMMANDS) {
   check(`widget command allowed: ${command}`, widgetPermissions.includes(`allow-${command.replaceAll("_", "-")}`));
 }
 check("main command set includes widget subset", mainPermissions.includes('identifier = "main"') && widgetPermissions.includes('identifier = "widget"'));

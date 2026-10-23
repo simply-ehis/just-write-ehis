@@ -71,7 +71,7 @@ function check(name, ok, detail = "") {
   const res = await audio.pollUntilHealthy(
     async () => { throw new Error("down"); },
     () => true,
-    "Kokoro",
+    "Phonon",
     () => {},
     600,
     100,

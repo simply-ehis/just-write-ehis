@@ -1,6 +1,7 @@
 use crate::database::Database;
 use crate::models::*;
 use crate::sidecar;
+use crate::tts_render;
 use crate::windows::AutostartLaunch;
 use crate::windows::PendingLaunchFile;
 use std::collections::HashSet;
@@ -12,6 +13,21 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use tauri::{Manager, State};
 use uuid::Uuid;
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalBinaryPreview {
+    pub file_name: String,
+    pub extension: String,
+    pub data_base64: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ExternalFileOpen {
+    Document { doc: Doc },
+    Preview { preview: ExternalBinaryPreview },
+}
 
 #[tauri::command]
 pub fn doc_create(
@@ -37,7 +53,7 @@ pub fn doc_create(
 pub fn open_external_file(
     db: State<'_, Database>,
     pending: State<'_, PendingLaunchFile>,
-) -> Result<Option<Doc>, String> {
+) -> Result<Option<ExternalFileOpen>, String> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (db, pending);
@@ -45,15 +61,10 @@ pub fn open_external_file(
     }
     #[cfg(target_os = "windows")]
     {
-        // The path is NOT taken from the renderer. It comes from
-        // `PendingLaunchFile`, which only the backend populates — from argv or
-        // the OS file association. A renderer-supplied path made this an
-        // arbitrary read: any compromised webview could name any .txt/.md on
-        // the machine and get its contents back as a Doc, bypassing the vault
-        // confinement that `fs_read_file` and friends apply. There is no
-        // legitimate caller that supplies a path — `nativeLaunch.ts` always
-        // fed this the backend's own pending file — so the parameter is gone
-        // rather than merely validated.
+        // Only the backend supplies this path from argv or a Windows file
+        // association. Never accept a renderer-provided path here: this
+        // command reads outside the vault for files the user explicitly
+        // opened through the operating system.
         let Some(raw) = pending.take() else {
             return Ok(None);
         };
@@ -63,21 +74,45 @@ pub fn open_external_file(
             .and_then(|value| value.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if extension != "txt" && extension != "md" {
+        let is_binary_preview = matches!(
+            extension.as_str(),
+            "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "docx"
+        );
+        let is_text_document = matches!(
+            extension.as_str(),
+            "txt" | "md" | "markdown" | "mdx" | "text" | "log" | "csv" | "json"
+                | "yaml" | "yml" | "toml" | "xml" | "htm" | "html" | "css" | "js"
+                | "ts" | "rs" | "py" | "sql" | "ini" | "conf"
+        );
+        if !is_binary_preview && !is_text_document {
             return Err(
-                "Only .txt and .md files can be opened from Windows file associations.".into(),
+                "This file type isn't supported for opening in Just Write ehis.".into(),
             );
         }
         if !path.is_file() {
             return Err(format!("File not found: {}", path.display()));
         }
-        // Cap before reading: a multi-GB .txt would otherwise be loaded
-        // whole into memory (25 MB mirrors attachment_save).
-        if path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_TEXT_BYTES as u64 {
+        // Cap before reading so a multi-GB document cannot exhaust memory.
+        if path.metadata().map_err(|e| e.to_string())?.len() > MAX_TEXT_BYTES as u64 {
             return Err("File over 25 MB — open it from its own app instead.".into());
         }
         let bytes = std::fs::read(&path)
             .map_err(|error| format!("Couldn't read {}: {}", path.display(), error))?;
+        if is_binary_preview {
+            use base64::Engine as _;
+            let file_name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("document")
+                .to_string();
+            return Ok(Some(ExternalFileOpen::Preview {
+                preview: ExternalBinaryPreview {
+                    file_name,
+                    extension,
+                    data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                },
+            }));
+        }
         if bytes.contains(&0) {
             return Err("That file looks binary, not UTF-8 text.".into());
         }
@@ -99,7 +134,7 @@ pub fn open_external_file(
                 serde_json::json!({ "source_path": path.to_string_lossy() }).to_string(),
             ),
         })?;
-        Ok(Some(doc))
+        Ok(Some(ExternalFileOpen::Document { doc }))
     }
 }
 
@@ -171,8 +206,8 @@ pub fn widget_doc_get(db: State<'_, Database>, id: String) -> Result<Doc, String
 }
 
 #[tauri::command]
-pub fn widget_doc_save(
-    db: State<'_, Database>,
+pub async fn widget_doc_save(
+    app: tauri::AppHandle,
     id: String,
     title: Option<String>,
     content: Option<String>,
@@ -180,19 +215,22 @@ pub fn widget_doc_save(
     frontmatter_json: Option<String>,
     parent_id: Option<Option<String>>,
 ) -> Result<Doc, String> {
-    db.save_doc(SaveDocRequest {
+    let request = SaveDocRequest {
         id,
         title,
         content,
         status,
         frontmatter_json,
         parent_id,
-    })
+    };
+    tauri::async_runtime::spawn_blocking(move || app.state::<Database>().save_doc(request))
+        .await
+        .map_err(|e| format!("Document save task failed: {e}"))?
 }
 
 #[tauri::command]
-pub fn doc_save(
-    db: State<'_, Database>,
+pub async fn doc_save(
+    app: tauri::AppHandle,
     id: String,
     title: Option<String>,
     content: Option<String>,
@@ -200,14 +238,17 @@ pub fn doc_save(
     frontmatter_json: Option<String>,
     parent_id: Option<Option<String>>,
 ) -> Result<Doc, String> {
-    db.save_doc(SaveDocRequest {
+    let request = SaveDocRequest {
         id,
         title,
         content,
         status,
         frontmatter_json,
         parent_id,
-    })
+    };
+    tauri::async_runtime::spawn_blocking(move || app.state::<Database>().save_doc(request))
+        .await
+        .map_err(|e| format!("Document save task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -282,8 +323,9 @@ pub async fn memory_learn(
 pub async fn memory_recall(
     mem: State<'_, sidecar::MemoryManager>,
     query: String,
+    prefetch: Option<bool>,
 ) -> Result<String, String> {
-    mem.recall(&query).await
+    mem.recall(&query, prefetch.unwrap_or(true)).await
 }
 
 #[tauri::command]
@@ -1814,11 +1856,11 @@ pub fn get_reopen_never_finish(db: State<'_, Database>) -> Result<serde_json::Va
 }
 
 #[tauri::command]
-pub fn dashboard_streak_heatmap(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let rows = db.dashboard_streak_heatmap()?;
+pub fn dashboard_activity_heatmap(db: State<'_, Database>) -> Result<serde_json::Value, String> {
+    let rows = db.dashboard_activity_heatmap()?;
     Ok(serde_json::Value::Array(
         rows.into_iter()
-            .map(|(date, words)| serde_json::json!({"date": date, "words": words}))
+            .map(|(date, activity)| serde_json::json!({"date": date, "activity": activity}))
             .collect(),
     ))
 }
@@ -1836,18 +1878,18 @@ pub fn dashboard_writing_time_patterns(
 }
 
 #[tauri::command]
-pub fn dashboard_writing_velocity(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    let rows = db.dashboard_writing_velocity()?;
+pub fn dashboard_writing_activity(db: State<'_, Database>) -> Result<serde_json::Value, String> {
+    let rows = db.dashboard_writing_activity()?;
     Ok(serde_json::Value::Array(
         rows.into_iter()
-            .map(|(date, words)| serde_json::json!({"date": date, "words": words}))
+            .map(|(date, activity)| serde_json::json!({"date": date, "activity": activity}))
             .collect(),
     ))
 }
 
 #[tauri::command]
-pub fn dashboard_productivity_score(db: State<'_, Database>) -> Result<serde_json::Value, String> {
-    db.dashboard_productivity_score()
+pub fn dashboard_library_stats(db: State<'_, Database>) -> Result<serde_json::Value, String> {
+    db.dashboard_library_stats()
 }
 
 fn script_frontmatter_array(
@@ -2046,17 +2088,25 @@ pub fn vault_rename_execute(
 }
 
 #[tauri::command]
-pub fn atomic_save(db: State<'_, Database>, doc_id: String, body: String) -> Result<(), String> {
-    db.atomic_save(&doc_id, &body)
+pub async fn atomic_save(
+    app: tauri::AppHandle,
+    doc_id: String,
+    body: String,
+) -> Result<Doc, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Database>().atomic_save(&doc_id, &body))
+        .await
+        .map_err(|e| format!("Atomic save task failed: {e}"))?
 }
 
 #[tauri::command]
-pub fn widget_atomic_save(
-    db: State<'_, Database>,
+pub async fn widget_atomic_save(
+    app: tauri::AppHandle,
     doc_id: String,
     body: String,
-) -> Result<(), String> {
-    db.atomic_save(&doc_id, &body)
+) -> Result<Doc, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<Database>().atomic_save(&doc_id, &body))
+        .await
+        .map_err(|e| format!("Widget atomic save task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -2416,10 +2466,7 @@ fn sanitize_body(html: &str) -> String {
 /// Files over 2 MB are skipped and counted, never inlined silently.
 /// Returns (rewritten_markdown, inlined_count, skipped_count).
 fn inline_attachments(content: &str, db: &State<'_, Database>) -> (String, u64, u64) {
-    let vault = match db.vault_path.lock().map(|v| v.clone()) {
-        Ok(v) => v,
-        Err(_) => return (content.to_string(), 0, 0),
-    };
+    let vault = &db.vault_path;
     let mut out = content.to_string();
     let mut inlined = 0u64;
     let mut skipped = 0u64;
@@ -2658,8 +2705,7 @@ pub fn perf_benchmark(db: State<'_, Database>) -> Result<serde_json::Value, Stri
 /// vault is refused; not-yet-existing paths resolve via the nearest
 /// existing ancestor with `..`/absolute segments in the remainder rejected.
 fn confine_to_vault(db: &State<'_, Database>, raw: &str) -> Result<std::path::PathBuf, String> {
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    confine_path_in(&vault, raw)
+    confine_path_in(&db.vault_path, raw)
 }
 
 fn confine_path_in(vault: &std::path::Path, raw: &str) -> Result<std::path::PathBuf, String> {
@@ -2754,6 +2800,32 @@ pub fn fs_read_file(db: State<'_, Database>, path: String) -> Result<String, Str
         return Err("File over 25 MB — open it from its own app instead.".into());
     }
     std::fs::read_to_string(&file).map_err(|e| e.to_string())
+}
+
+/// Read a supported binary document from inside the vault for an in-app
+/// preview. Keep this separate from attachment_read: preview paths may name
+/// files anywhere in the vault, but only a small, explicit set of formats.
+#[tauri::command]
+pub fn fs_read_binary(db: State<'_, Database>, path: String) -> Result<String, String> {
+    let file = confine_to_vault(&db, &path)?;
+    let ext = file
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(
+        ext.as_str(),
+        "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "docx"
+    ) {
+        return Err("This binary file type cannot be previewed.".into());
+    }
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    if len > MAX_TEXT_BYTES as u64 {
+        return Err("File over 25 MB — open it from its own app instead.".into());
+    }
+    let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 #[tauri::command]
@@ -2853,8 +2925,7 @@ pub fn attachment_save(
         safe
     };
     let unique = format!("{}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"), safe);
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    let dir = vault.join(".attachments");
+    let dir = db.vault_path.join(".attachments");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let dest = dir.join(&unique);
     // Unique temp per write: same-second same-name saves from concurrent
@@ -2944,8 +3015,7 @@ pub fn get_workspace_context(
 
 #[tauri::command]
 pub fn get_vault_path(db: State<'_, Database>) -> Result<String, String> {
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?;
-    Ok(vault.to_string_lossy().to_string())
+    Ok(db.vault_path.to_string_lossy().to_string())
 }
 
 // ── STT: Moonshine Voice ─────────────────────────────────────────
@@ -3154,18 +3224,21 @@ pub async fn stt_stream_stop(stt: State<'_, sidecar::SttManager>) -> Result<Stri
     stt.stream_stop().await
 }
 
-// ── TTS: Kokoro-82M ──────────────────────────────────────────────
+// ── TTS: Phonon ──────────────────────────────────────────────
 
 #[tauri::command]
 pub fn tts_start(
     tts: State<'_, sidecar::TtsManager>,
-    python_path: String,
+    _python_path: String,
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
     require_sidecar_paths(&sidecars_dir)?;
-    let python = python_for_sidecar(&python_path, &sidecars_dir, "tts-server.exe")?;
-    tts.start(&python, &sidecars_dir, model.as_deref())
+    // Phonon is a Rust binary — no Python needed. The dummy "python" return
+    // from python_for_sidecar is ignored by TtsManager::start when the exe
+    // is found; the Python fallback (tts_server.py) is kept for transition.
+    let _python = python_for_sidecar(&_python_path, &sidecars_dir, "phonon-server.exe")?;
+    tts.start(&_python, &sidecars_dir, model.as_deref())
 }
 
 /// Probe a python interpreter (`python --version`). Used by the Settings
@@ -3265,6 +3338,98 @@ pub async fn tts_stop_playback(tts: State<'_, sidecar::TtsManager>) -> Result<()
     tts.stop_playback().await
 }
 
+#[tauri::command]
+pub async fn tts_stream_start(
+    tts: State<'_, sidecar::TtsManager>,
+    text: String,
+    voice: String,
+) -> Result<(u64, u32), String> {
+    tts.stream_start(&text, &voice).await
+}
+
+#[tauri::command]
+pub async fn tts_stream_chunk(
+    tts: State<'_, sidecar::TtsManager>,
+    stream_id: u64,
+) -> Result<Option<(Vec<u8>, u32)>, String> {
+    tts.stream_chunk(stream_id).await
+}
+
+#[tauri::command]
+pub async fn tts_stream_stop(
+    tts: State<'_, sidecar::TtsManager>,
+    stream_id: u64,
+) -> Result<(), String> {
+    tts.stream_stop(stream_id).await
+}
+
+// ── TTS render-ahead: pages + sample-accurate timeline ───────────────
+
+/// Start one render job over a frontend-segmented snapshot. Returns the
+/// renderId used by the `tts://render-*` events and the page/demand/
+/// cancel commands. The voice model must already be up (the button
+/// ensures it); the job renders internally per sentence, inserts pauses,
+/// and is bounded to ~45 s ahead of the demanded playhead.
+#[tauri::command]
+pub fn tts_render_start(
+    app: tauri::AppHandle,
+    tts: State<'_, sidecar::TtsManager>,
+    registry: State<'_, std::sync::Arc<tts_render::RenderRegistry>>,
+    segments: Vec<tts_render::RenderSegment>,
+    params: tts_render::RenderParams,
+) -> Result<u64, String> {
+    if !tts.is_running() {
+        return Err(
+            "The voice model is not running — start read-aloud once so it can load."
+                .to_string(),
+        );
+    }
+    tts_render::spawn_render(app, registry.inner().clone(), segments, params)
+}
+
+#[tauri::command]
+pub fn tts_render_cancel(
+    registry: State<'_, std::sync::Arc<tts_render::RenderRegistry>>,
+    render_id: u64,
+) -> Result<(), String> {
+    registry.cancel(render_id)
+}
+
+/// Absolute render budget: the renderer may produce `seconds` of audio
+/// from the stream start (playback passes playhead + render-ahead).
+#[tauri::command]
+pub fn tts_render_demand(
+    registry: State<'_, std::sync::Arc<tts_render::RenderRegistry>>,
+    render_id: u64,
+    seconds: f64,
+) -> Result<(), String> {
+    registry.get(render_id).map(|job| job.demand(seconds))
+}
+
+/// Phase 4: live WSOLA speed for a running render job. Applies from the
+/// render frontier (≤ one page ahead) — no re-synthesis, pitch
+/// untouched. Clamped to 0.5–2.0 in the job itself.
+#[tauri::command]
+pub fn tts_render_set_speed(
+    registry: State<'_, std::sync::Arc<tts_render::RenderRegistry>>,
+    render_id: u64,
+    speed: f64,
+) -> Result<(), String> {
+    registry.get(render_id).map(|job| job.set_speed(speed))
+}
+
+/// Pull one page as raw i16le bytes (no base64 tax). Recently fetched
+/// pages stay briefly addressable for back-seeks; older ones error with
+/// an evicted message so the frontend re-renders from that position.
+#[tauri::command]
+pub fn tts_render_page(
+    registry: State<'_, std::sync::Arc<tts_render::RenderRegistry>>,
+    render_id: u64,
+    page_idx: u32,
+) -> Result<Vec<u8>, String> {
+    registry.get(render_id)?.take_page_bytes(page_idx)
+}
+
 // ── LLM: llama.cpp server (LFM 2.5-350M) ─────────────────────────────
 
 #[tauri::command]
@@ -3273,10 +3438,9 @@ pub fn llm_start(
     sidecars_dir: String,
     model: Option<String>,
     ctx_size: Option<u32>,
-    quantization: Option<String>,
 ) -> Result<(), String> {
     require_sidecar_paths(&sidecars_dir)?;
-    llm.start(&sidecars_dir, model.as_deref(), ctx_size, quantization.as_deref())
+    llm.start(&sidecars_dir, model.as_deref(), ctx_size)
 }
 
 #[tauri::command]
@@ -3388,12 +3552,7 @@ pub async fn convert_run(
     doc_id: String,
     out_fmt: String,
 ) -> Result<crate::convert::ConvertOutput, String> {
-    // Run on spawn_blocking: convert_markdown can invoke the Typst
-    // subprocess (up to 120s) and holds vault_path for its duration. As a
-    // sync command this ran on the UI thread and froze the whole app.
-    //
-    // Extract owned data before the closure: State<'_, Database> is not
-    // 'static, so it cannot be moved into spawn_blocking.
+    // Conversion can run Typst, so keep it off the async executor.
     let doc = db.get_doc(&doc_id)?;
     let lookup = export_lookup(&db);
     let prepared = crate::convert::prepare_export(
@@ -3404,9 +3563,6 @@ pub async fn convert_run(
     );
     let typst = crate::pdf::find_typst(resource_dir(&app));
     let title = doc.title.clone();
-    // vault_path is NOT held across the spawn_blocking closure: the
-    // _vault parameter of convert_markdown is unused, so the lock was
-    // starving autosave for the entire export duration for nothing.
     tauri::async_runtime::spawn_blocking(move || {
         crate::convert::convert_markdown(&title, &prepared, &out_fmt, typst, None)
     })
@@ -3480,9 +3636,7 @@ pub async fn compile_run(
         extra: Vec::new(),
     };
     let manuscript = crate::convert::inject_frontmatter(&manuscript, &header);
-    // spawn_blocking: same reason as convert_run — the Typst subprocess can
-    // run up to 120s. vault_path is not held: the _vault parameter of
-    // convert_markdown is unused.
+    // Conversion can run Typst, so keep it off the async executor.
     let typst = crate::pdf::find_typst(resource_dir(&app));
     tauri::async_runtime::spawn_blocking(move || {
         crate::convert::convert_markdown(&name, &manuscript, &out_fmt, typst, None)
@@ -3518,8 +3672,8 @@ pub fn attachment_read(db: State<'_, Database>, path: String) -> Result<String, 
     }
     // Canonicalize and re-check: a symlink inside .attachments/ pointing
     // outside the vault must not be followed.
-    let vault = db.vault_path.lock().map_err(|e| e.to_string())?.clone();
-    let vault_canon = vault
+    let vault_canon = db
+        .vault_path
         .canonicalize()
         .map_err(|_| "Vault is unavailable.".to_string())?;
     let target = vault_canon

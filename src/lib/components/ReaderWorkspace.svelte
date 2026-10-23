@@ -48,6 +48,8 @@
   let renderedCount = $state(12);
   // Section currently read aloud (highlight + autoscroll target).
   let readSectionIdx = $state<number | null>(null);
+  let activeTtsBlock: HTMLElement | null = null;
+  let ttsFollowSequence = 0;
 
   // 6.1 — Contents panel + live reading progress. Sections already exist
   // for read-aloud; this exposes them for navigation instead of leaving
@@ -284,10 +286,9 @@
   function ttsSections(): { id: string; title: string; text: string }[] {
     return readSections
       .map((s, i) => ({ id: s.id, title: s.title, text: sectionTexts[i] ?? "" }))
-      .filter((s) => s.text.trim().length > 0);
   }
 
-  /** Highlight + autoscroll the section being read; expand the window first. */
+  /** Highlight the section being read; sentence handling owns scroll-follow. */
   function handleTtsSection(idx: number | null) {
     if (idx == null || idx < 0 || idx >= readSections.length) {
       readSectionIdx = null;
@@ -295,10 +296,31 @@
     }
     if (idx + 2 > renderedCount) renderedCount = Math.min(readSections.length, idx + 2);
     readSectionIdx = idx;
-    requestAnimationFrame(() => {
-      const el = scrollEl?.querySelector(`section[data-section="${readSections[idx].id}"]`);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-    });
+  }
+
+  /** Follow the spoken paragraph inside a chapter; fall back to its section. */
+  async function handleTtsSentence(idx: number | null, sentence: string | null) {
+    const sequence = ++ttsFollowSequence;
+    activeTtsBlock?.classList.remove("tts-active-sentence");
+    activeTtsBlock = null;
+    if (idx == null || idx < 0 || idx >= readSections.length || !sentence?.trim()) return;
+    if (idx + 2 > renderedCount) renderedCount = Math.min(readSections.length, idx + 2);
+    await tick();
+    if (sequence !== ttsFollowSequence) return;
+    const section = scrollEl?.querySelector<HTMLElement>(`section[data-section="${CSS.escape(readSections[idx].id)}"]`);
+    if (!section) return;
+    const normalize = (value: string) => value.toLocaleLowerCase().replace(/\s+/g, " ").trim();
+    const targetText = normalize(sentence);
+    const blocks = Array.from(section.querySelectorAll<HTMLElement>("p, li, blockquote, h1, h2, h3"));
+    const match = targetText.length >= 8
+      ? blocks.find((block) => normalize(block.innerText).includes(targetText))
+      : undefined;
+    const target = match ?? section;
+    if (match) {
+      activeTtsBlock = match;
+      match.classList.add("tts-active-sentence");
+    }
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 
   /** Measured section boxes for anchoring (offsetTop/offsetHeight). */
@@ -764,6 +786,7 @@
             }}
             getSections={ttsSections}
             onSection={handleTtsSection}
+            onSentence={handleTtsSentence}
           />
         {/if}
       </div>

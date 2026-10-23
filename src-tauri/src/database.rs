@@ -1,32 +1,28 @@
 use rusqlite::{Connection, Result as SqlResult};
-use std::sync::Mutex;
+use std::collections::{HashMap, HashSet};
+use std::sync::{mpsc, Mutex};
+
+// Increment when the schema changes; the version commits with the migration.
+const SCHEMA_VERSION: i64 = 5;
 
 pub struct Database {
     pub conn: Mutex<Connection>,
-    pub vault_path: Mutex<std::path::PathBuf>,
-    /// True when writes must be refused (e.g. a failed migration left the
-    /// schema in an unsafe state). Checked by save_doc and atomic_save.
-    pub read_only: Mutex<crate::ReadOnlyFlag>,
-    /// On-disk location of the database, when there is one.
-    ///
-    /// `backup_create` needs this to run `VACUUM INTO` on a SECOND connection:
-    /// the copy reads the whole file, and doing it on `conn` held the only
-    /// connection's mutex for the duration, stalling every concurrent command
-    /// (autosave, search, RAG) on a large vault. WAL permits a reader alongside
-    /// the writer, so a separate connection lets the app keep serving while the
-    /// backup runs. `None` for in-memory databases, where there is no file to
-    /// reopen and the caller must fall back to the locked path.
-    pub db_path: Mutex<Option<std::path::PathBuf>>,
+    pub vault_path: std::path::PathBuf,
+    /// Set after a failed migration to block document writes.
+    pub read_only: bool,
+    /// On-disk location used by backups and the derived-index worker.
+    pub db_path: Option<std::path::PathBuf>,
+    index_tx: Option<mpsc::Sender<DerivedIndexJob>>,
 }
 
-/// Rolls an open transaction back on drop, unless disarmed after COMMIT.
-///
-/// SQLite does not roll back an open transaction when a statement inside it
-/// fails: it stays open, holding its locks, until an explicit ROLLBACK or
-/// COMMIT. The migration body propagates every failure with `?`, and lib.rs
-/// deliberately keeps this same connection alive (read-only) after a failed
-/// migration, so without this guard the transaction would stay open for the
-/// life of the process.
+struct DerivedIndexJob {
+    doc_id: String,
+    content: String,
+    refresh_rag: bool,
+    refresh_backlink_titles: Vec<String>,
+}
+
+/// Rolls back a migration transaction unless it commits.
 struct RollbackGuard<'a> {
     conn: &'a Connection,
     committed: bool,
@@ -44,65 +40,143 @@ impl Database {
     pub fn new(conn: Connection, vault_path: std::path::PathBuf) -> Self {
         Self {
             conn: Mutex::new(conn),
-            vault_path: Mutex::new(vault_path),
-            db_path: Mutex::new(None),
-            read_only: Mutex::new(crate::ReadOnlyFlag(false)),
+            vault_path,
+            db_path: None,
+            read_only: false,
+            index_tx: None,
         }
     }
 
-    /// Record the backing file so long-running reads can use their own
-    /// connection. Separate from `new` so in-memory test databases stay valid.
-    pub fn with_db_path(self, path: std::path::PathBuf) -> Self {
-        if let Ok(mut slot) = self.db_path.lock() {
-            *slot = Some(path);
-        }
+    /// Set the backing file; in-memory databases leave it unset.
+    pub fn with_db_path(mut self, path: std::path::PathBuf) -> Self {
+        self.db_path = Some(path);
         self
     }
 
+    pub fn start_derived_index_worker(&mut self) -> Result<(), String> {
+        let path = self
+            .db_path
+            .clone()
+            .ok_or_else(|| "database path is unavailable".to_string())?;
+        let vault = self.vault_path.clone();
+        let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA vec_enable=ON;",
+        )
+        .map_err(|e| e.to_string())?;
+        let worker_db = Database::new(conn, vault);
+        let (tx, rx) = mpsc::channel();
+        self.index_tx = Some(tx);
+
+        std::thread::Builder::new()
+            .name("derived-index".into())
+            .spawn(move || {
+                while let Ok(first) = rx.recv() {
+                    let mut pending = HashMap::new();
+                    pending.insert(first.doc_id.clone(), first);
+                    loop {
+                        match rx.recv_timeout(std::time::Duration::from_millis(300)) {
+                            Ok(job) => {
+                                if let Some(previous) = pending.get_mut(&job.doc_id) {
+                                    previous.content = job.content;
+                                    previous.refresh_rag |= job.refresh_rag;
+                                    previous
+                                        .refresh_backlink_titles
+                                        .extend(job.refresh_backlink_titles);
+                                } else {
+                                    pending.insert(job.doc_id.clone(), job);
+                                }
+                            }
+                            Err(mpsc::RecvTimeoutError::Timeout)
+                            | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        }
+                    }
+
+                    let mut refresh_backlink_titles = HashSet::new();
+                    for job in pending.into_values() {
+                        refresh_backlink_titles.extend(job.refresh_backlink_titles);
+                        if let Err(error) =
+                            worker_db.refresh_entities(&job.doc_id, &job.content)
+                        {
+                            eprintln!("[derived-index] entities refresh failed for {}: {error}", job.doc_id);
+                        }
+                        if let Err(error) =
+                            worker_db.extract_backlinks(&job.doc_id, &job.content)
+                        {
+                            eprintln!("[derived-index] backlinks refresh failed for {}: {error}", job.doc_id);
+                        }
+                        if job.refresh_rag {
+                            worker_db.refresh_rag_chunks(&job.doc_id);
+                        }
+                    }
+                    if !refresh_backlink_titles.is_empty() {
+                        let titles = refresh_backlink_titles.into_iter().collect::<Vec<_>>();
+                        if let Err(error) = worker_db
+                            .refresh_backlinks_for_titles(&titles)
+                        {
+                            eprintln!("[derived-index] backlink title refresh failed: {error}");
+                        }
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub(crate) fn schedule_derived_indexes(
+        &self,
+        doc_id: &str,
+        content: &str,
+        refresh_rag: bool,
+        refresh_backlink_titles: &[String],
+    ) -> bool {
+        let job = DerivedIndexJob {
+            doc_id: doc_id.to_string(),
+            content: content.to_string(),
+            refresh_rag,
+            refresh_backlink_titles: refresh_backlink_titles.to_vec(),
+        };
+        self.index_tx
+            .as_ref()
+            .is_some_and(|tx| tx.send(job).is_ok())
+    }
+
     pub fn initialize(&self) -> SqlResult<()> {
-        // Back up the DB file before any DDL runs. A failed migration is
-        // recoverable only if the pre-migration state still exists — and the
-        // old code had no backup at all, so a half-migrated schema meant the
-        // app refused to launch with the vault on disk and no way in.
-        self.backup_before_migration()?;
+        let current_version: i64 = {
+            let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+            conn.query_row("PRAGMA user_version", [], |row| row.get(0))?
+        };
+        if current_version > SCHEMA_VERSION {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some(format!(
+                    "database schema version {current_version} is newer than this app supports ({SCHEMA_VERSION})"
+                )),
+            ));
+        }
+        if current_version < SCHEMA_VERSION {
+            if let Err(error) = self.backup_before_migration() {
+                eprintln!("[db] pre-migration backup failed; migration remains transactional: {error}");
+            }
+        }
 
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
-        conn.execute_batch("PRAGMA vec_enable=ON;")?;
-
-        // WAL companions. Only `journal_mode` was set, so the rest ran at SQLite
-        // defaults, which cost real time in this app specifically:
-        //
-        // - `synchronous` defaults to FULL, so every commit fsyncs the WAL. The
-        //   editor autosaves on each pause while typing, making this the single
-        //   most frequent disk sync in the product. NORMAL is the standard
-        //   companion to WAL: still crash-safe against application crashes
-        //   (only a power loss/OS crash can lose the last commits), and the app
-        //   already has a snapshot + version-history layer for that case.
-        // - `cache_size` defaults to ~2 MB, which is small against a vault large
-        //   enough to make the scans in doc_store noticeable; these were
-        //   re-reading from disk repeatedly.
-        // - `mmap_size` unset means reads go through the syscall path rather
-        //   than memory mapping.
-        //
-        // Negative `cache_size` is kibibytes rather than pages.
         conn.execute_batch(
-            "PRAGMA synchronous=NORMAL;
-             PRAGMA cache_size=-20000;
-             PRAGMA mmap_size=268435456;
-             PRAGMA temp_store=MEMORY;",
+            "PRAGMA journal_mode=WAL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA vec_enable=ON;
+             PRAGMA synchronous=NORMAL;",
         )?;
 
-        // Migrations run inside one transaction. `execute_batch` does NOT wrap
-        // its statements, so a failure part-way through used to leave the
-        // schema half-migrated — and because lib.rs maps an initialize() error
-        // out of setup, that meant the app refused to launch with the vault
-        // still on disk and no way in through the UI.
-        //
-        // Must come AFTER the PRAGMA block above: `PRAGMA journal_mode=WAL`
-        // cannot run inside a transaction ("Safety level may not be changed
-        // inside a transaction").
+        if current_version == SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        // Keep schema changes atomic so a failed migration leaves the DB usable.
         conn.execute_batch("BEGIN;")?;
         let mut rollback_guard = RollbackGuard {
             conn: &conn,
@@ -243,8 +317,9 @@ impl Database {
             CREATE TABLE IF NOT EXISTS craft_metrics (
                 id TEXT PRIMARY KEY,
                 doc_id TEXT NOT NULL,
-                metrics_json TEXT NOT NULL,
-                ts TEXT NOT NULL,
+                metric_type TEXT NOT NULL,
+                value REAL NOT NULL,
+                created_at TEXT NOT NULL,
                 FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
             );
 
@@ -255,20 +330,13 @@ impl Database {
                 FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_docs_workspace ON docs(workspace);
             CREATE INDEX IF NOT EXISTS idx_docs_parent ON docs(parent_id);
             CREATE INDEX IF NOT EXISTS idx_docs_path ON docs(path);
-            CREATE INDEX IF NOT EXISTS idx_backlinks_source ON backlinks(source_id);
             CREATE INDEX IF NOT EXISTS idx_backlinks_target ON backlinks(target_id);
-            CREATE INDEX IF NOT EXISTS idx_snapshots_doc ON snapshots(doc_id);
-            CREATE INDEX IF NOT EXISTS idx_usage_events_doc ON usage_events(doc_id);
             CREATE INDEX IF NOT EXISTS idx_conversations_doc ON conversations(doc_id);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id);
-            CREATE INDEX IF NOT EXISTS idx_bible_facts_doc ON bible_facts(doc_id);
             CREATE INDEX IF NOT EXISTS idx_bible_mentions_scope ON bible_mentions(bible_doc_id);
-            CREATE INDEX IF NOT EXISTS idx_bible_mentions_doc ON bible_mentions(doc_id);
             CREATE INDEX IF NOT EXISTS idx_bible_suggestions_scope ON bible_suggestions(bible_doc_id);
-            CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);
             CREATE INDEX IF NOT EXISTS idx_docs_updated_at ON docs(updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_docs_pinned ON docs(pinned);
             CREATE INDEX IF NOT EXISTS idx_docs_activity_score ON docs(activity_score DESC);
@@ -280,7 +348,6 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_usage_events_doc_event ON usage_events(doc_id, event);
             CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(ts);
             CREATE INDEX IF NOT EXISTS idx_doc_tags_tag ON doc_tags(tag);
-            CREATE INDEX IF NOT EXISTS idx_doc_tags_doc ON doc_tags(doc_id);
 
             CREATE TABLE IF NOT EXISTS rag_chunks (
                 id TEXT PRIMARY KEY,
@@ -289,12 +356,28 @@ impl Database {
                 content TEXT NOT NULL,
                 start_word INTEGER NOT NULL,
                 end_word INTEGER NOT NULL,
-                embedding BLOB,
                 FOREIGN KEY (doc_id) REFERENCES docs(id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
-            CREATE INDEX IF NOT EXISTS idx_rag_chunks_content ON rag_chunks(content);"
+            CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);"
+        )?;
+
+        let has_unused_chunk_embedding: bool =
+            conn.prepare("SELECT embedding FROM rag_chunks LIMIT 0").is_ok();
+        if has_unused_chunk_embedding {
+            conn.execute_batch("ALTER TABLE rag_chunks DROP COLUMN embedding;")?;
+        }
+
+        // Drop redundant indexes left by earlier schemas.
+        conn.execute_batch(
+            "DROP INDEX IF EXISTS idx_docs_workspace;
+             DROP INDEX IF EXISTS idx_snapshots_doc;
+             DROP INDEX IF EXISTS idx_usage_events_doc;
+             DROP INDEX IF EXISTS idx_backlinks_source;
+             DROP INDEX IF EXISTS idx_bible_facts_doc;
+             DROP INDEX IF EXISTS idx_bible_mentions_doc;
+             DROP INDEX IF EXISTS idx_doc_tags_doc;
+             DROP INDEX IF EXISTS idx_rag_chunks_content;",
         )?;
 
         let has_suggestion_status: bool = conn
@@ -333,6 +416,28 @@ impl Database {
             );",
         )?;
 
+        // Keep command-palette search in sync with document writes.
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS docs_fts_insert AFTER INSERT ON docs BEGIN
+                 INSERT INTO docs_fts(rowid, title, content, workspace)
+                 VALUES (new.rowid, new.title, new.content, new.workspace);
+             END;
+             CREATE TRIGGER IF NOT EXISTS docs_fts_update AFTER UPDATE OF title, content, workspace ON docs BEGIN
+                 DELETE FROM docs_fts WHERE rowid = old.rowid;
+                 INSERT INTO docs_fts(rowid, title, content, workspace)
+                 VALUES (new.rowid, new.title, new.content, new.workspace);
+             END;
+             CREATE TRIGGER IF NOT EXISTS docs_fts_delete AFTER DELETE ON docs BEGIN
+                 DELETE FROM docs_fts WHERE rowid = old.rowid;
+             END;",
+        )?;
+
+        conn.execute_batch(
+            "DELETE FROM docs_fts;
+             INSERT INTO docs_fts(rowid, title, content, workspace)
+             SELECT rowid, title, content, workspace FROM docs;",
+        )?;
+
         let has_hash: bool = conn
             .prepare("SELECT content_hash FROM snapshots LIMIT 1")
             .is_ok();
@@ -340,13 +445,19 @@ impl Database {
             conn.execute_batch("ALTER TABLE snapshots ADD COLUMN content_hash TEXT;")?;
         }
 
-        let has_pinned: bool = conn.prepare("SELECT pinned FROM docs LIMIT 1").is_ok();
-        if !has_pinned {
-            conn.execute_batch(
-                "ALTER TABLE docs ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
-                 ALTER TABLE docs ADD COLUMN goal_words INTEGER;
-                 ALTER TABLE docs ADD COLUMN deadline TEXT;",
-            )?;
+        for (column, definition) in [
+            ("pinned", "pinned INTEGER NOT NULL DEFAULT 0"),
+            ("goal_words", "goal_words INTEGER"),
+            ("deadline", "deadline TEXT"),
+        ] {
+            if conn
+                .prepare(&format!("SELECT {column} FROM docs LIMIT 1"))
+                .is_err()
+            {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE docs ADD COLUMN {definition};"
+                ))?;
+            }
         }
 
         conn.execute_batch(
@@ -370,25 +481,12 @@ impl Database {
              CREATE INDEX IF NOT EXISTS idx_canvas_edges_target ON canvas_edges(target_id);",
         )?;
 
-        // The craft_metrics table gained `metric_type` in a later schema. The old
-        // check only asked "does this table exist", so a DB that already had
-        // the table but not the column never got it — and every later
-        // get_doc failed with "no such column".
-        //
-        // Worse, the old body did `DROP TABLE IF EXISTS craft_metrics` before
-        // recreating it, which silently destroyed every existing user's
-        // craft-metric history on upgrade. Rename-and-copy instead: the old
-        // rows survive, and the new column is added without data loss.
-        let table_exists: bool = conn
-            .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='craft_metrics'")
-            .is_ok();
+        // Preserve craft metrics when converting the old table shape.
         let has_metric_type: bool = conn
             .prepare("SELECT metric_type FROM craft_metrics LIMIT 1")
             .is_ok();
-        if table_exists && !has_metric_type {
-            // Existing table without the new column: rename, copy, drop.
-            // The old schema used metrics_json/ts; the new one uses
-            // metric_type/value/created_at. Map old -> new explicitly.
+        if !has_metric_type {
+            // Convert the old metrics_json/ts rows into the current columns.
             conn.execute_batch(
                 "ALTER TABLE craft_metrics RENAME TO craft_metrics_old;
                  CREATE TABLE craft_metrics (
@@ -401,15 +499,16 @@ impl Database {
                  );
                  INSERT INTO craft_metrics (id, doc_id, metric_type, value, created_at)
                      SELECT id, doc_id, 'unknown', 0.0, ts FROM craft_metrics_old;
-                 DROP TABLE craft_metrics_old;
-                 CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);",
+                 DROP TABLE craft_metrics_old;",
             )?;
         }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_craft_metrics_doc ON craft_metrics(doc_id);",
+        )?;
 
-        // COMMIT is the last statement of the migration batch. If any statement
-        // failed, the `?` above returned early and RollbackGuard dropped, so the
-        // transaction was rolled back rather than left open on the connection
-        // this app keeps alive in read-only mode.
+        // Store the version in the same transaction as the schema changes.
+        conn.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION};"))?;
+
         conn.execute_batch("COMMIT;")?;
         rollback_guard.committed = true;
 
@@ -418,20 +517,9 @@ impl Database {
 
     /// Copy the DB file to a timestamped backup before migrations run.
     ///
-    /// A failed migration is only recoverable if the pre-migration state still
-    /// exists. The old code had no backup, so a half-migrated schema meant the
-    /// app refused to launch with the vault on disk and no way in through the
-    /// UI.
-    ///
-    /// Best-effort: a backup failure must not prevent the app from starting.
-    /// The migration itself is transactional, so the backup is a second layer
-    /// of safety, not the only one.
+    /// Best-effort copy before the transactional schema update.
     fn backup_before_migration(&self) -> SqlResult<()> {
-        let db_file = self
-            .db_path
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let db_file = self.db_path.clone();
         let Some(path) = db_file else {
             return Ok(()); // in-memory (tests): nothing to back up
         };

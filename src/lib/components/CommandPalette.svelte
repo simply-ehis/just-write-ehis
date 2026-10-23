@@ -13,6 +13,7 @@
   import { untrack } from 'svelte';
   import { domainError } from '$lib/errors';
   import { sendToCapture } from '$lib/stores/capture';
+  import { listenHarnessOpen } from '$lib/stores/devHarness';
 
   let open = $state(false);
   let query = $state('');
@@ -33,6 +34,7 @@
     { id: 'script', label: 'Go to Scripts', icon: 'film', action: () => { $currentWorkspace = 'script'; close(); } },
     { id: 'projects', label: 'Go to Projects', icon: 'folder', action: () => { $currentWorkspace = 'projects'; close(); } },
     { id: 'reader', label: 'Go to Reader', icon: 'book-open', action: () => { $currentWorkspace = 'reader'; close(); } },
+    { id: 'listenharness', label: 'TTS listen harness (dev)', icon: 'speaker', action: () => { $listenHarnessOpen = true; close(); } },
     { id: 'files', label: 'Go to Files', icon: 'files', action: () => { $currentWorkspace = 'properties'; window.dispatchEvent(new CustomEvent('open-library-files')); close(); } },
     { id: 'inbox', label: 'Open Capture', icon: 'inbox', action: () => { $currentWorkspace = 'inbox'; close(); } },
     { id: 'craft', label: 'Open Craft Analytics (Settings)', icon: 'chart', action: () => { openSettingsAt('craft'); $showSettings = true; close(); } },

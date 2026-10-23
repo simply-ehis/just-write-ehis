@@ -27,12 +27,12 @@
         "label": "widget",
         "title": "Just Write ehis Companion",
         "url": "index.html?widget=1",
-        "width": 56,
-        "height": 56,
-        "minWidth": 48,
-        "minHeight": 48,
+        "width": 340,
+        "height": 240,
+        "minWidth": 280,
+        "minHeight": 180,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "alwaysOnTop": false,
         "resizable": true,
         "skipTaskbar": true,
@@ -63,7 +63,7 @@
     "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
-        "installMode": "both",
+        "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
         "headerImage": "installer-assets/header.bmp",
         "sidebarImage": "installer-assets/sidebar.bmp"
@@ -74,7 +74,6 @@
       "sidecars/fetch_sidecars.py",
       "sidecars/requirements.txt",
       "sidecars/stt_server.py",
-      "sidecars/tts_server.py",
       "sidecars/memory_server.py",
       "sidecars/harness/*"
     ]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-render-demand"
+description = "Enables the tts_render_demand command without any pre-configured scope."
+commands.allow = ["tts_render_demand"]
+
+[[permission]]
+identifier = "deny-tts-render-demand"
+description = "Denies the tts_render_demand command without any pre-configured scope."
+commands.deny = ["tts_render_demand"]

@@ -13,7 +13,7 @@ const check = (name, condition, detail = "") => {
 const windowsConfig = JSON.parse(await read("src-tauri/tauri.windows.conf.json"));
 const association = windowsConfig.bundle?.fileAssociations?.[0];
 check("Windows association config exists", windowsConfig.bundle?.windows?.nsis?.installerHooks === "./windows/hooks.nsh");
-check("association list is exactly txt and md", JSON.stringify(association?.ext) === JSON.stringify(["txt", "md"]));
+check("association list covers supported text formats", ["txt", "md", "json", "csv", "py"].every((ext) => association?.ext?.includes(ext)));
 const hooks = await read("src-tauri/windows/hooks.nsh");
 check("uninstall removes Run entry", hooks.includes("CurrentVersion\\Run") && hooks.includes("Just Write ehis"));
 check("uninstall removes StartupApproved entry", hooks.includes("StartupApproved\\Run"));
@@ -27,15 +27,16 @@ const processPlugin = lib.indexOf("tauri_plugin_process::init");
 check("single instance registers first", singleInstance > builderStart && singleInstance < processPlugin);
 check("single-instance forwards text file paths", lib.includes("native-file-open") && lib.includes("PendingLaunchFile"));
 const commands = await read("src-tauri/src/commands.rs");
-check("external file import is guarded", commands.includes('extension != "txt" && extension != "md"') && commands.includes("open_external_file"));
+check("external file import validates supported text and preview types", commands.includes('"txt" | "md" | "markdown"') && commands.includes('"pdf" | "png" | "jpg"') && commands.includes("!is_binary_preview && !is_text_document") && commands.includes("open_external_file"));
 check("default app button does not write UserChoice", commands.includes("ms-settings:defaultapps") && !commands.includes("UserChoice"));
 const settings = await read("src/lib/components/SettingsPane.svelte");
 const autostart = await read("src/lib/widgetAutostart.ts");
 const onboarding = await read("src/lib/components/OnboardingOverlay.svelte");
 const settingsStore = await read("src/lib/stores/settings.ts");
-check("settings expose all Windows controls", settings.includes("setting-companion-widget") && settings.includes("setting-widget-startup") && settings.includes("setting-default-app") && settings.includes("setting-associated-extensions"));
+check("settings expose Windows controls", settings.includes("setting-companion-widget") && settings.includes("setting-widget-startup") && settings.includes("setting-default-app"));
 check("onboarding explains Windows integration", onboarding.includes("windowsStep") && onboarding.includes("Open your writing from Windows") && onboarding.includes("Open Windows Default Apps") && settingsStore.includes("ONBOARD_VERSION = 2"));
-check("autostart prompt is explicit", autostart.includes("Also start Just Write ehis automatically with Windows? Choose Cancel to decline."));
+// Native confirm() popups are titled "tauri.localhost says" by WebView2 and read as a permission request.
+check("autostart never uses a native confirm popup", !autostart.includes("window.confirm") && !autostart.includes("promptWidgetAutostart"));
 if (failures) {
   console.error(`${failures} OS integration failure(s)`);
   process.exit(1);

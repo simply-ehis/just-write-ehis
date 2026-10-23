@@ -20,8 +20,9 @@
   let wordTrend = $state<[string, number][]>([]);
   let aiSuggestion = $state("");
   let loading = $state(false);
-  let viewMode = $state<'dashboard' | 'board'>('dashboard');
+  let viewMode = $state<'dashboard' | 'board' | 'references'>('dashboard');
   let boardColumns = $state<Record<string, Doc[]>>({});
+  let referenceDocs = $state<Doc[]>([]);
   // Task/project open for reading/editing (master-detail); null = boards.
   let editingDoc = $state<Doc | null>(null);
   let sidebarCollapsed = $state(false);
@@ -42,6 +43,7 @@
   function dropEditingIfGone(id: string) {
     if (editingDoc?.id === id) editingDoc = null;
     childDocs = childDocs.filter((d) => d.id !== id);
+    referenceDocs = referenceDocs.filter((d) => d.id !== id);
     for (const key of Object.keys(boardColumns)) {
       boardColumns[key] = (boardColumns[key] || []).filter((d) => d.id !== id);
     }
@@ -67,7 +69,9 @@
     try {
       // Load child docs (docs whose parent_id is this project)
       const allDocs = await api.docListByWorkspace("projects");
-      childDocs = allDocs.filter(d => d.parent_id === project.id);
+      const projectDocs = allDocs.filter(d => d.parent_id === project.id);
+      referenceDocs = projectDocs.filter((d) => d.kind === "reference");
+      childDocs = projectDocs.filter((d) => d.kind !== "reference");
 
       // Build word count trend from child docs
       wordTrend = childDocs
@@ -106,6 +110,25 @@
       boardColumns[status].push(doc);
     } catch (e) {
       domainError("Projects", "couldn't add task", e);
+    }
+  }
+
+  async function addReference() {
+    if (!selectedProject) return;
+    const title = `Reference ${referenceDocs.length + 1}`;
+    try {
+      const doc = await api.docCreate(
+        "projects",
+        "reference",
+        title,
+        selectedProject.id,
+        "",
+        JSON.stringify({ status: "reference" })
+      );
+      referenceDocs = [...referenceDocs, doc];
+      openForEdit(doc);
+    } catch (e) {
+      domainError("Projects", "couldn't add reference", e);
     }
   }
 
@@ -226,6 +249,7 @@
         <div class="view-toggle">
           <button class:active={viewMode === 'dashboard'} onclick={() => viewMode = 'dashboard'}>Dashboard</button>
           <button class:active={viewMode === 'board'} onclick={() => viewMode = 'board'}>Board</button>
+          <button class:active={viewMode === 'references'} onclick={() => viewMode = 'references'}>References ({referenceDocs.length})</button>
           <button class="ai-btn" onclick={askAiSuggestion}>AI Suggest</button>
           <button class="open-btn" onclick={() => selectedProject && openForEdit(selectedProject)} title="Open project notes in editor" aria-label="Open project notes in editor">Open</button>
           <DeleteButton
@@ -298,7 +322,7 @@
             </div>
           {/if}
         </div>
-      {:else}
+      {:else if viewMode === 'board'}
         <!-- Board view -->
         <div class="board-view">
           {#each statusOrder as status}
@@ -330,6 +354,28 @@
               {/snippet}
             </BoardColumn>
           {/each}
+        </div>
+      {:else}
+        <div class="references-view">
+          <div class="references-header">
+            <div>
+              <h2>Project references</h2>
+              <p>Keep research notes and source details with this project.</p>
+            </div>
+            <button class="add-reference-btn" onclick={addReference}>+ Add reference</button>
+          </div>
+          {#if referenceDocs.length === 0}
+            <p class="references-empty">No references yet. Add one to keep notes and source details here.</p>
+          {:else}
+            <div class="references-list">
+              {#each referenceDocs as reference (reference.id)}
+                <button class="reference-item" onclick={() => openForEdit(reference)}>
+                  <span>{reference.title}</span>
+                  <small>{reference.word_count} words · Updated {new Date(reference.updated_at).toLocaleDateString()}</small>
+                </button>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
         {/snippet}
@@ -546,6 +592,71 @@
     font-family: var(--font-heading);
     font-size: var(--font-size-xl);
     font-weight: var(--font-weight-bold);
+  }
+
+  .references-view {
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    padding: var(--space-4);
+  }
+
+  .references-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .references-header h2 {
+    margin: 0 0 var(--space-1);
+    font-family: var(--font-heading);
+  }
+
+  .references-header p,
+  .references-empty {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+  }
+
+  .add-reference-btn,
+  .reference-item {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  .add-reference-btn {
+    flex-shrink: 0;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .references-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--space-2);
+  }
+
+  .reference-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    text-align: left;
+  }
+
+  .reference-item:hover,
+  .add-reference-btn:hover {
+    border-color: var(--accent-primary);
+  }
+
+  .reference-item small {
+    color: var(--text-muted);
   }
 
   .view-toggle {

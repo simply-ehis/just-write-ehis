@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dashboard-library-stats"
+description = "Enables the dashboard_library_stats command without any pre-configured scope."
+commands.allow = ["dashboard_library_stats"]
+
+[[permission]]
+identifier = "deny-dashboard-library-stats"
+description = "Denies the dashboard_library_stats command without any pre-configured scope."
+commands.deny = ["dashboard_library_stats"]

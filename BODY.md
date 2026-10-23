@@ -75,7 +75,6 @@ Brand assets: `public/logo.svg` and `public/logo-light.svg` feed generated PNG/I
 | Story Memory lookup | muscle | frontend | `src/lib/storyMemoryEditor.ts` | EditorPane + JustWriteWorkspace CodeMirror decorations and hover card | ✅ wired |
 | Story Memory review UI | skin | ui | `src/lib/components/NovelWorkspace.svelte` | StoryMemoryHoverCard: appearances, suggestions, contradictions, scene jumps | ✅ wired |
 | Place stamp | tendon | frontend | `src/lib/stamp.ts` | LogsWorkspace (opt-in daily stamp) | ✅ wired |
-| Lock store + app gate | tendon | frontend | `src/lib/stores/lock.ts` | SettingsPane keychain setup → App session gate → TabBar/LockScreen/AiPanel/EditorPane | ✅ wired (source-tested; native gate build pending) |
 | Native sidecar packager | tendon | build | `src-tauri/sidecars/build_sidecars.py` | `package.json` → `tauri.windows.conf.json` → `sidecar.rs` native-first launchers | ✅ wired (not built by user instruction) |
 | Window state | muscle | frontend | `src/lib/windowState.ts` | App startup → main-window geometry | ✅ wired (source-tested) |
 | Boot gate | tendon | engine+frontend | `src/lib/bootGate.ts` | `commands::BootReady` (setup) → App.svelte **and** WidgetApp.svelte boot steps | ✅ wired (source-tested) |
@@ -83,7 +82,6 @@ Brand assets: `public/logo.svg` and `public/logo-light.svg` feed generated PNG/I
 | Ghost-window guard | tendon | build | `tests/ghost-window-guard.mjs` | index.html SW gating + public/sw.js cache strategy | ✅ wired |
 | ACL parity guard | tendon | build | `tests/acl-parity.mjs` | lib.rs handler ↔ build.rs COMMANDS ↔ permissions/*.toml | ✅ wired |
 | Last-place store | tendon | frontend | `src/lib/stores/lastPlace.ts` | App workspace-restore effect | ✅ wired |
-| LockScreen | skin | ui | `src/lib/components/LockScreen.svelte` | App content-pane overlay | ✅ wired |
 | CanvasWorkspace | skin | ui | `src/lib/components/CanvasWorkspace.svelte` | App.svelte (canvas route) | ✅ wired |
 | App stores | bone | frontend | `src/lib/stores/app.ts` | all components | ✅ wired |
 | Settings store | bone | frontend | `src/lib/stores/settings.ts` | SettingsPane | ✅ wired |

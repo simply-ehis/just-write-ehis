@@ -24,7 +24,7 @@
     { name: "Files", desc: "Browse vault folder structure, open any file." },
     { name: "Settings → Tips", desc: "Power features, hints, and try-one-click list." },
     { name: "Settings → Craft", desc: "Dialogue, sentence, and filter-word trends for the open doc." },
-    { name: "Settings → Stats", desc: "Streaks, patterns, velocity, and reopen lists." },
+    { name: "Settings → Stats", desc: "Writing activity, hourly patterns, and reopened docs." },
     { name: "AI Panel", desc: "Chat, Composer, Ghost, Structurize — right docked panel." },
     { name: "Zen Mode", desc: "One keystroke hides all chrome, leaving only text." },
   ];

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from "d3-force";
+  import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationLinkDatum } from "d3-force";
   import { api, type GraphNode, type GraphEdge, type GraphQueryResult } from "$lib/api";
   import { currentDoc, openTabs, currentWorkspace } from "$lib/stores/app";
   import { settings } from "$lib/stores/settings";
@@ -8,10 +8,19 @@
   import { domainError, warnOnce } from "$lib/errors";
   import WorkspaceError from "./WorkspaceError.svelte";
   import { resolveThemeMode } from "$lib/appearance";
+  import { computeVisibleNodes, hitTestNode, nodeRadius, applyNodeCap, type MapFilters } from "$lib/nodeMapGraph";
 
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null = null;
-  let simulation: Simulation<SimNode, SimLink> | null = null;
+  let simulation: Simulation<GraphNode, SimLink> | null = null;
+  // Pending "fit after settle" timer — cleared on reload and destroy so a
+  // refresh can't yank a user's pan mid-gesture and a destroyed component
+  // never gets a stray fitGraph write.
+  let fitTimer: ReturnType<typeof setTimeout> | null = null;
+  // Container-size observer: the canvas tracks its PARENT, not the window —
+  // collapsing the sidebar resizes the pane without a window resize, and a
+  // stale backing buffer desyncs hit-testing from the drawn pixels.
+  let resizeObserver: ResizeObserver | null = null;
 
   let graphData = $state<GraphQueryResult | null>(null);
   let loading = $state(true);
@@ -38,7 +47,9 @@
   // Distance-tracked suppressClick survives across the two events.
   let downPos = $state<{ x: number; y: number } | null>(null);
   let suppressClick = $state(false);
-  let tickCount = $state(0);
+  // Plain counter: only the tick handler reads it — as $state it would
+  // write reactive state 60x/s for nothing.
+  let tickCount = 0;
 
   let width = $state(800);
   let height = $state(600);
@@ -48,24 +59,12 @@
   let dragStart = $state({ x: 0, y: 0 });
   let lastMouse = $state({ x: 0, y: 0 });
   let isPanning = $state(false);
-  let dragNode = $state<SimNode | null>(null);
+  let dragNode = $state<GraphNode | null>(null);
 
-  interface SimNode extends SimulationNodeDatum {
-    id: string;
-    title: string;
-    workspace: string;
-    kind: string;
-    wordCount: number;
-    activityScore: number;
-    degree: number;
-    tags?: string[];
-    x?: number;
-    y?: number;
-    vx?: number;
-    vy?: number;
-  }
-
-  interface SimLink extends SimulationLinkDatum<SimNode> {
+  // Nodes are GraphNode straight through — the API type already carries
+  // x/y/vx/vy/fx/fy, so there is no snake/camel translation (and no second
+  // radius/shape definition) to drift out of sync with the drawn state.
+  interface SimLink extends SimulationLinkDatum<GraphNode> {
     kind: string;
     contextSnippet: string | null;
   }
@@ -143,41 +142,43 @@
     ];
   }
 
+  // THE visibility rule, computed once per input change and shared by
+  // draw, hit-test and fit. (Previously findNodeAt/fitGraph iterated the
+  // unfiltered node list: filtered-out docs stayed clickable and fit
+  // framed invisible nodes. The per-frame O(N^2) orphans.includes scan is
+  // gone too — Set lookups live in nodeSets.)
+  let mapFilters = $derived<MapFilters>({
+    workspace: filterWorkspace,
+    tags: filterTags,
+    showOrphans,
+    hubOnly,
+  });
+  let nodeSets = $derived(
+    graphData
+      ? {
+          orphanIds: new Set(graphData.orphans),
+          hubIds: new Set(graphData.hubs.map(([id]) => id)),
+        }
+      : { orphanIds: new Set<string>(), hubIds: new Set<string>() },
+  );
+  let visibleNodes = $derived<GraphNode[]>(
+    graphData ? computeVisibleNodes(graphData, mapFilters, nodeSets) : [],
+  );
+
   function draw() {
     if (ctx && canvas && graphData) {
-      const gd = graphData;
+      // Visible set + orphan/hub Sets come from the shared deriveds above.
+      const { orphanIds, hubIds } = nodeSets;
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.save();
-    ctx.translate(transform.x, transform.y);
-    ctx.scale(transform.k, transform.k);
+      ctx.clearRect(0, 0, width, height);
+      ctx.save();
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.k, transform.k);
 
-    const filteredNodes = gd.nodes.filter((n) => {
-      if (filterWorkspace !== "all" && n.workspace !== filterWorkspace) return false;
-      if (!showOrphans && gd.orphans.includes(n.id)) return false;
-      if (filterTags.length > 0 && n.tags && !filterTags.every((t) => n.tags!.includes(t))) return false;
-      return true;
-    });
-
-    // Per-frame Set lookups (orphans/hubs ship as arrays).
-    const orphanIds = new Set(gd.orphans);
-    const hubIds = new Set(gd.hubs.map(([id]) => id));
-
-    // Hubs-only view: hub nodes plus their direct neighbors. Off = all.
-    let visibleNodes = filteredNodes;
-    if (hubOnly) {
-      const neighborIds = new Set<string>();
-      for (const e of gd.edges) {
-        if (hubIds.has(e.source)) neighborIds.add(e.target);
-        if (hubIds.has(e.target)) neighborIds.add(e.source);
-      }
-      visibleNodes = filteredNodes.filter((n) => hubIds.has(n.id) || neighborIds.has(n.id));
-    }
-
-    const nodeIds = new Set(visibleNodes.map((n) => n.id));
-    const filteredEdges = gd.edges.filter((e) =>
-      nodeIds.has(e.source) && nodeIds.has(e.target)
-    );
+      const nodeIds = new Set(visibleNodes.map((n) => n.id));
+      const filteredEdges = graphData.edges.filter((e) =>
+        nodeIds.has(e.source) && nodeIds.has(e.target)
+      );
 
     // O(1) endpoint lookup per edge (was O(N) find per edge per frame).
     const nodeById = new Map(visibleNodes.map((n) => [n.id, n]));
@@ -202,7 +203,7 @@
       const isHovered = hoveredNodeId === node.id;
       const isOrphan = orphanIds.has(node.id);
       const isHub = hubIds.has(node.id);
-      const baseRadius = 6 + Math.min(node.degree * 1.5, 12);
+      const baseRadius = nodeRadius(node.degree);
       const radius = isSelected ? baseRadius * 1.3 : isHovered ? baseRadius * 1.15 : baseRadius;
 
       ctx.beginPath();
@@ -229,23 +230,25 @@
       }
     }
 
-    ctx.restore();
+      ctx.restore();
     }
-    requestAnimationFrame(draw);
   }
 
-  function findNodeAt(wx: number, wy: number): SimNode | null {
+  // Redraw is effect-driven, not rAF-driven: draw() reads every input it
+  // needs (graphData, transform, hover/selection, filters, theme), so a
+  // $state change re-runs it and a settled graph redraws nothing at all.
+  // The old self-scheduling frame loop redrew an idle frame 60x/s
+  // forever — and survived destroy, because onDestroy never cancelled
+  // it. Effects dispose with the component: destroy silences it.
+  $effect(() => {
+    draw();
+  });
+
+  function findNodeAt(wx: number, wy: number): GraphNode | null {
     if (!graphData) return null;
-    for (const node of graphData.nodes) {
-      if (node.x == null || node.y == null) continue;
-      const r = 6 + Math.min(node.degree * 1.5, 12);
-      const dx = wx - node.x;
-      const dy = wy - node.y;
-      if (dx * dx + dy * dy < r * r) {
-        return node as unknown as SimNode;
-      }
-    }
-    return null;
+    // Same visible set as draw — a filtered-out doc can't be hovered or
+    // clicked even if its (invisible) node sits under the cursor.
+    return hitTestNode(visibleNodes, wx, wy);
   }
 
   function handleMouseDown(e: MouseEvent) {
@@ -363,9 +366,11 @@
   }
 
   function fitGraph() {
-    if (!graphData || graphData.nodes.length === 0) return;
+    // Frame what's DRAWN: fitting the unfiltered set pushed visible nodes
+    // off-center whenever a workspace/tag filter was active.
+    if (visibleNodes.length === 0) return;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const node of graphData.nodes) {
+    for (const node of visibleNodes) {
       if (node.x !== undefined && node.x !== null && node.y !== undefined && node.y !== null) {
         minX = Math.min(minX, node.x);
         maxX = Math.max(maxX, node.x);
@@ -395,21 +400,9 @@
       // Cap the force layout past NODE_CAP (highest degree first) — the
       // sim + draw both degrade without virtualization. Explicit opt-in
       // to see everything; filters still apply on top.
-      if (!showAllNodes && full.nodes.length > NODE_CAP) {
-        const keep = new Set(
-          [...full.nodes].sort((a, b) => b.degree - a.degree).slice(0, NODE_CAP).map((n) => n.id)
-        );
-        cappedCount = full.nodes.length - NODE_CAP;
-        graphData = {
-          ...full,
-          nodes: full.nodes.filter((n) => keep.has(n.id)),
-          edges: full.edges.filter((e) => keep.has(e.source) && keep.has(e.target)),
-          orphans: full.orphans.filter((id) => keep.has(id)),
-        };
-      } else {
-        cappedCount = 0;
-        graphData = full;
-      }
+      const capped = applyNodeCap(full, NODE_CAP, showAllNodes);
+      cappedCount = capped.capped;
+      graphData = capped.data;
       initSimulation();
     } catch (e) {
       graphLoadError = e instanceof Error ? e.message : String(e);
@@ -453,11 +446,7 @@
 
     if (simulation) simulation.stop();
 
-    const nodes: SimNode[] = graphData.nodes.map((n) => ({
-      ...n,
-      wordCount: n.word_count,
-      activityScore: n.activity_score,
-    }));
+    const nodes: GraphNode[] = graphData.nodes.map((n) => ({ ...n }));
 
     const links: SimLink[] = graphData.edges.map((e) => ({
       source: e.source,
@@ -466,28 +455,33 @@
       contextSnippet: e.context_snippet,
     }));
 
-    simulation = forceSimulation<SimNode, SimLink>(nodes)
-      .force("link", forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(100))
-      .force("charge", forceManyBody<SimNode>().strength(-200))
-      .force("center", forceCenter<SimNode>(0, 0))
-      .force("collide", forceCollide<SimNode>().radius((d) => 10 + d.degree * 2))
+    simulation = forceSimulation<GraphNode, SimLink>(nodes)
+      .force("link", forceLink<GraphNode, SimLink>(links).id((d) => d.id).distance(100))
+      .force("charge", forceManyBody<GraphNode>().strength(-200))
+      .force("center", forceCenter<GraphNode>(0, 0))
+      .force("collide", forceCollide<GraphNode>().radius((d) => 10 + d.degree * 2))
       .on("tick", () => {
         // Sync positions at ~10fps, not every tick: each write retriggers
         // Svelte reactivity (draw reads graphData), so per-tick sync is a
         // storm for zero visual gain.
         tickCount++;
         if (tickCount % 6 !== 0) return;
-        graphData = { ...graphData!, nodes: nodes.map((n) => ({
-          id: n.id, title: n.title, workspace: n.workspace, kind: n.kind,
-          word_count: n.wordCount, activity_score: n.activityScore, degree: n.degree,
-          x: n.x, y: n.y, vx: n.vx, vy: n.vy, fx: n.fx, fy: n.fy,
-        })) };
+        graphData = { ...graphData!, nodes: nodes.map((n) => ({ ...n })) };
       });
 
-    setTimeout(fitGraph, 500);
+    if (fitTimer !== null) clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      fitTimer = null;
+      fitGraph();
+    }, 500);
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    // Toolbar inputs live inside the keydown container — typing "f" in
+    // the tag filter must not yank the viewport to fit (Enter must not
+    // reopen the selected doc). Only the map surface itself takes them.
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
     if (e.key === "f" || e.key === "F") {
       fitGraph();
     } else if (e.key === "Escape") {
@@ -525,14 +519,28 @@
     if (!canvas) return;
     ctx = canvas.getContext("2d");
     handleResize();
-    window.addEventListener("resize", handleResize);
+    // Track the CONTAINER size, not just the window: collapsing the
+    // sidebar (or any pane change) resizes the parent without a window
+    // resize, and a stale canvas backing buffer shifts every hit-test.
+    // ResizeObserver is absent under jsdom — keep the window fallback.
+    const parent = canvas.parentElement;
+    if (typeof ResizeObserver !== "undefined" && parent) {
+      resizeObserver = new ResizeObserver(() => handleResize());
+      resizeObserver.observe(parent);
+    } else {
+      window.addEventListener("resize", handleResize);
+    }
     loadGraph();
-    requestAnimationFrame(draw);
   });
 
   onDestroy(() => {
     window.removeEventListener("resize", handleResize);
+    resizeObserver?.disconnect();
     if (simulation) simulation.stop();
+    if (fitTimer !== null) {
+      clearTimeout(fitTimer);
+      fitTimer = null;
+    }
   });
 </script>
 

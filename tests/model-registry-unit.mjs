@@ -30,7 +30,7 @@ check("registry has LFM Q4", !!MODEL_REGISTRY["lfm2.5-350m-q4_k_m.gguf"]);
 check("registry has LFM Q5", !!MODEL_REGISTRY["lfm2.5-350m-q5_k_m.gguf"]);
 check("registry has LFM Q8", !!MODEL_REGISTRY["lfm2.5-350m-q8_0.gguf"]);
 check("registry has Moonshine", !!MODEL_REGISTRY["moonshine-base-Q8_0.gguf"]);
-check("registry has Kokoro", !!MODEL_REGISTRY["kokoro-multi-lang-v1_0"]);
+check("registry has Phonon 31M", !!MODEL_REGISTRY["phonon-31m-en"]);
 check("LLM_QUANTIZATIONS has q4_k_m", LLM_QUANTIZATIONS.some((q) => q.id === "q4_k_m"));
 check("LLM_QUANTIZATIONS has q5_k_m", LLM_QUANTIZATIONS.some((q) => q.id === "q5_k_m"));
 check("LLM_QUANTIZATIONS has q8_0", LLM_QUANTIZATIONS.some((q) => q.id === "q8_0"));
@@ -47,9 +47,9 @@ const stt = getModelMetadata("moonshine-base-Q8_0.gguf");
 check("STT metadata type=stt", stt?.type === "stt");
 check("STT metadata arch=moonshine", stt?.architecture === "moonshine");
 
-const tts = getModelMetadata("kokoro-multi-lang-v1_0");
+const tts = getModelMetadata("phonon-31m-en");
 check("TTS metadata type=tts", tts?.type === "tts");
-check("TTS metadata arch=kokoro", tts?.architecture === "kokoro");
+check("TTS metadata arch=phonon", tts?.architecture === "phonon");
 
 // getLlmMetadata
 check("getLlmMetadata q4_k_m", getLlmMetadata("q4_k_m")?.quantization === "q4_k_m");
@@ -60,14 +60,14 @@ check("getLlmMetadata unknown returns undefined", getLlmMetadata("nonexistent") 
 // Task validation
 check("validate LFM for llm: ok", validateModelForTask("lfm2.5-350m-q4_k_m.gguf", "llm").ok);
 check("validate Moonshine for llm: fail", !validateModelForTask("moonshine-base-Q8_0.gguf", "llm").ok);
-check("validate Kokoro for tts: ok", validateModelForTask("kokoro-multi-lang-v1_0", "tts").ok);
+check("validate Phonon for tts: ok", validateModelForTask("phonon-40m-multilingual", "tts").ok);
 check("validate LFM for tts: fail", !validateModelForTask("lfm2.5-350m-q4_k_m.gguf", "tts").ok);
 check("validate unknown model: fail", !validateModelForTask("unknown.gguf", "llm").ok);
 
 // Tag checking
 check("modelHasTag LFM chat", modelHasTag("lfm2.5-350m-q4_k_m.gguf", "chat"));
 check("modelHasTag Moonshine transcription", modelHasTag("moonshine-base-Q8_0.gguf", "transcription"));
-check("modelHasTag Kokoro synthesis", modelHasTag("kokoro-multi-lang-v1_0", "synthesis"));
+check("modelHasTag Phonon synthesis", modelHasTag("phonon-40m-multilingual", "synthesis"));
 check("modelHasTag unknown tag: false", !modelHasTag("lfm2.5-350m-q4_k_m.gguf", "nonexistent"));
 
 // Loop detection

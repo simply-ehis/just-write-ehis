@@ -14,6 +14,7 @@
   import { ghostStatus } from "$lib/ghost";
   import { isWorkspacePrivate } from "$lib/stores/settings";
   import { markUsed } from "$lib/features";
+  import { notifyLongAiJobFinished, LONG_AI_JOB_SECONDS } from "$lib/osNotifications";
   import { ensureLlm, ensureLlmFor, isLocalLlmSentinel, llmError, llmRunning, llmStarting, stopLlm } from "$lib/stores/audio";
 import { detectRepetitionLoop } from "$lib/modelRegistry";
   import Icon from "$lib/components/Icon.svelte";
@@ -93,6 +94,7 @@ import { detectRepetitionLoop } from "$lib/modelRegistry";
     // `abortController?.signal.aborted` read undefined, so tokens kept
     // appending after "Cancel".
     abortController?.abort();
+    genFailed = true;
     generating = false;
     composerRunning = false;
     structurizeRunning = false;
@@ -150,8 +152,14 @@ import { detectRepetitionLoop } from "$lib/modelRegistry";
     const notices: string[] = [];
     if ($settings.aiMemoryEnabled && !isBrowserPreview()) {
       try {
-        const facts = await api.memoryRecall(nextPrompt);
-        if (facts.trim()) nextSystem += `\n\n${facts}`;
+        if (await ensureHarness()) {
+          // This app does not execute model-requested tools yet. Ask the
+          // sidecar to prefetch the matching topic files into this prompt.
+          const facts = await api.memoryRecall(nextPrompt, true);
+          if (facts.trim()) nextSystem += `\n\n${facts}`;
+        } else {
+          notices.push("memory recall unavailable (local sidecar did not start)");
+        }
       } catch (e) {
         // Enhancement, never blocking — but surfaced in the context chip.
         notices.push(`memory recall unavailable (${e instanceof Error ? e.message : e})`);
@@ -307,11 +315,16 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
   // generation, so the status can say "Generating" instead of a stale
   // "Thinking…" that never resolves while the stream is still open.
   let gotToken = $state(false);
+  // True when the current generation failed or was cancelled — suppresses
+  // the "job finished" OS notification (failures already escalate via the
+  // error toast's hidden-app notification; cancels are the user's own act).
+  let genFailed = $state(false);
   $effect(() => {
     if (generating) {
       genStartAt = Date.now();
       genElapsed = 0;
       gotToken = false;
+      genFailed = false;
       if (genTimer) clearInterval(genTimer);
       genTimer = setInterval(() => {
         genElapsed = Math.floor((Date.now() - genStartAt) / 1000);
@@ -319,6 +332,11 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     } else if (genTimer) {
       clearInterval(genTimer);
       genTimer = null;
+      // A long job that finished cleanly tells the user even while the
+      // app is hidden (notifyLongAiJobFinished gates on the setting +
+      // visibility itself).
+      const secs = Math.floor((Date.now() - genStartAt) / 1000);
+      if (!genFailed && secs >= LONG_AI_JOB_SECONDS) notifyLongAiJobFinished(secs);
     }
   });
 
@@ -556,6 +574,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       if (abortController?.signal.aborted) return;
       const friendly = friendlyEndpointError(e);
       showToast(`Structurize failed: ${friendly}`, "error");
+      genFailed = true;
       structurizeOutput = `Error: ${friendly}`;
     } finally {
       structurizeRunning = false;
@@ -718,6 +737,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     } catch (e) {
       const friendly = friendlyEndpointError(e);
       showToast(`AI generation failed: ${friendly}`, "error");
+      genFailed = true;
       const errorMsg = await api.conversationAddMessage(
         conversation.id,
         "assistant",
@@ -771,6 +791,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
       if (abortController?.signal.aborted) return;
       const friendly = friendlyEndpointError(e);
       showToast(`Composer failed: ${friendly}`, "error");
+      genFailed = true;
       composerOutput = `Error: ${friendly}`;
     } finally {
       abortController = null;
@@ -821,7 +842,7 @@ let mode = $state<"chat" | "composer" | "ghost" | "structurize">("chat"); let bl
     {#if $currentWorkspace && isWorkspacePrivate($currentWorkspace)}
       <span
         class="privacy-badge"
-        title="This workspace is local-only: AI calls stay on-device and locked docs are excluded from context."
+        title="This workspace is local-only: AI requests stay on this device."
       >
         <Icon name="lock" size={12} />
         <span>Private</span>

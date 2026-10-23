@@ -4,7 +4,7 @@ A personal super app for **writing and everything around writing** — docs, fic
 
 > License: GNU Affero General Public License v3.0 or later — see [LICENSE](LICENSE). Made by simply-ehis: report bugs via Settings → Support or [GitHub Issues](https://github.com/simply-ehis/just-write-ehis/issues).
 
-> Spec: the canonical `canonical-spec-v1.11.md` (Amendments 1–11 + deltas in `docs/SPEC-STATUS.md`). Deviations need a spec amendment, not a chat message.
+> Spec status: `docs/SPEC-STATUS.md` records the implementation and deliberate deviations from the original v1.11 specification. The original canonical file is not present in this checkout.
 
 ## Recent Production Readiness Additions (v0.2.1)
 
@@ -12,14 +12,14 @@ A personal super app for **writing and everything around writing** — docs, fic
 - **Error Handling Polish** — Friendly error messages (401→API key, 429→rate limited, 408→timeout, network→can't reach server), retry button after failed generation, toast notifications for AI failures.
 - **Toast System** — Click-to-dismiss, explicit close button, max 3 visible (queues rest), error toasts persist until dismissed.
 - **Local Runtime Integrity** — STT, TTS, AI memory, and the bundled LLM use real readiness checks and native-first release runtimes; Settings can run STT, TTS, and LLM test requests.
-- **App PIN** — locking defaults off, requires confirmed setup, stores the desktop PIN through the OS keychain, gates the app session, and applies retry backoff.
+- **Privacy** — API keys use the OS keychain; writing files are plaintext until encrypted-vault support is implemented.
 - **XSS Fix** — HTML sanitization via `ammonia` crate for published output (replaced incomplete custom escape).
 - **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
 - **Auto Story Memory** — Successful scene saves queue local-only mention extraction; unmatched names wait in the Story Bible suggestion queue, while appearance links and contradiction badges stay informational.
 - **Settings** — `aiRateLimitCooldown` (ms, default 3000), `blankModeDefault` now initializes AI panel state and persists toggle.
 - **Default STT Model** — the bundled `moonshine-base-Q8_0.gguf` is selected when `sttModel` is empty; the legacy `moonshine-base` value remains compatible.
 - **Brutalist Theme** — Third theme option alongside Dark/Light: zero border-radius, thick borders, hard offset shadows, Archivo Black headers, Space Mono body.
-- **Windows OS Integration** — NSIS registers `.txt` and `.md`, single-instance file handoff opens the requested file, autostart is explicit opt-in, and Default Apps opens Windows Settings without forcing a default editor.
+- **Windows OS Integration** — NSIS registers text, source, PDF, image, and DOCX files; single-instance handoff opens supported files, autostart is opt-in, and Default Apps opens Windows Settings without forcing a default editor.
 
 ## Stack
 
@@ -66,7 +66,7 @@ Uninstall anytime via **Settings → Apps → Just Write ehis → Uninstall**
 
 ## Windows integration
 
-The Windows NSIS installer registers `.txt` and `.md` only. A file launch is handled by the existing process, and a second invocation hands the path to the running window through the single-instance plugin. The Settings UI includes the widget master switch, opt-in **Start with Windows**, the **Make Just Write ehis my default text editor** button, and the associated-extension list. Default-app status is never forced; the button opens `ms-settings:defaultapps`. The autostart registration is removed by the uninstall hook and is never enabled silently.
+The Windows NSIS installer registers text/source formats plus PDF, image, and DOCX formats. A file launch is handled by the existing process, and a second invocation hands the path to the running window through the single-instance plugin. The Settings UI includes the widget master switch, opt-in **Start with Windows**, and **Default Apps** access. Default-app status is never forced; the button opens `ms-settings:defaultapps`. The autostart registration is removed by the uninstall hook and is never enabled silently.
 
 Native install, Explorer **Open with**, cold/warm timing, Default Apps navigation, and uninstall cleanup are documented separately in `docs/WINDOWS-INTEGRATION.md`; they require an approved Windows installer loop before being treated as verified.
 

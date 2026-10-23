@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-render-set-speed"
+description = "Enables the tts_render_set_speed command without any pre-configured scope."
+commands.allow = ["tts_render_set_speed"]
+
+[[permission]]
+identifier = "deny-tts-render-set-speed"
+description = "Denies the tts_render_set_speed command without any pre-configured scope."
+commands.deny = ["tts_render_set_speed"]

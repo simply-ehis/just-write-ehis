@@ -300,25 +300,21 @@ await sleep(400);
 const generalSettingsBtn = [...qa(".settings-nav .nav-item")].find((b) => (b.textContent || "").trim() === "General");
 generalSettingsBtn?.click();
 await sleep(200);
-const iconSetSelect = q("#setting-icon-set");
-const streakGoalInput = q("#setting-streak-goal");
 const compactModeInput = q("#setting-compact-mode");
-check("major setting controls render", !!iconSetSelect && !!streakGoalInput && !!compactModeInput);
-if (iconSetSelect && streakGoalInput && compactModeInput) {
-  iconSetSelect.value = "tabler";
-  iconSetSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-  streakGoalInput.value = "321";
-  streakGoalInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+// iconSet + streakGoal were removed by the 2026-10 settings declutter
+// (typed inputs cut down to the AI endpoint/model/key fields; the daily
+// goal moved to the per-document Inspector, icons are a fixed set).
+// compactMode is the surviving "major" General control — pin it.
+check("major setting controls render", !!compactModeInput);
+if (compactModeInput) {
   compactModeInput.checked = true;
   compactModeInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   await sleep(400);
   q('.workspace-nav [data-ws="write"]')?.click();
   await sleep(700);
   const storedMajor = JSON.parse(dom.window.localStorage.getItem("writing-app-settings") || "{}");
-  check("major settings persist", storedMajor.iconSet === "tabler" && storedMajor.streakGoal === 321 && storedMajor.compactMode === true);
-  check("icon set applies", q(".workspace-nav svg")?.getAttribute("stroke-width") === "1.5");
+  check("major settings persist", storedMajor.compactMode === true);
   check("compact mode applies", !!q(".app-shell.compact"));
-  check("daily goal applies", (q(".status-bar")?.textContent || "").includes("0 / 321 today"));
 }
 
 console.log(`INFO  console.error count: ${errors.length}`);

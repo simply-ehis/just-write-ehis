@@ -5,7 +5,7 @@
    * "files" destinations deep-link here via the open-library-files event.
    */
   import { onMount } from "svelte";
-  import { currentDoc, openTabs } from "$lib/stores/app";
+  import { currentDoc, externalFilePreview, openTabs } from "$lib/stores/app";
   import { api } from "$lib/api";
   import FileBrowser from "$lib/components/FileBrowser.svelte";
   import MarkdownViewer from "$lib/components/MarkdownViewer.svelte";
@@ -19,6 +19,10 @@
     tab = initialTab;
   });
 
+  $effect(() => {
+    if ($externalFilePreview) tab = "files";
+  });
+
   // Deep link target for the retired standalone Files route: palette,
   // More menu, and old pins land here instead of a dead workspace.
   onMount(() => {
@@ -30,7 +34,7 @@
   });
 
   async function handleSelect(path: string, isDir: boolean) {
-    if (!isDir && (path.endsWith(".md") || path.endsWith(".txt"))) {
+    if (!isDir && /\.(md|markdown|mdx|txt|text|log|csv|json|ya?ml|toml|xml|html?|css|js|ts|rs|py|sql|ini|conf|pdf|png|jpe?g|gif|webp|bmp|svg|docx)$/i.test(path)) {
       viewedFile = path;
       return;
     }
@@ -64,7 +68,15 @@
     >Files</button>
   </div>
   <div class="lib-content">
-    {#if tab === "views"}
+    {#if $externalFilePreview}
+      {#key $externalFilePreview.id}
+        <MarkdownViewer
+          filePath={$externalFilePreview.fileName}
+          externalBase64={$externalFilePreview.dataBase64}
+          onClose={() => externalFilePreview.set(null)}
+        />
+      {/key}
+    {:else if tab === "views"}
       <LazyWorkspace loader={() => import("$lib/components/PropertiesView.svelte")} label="Properties" />
     {:else if viewedFile}
       <MarkdownViewer filePath={viewedFile} onClose={() => (viewedFile = null)} />

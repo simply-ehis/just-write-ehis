@@ -177,16 +177,16 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Every application command used by the main window.\n#### This permission set includes:\n\n- `allow-doc-create`\n- `allow-open-external-file`\n- `allow-take-launch-file`\n- `allow-autostart-launch`\n- `allow-app-boot-ready`\n- `allow-open-default-apps`\n- `allow-doc-get`\n- `allow-widget-doc-get`\n- `allow-doc-save`\n- `allow-widget-doc-save`\n- `allow-doc-delete`\n- `allow-doc-toggle-pin`\n- `allow-doc-set-goal`\n- `allow-doc-move`\n- `allow-doc-search`\n- `allow-doc-list-by-workspace`\n- `allow-backlinks-get`\n- `allow-implicit-links-get`\n- `allow-usage-record`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-graph-query`\n- `allow-backlinks-extract`\n- `allow-unlinked-mentions`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-entities-backfill`\n- `allow-reader-update-position`\n- `allow-reader-set-shelf-status`\n- `allow-reader-set-rating`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-novel-get-beat-board`\n- `allow-novel-compile`\n- `allow-bible-scope-id`\n- `allow-bible-get-facts`\n- `allow-bible-upsert-fact`\n- `allow-bible-delete-fact`\n- `allow-bible-get-mentions`\n- `allow-bible-upsert-mention`\n- `allow-bible-delete-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-reject-suggestion`\n- `allow-bible-extract-mentions`\n- `allow-bible-rebuild-memory`\n- `allow-conversation-create`\n- `allow-conversation-list`\n- `allow-conversation-add-message`\n- `allow-conversation-get-messages`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-provider-probe`\n- `allow-memory-decay-activity`\n- `allow-memory-smart-tabs`\n- `allow-memory-record-metric`\n- `allow-memory-get-metrics`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-patterns`\n- `allow-dashboard-goals`\n- `allow-get-reopen-never-finish`\n- `allow-dashboard-streak-heatmap`\n- `allow-dashboard-writing-time-patterns`\n- `allow-dashboard-writing-velocity`\n- `allow-dashboard-productivity-score`\n- `allow-script-character-list`\n- `allow-script-character-add`\n- `allow-script-location-list`\n- `allow-script-location-add`\n- `allow-script-timeline-get`\n- `allow-script-timeline-add`\n- `allow-script-role-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-vault-rename-preview`\n- `allow-vault-rename-execute`\n- `allow-atomic-save`\n- `allow-widget-atomic-save`\n- `allow-setup-file-watcher`\n- `allow-memory-get-streak`\n- `allow-doc-search-full`\n- `allow-doc-get-stats`\n- `allow-snapshot-create`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-snapshot-delete-old`\n- `allow-backup-create`\n- `allow-backup-list`\n- `allow-backup-restore`\n- `allow-backup-delete`\n- `allow-backup-prune`\n- `allow-rag-chunk-document`\n- `allow-rag-search`\n- `allow-rag-get-context`\n- `allow-ai-structurize`\n- `allow-perf-benchmark`\n- `allow-fs-list-dir`\n- `allow-fs-read-file`\n- `allow-fs-rename`\n- `allow-fs-delete`\n- `allow-fs-move`\n- `allow-fs-create-dir`\n- `allow-fs-write-file`\n- `allow-attachment-save`\n- `allow-attachment-read`\n- `allow-fs-reveal`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-usage-events`\n- `allow-clear-tab-states`\n- `allow-sidecar-python-probe`\n- `allow-sidecars-dir`\n- `allow-get-workspace-context`\n- `allow-get-vault-path`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-is-running`\n- `allow-stt-health`\n- `allow-stt-transcribe`\n- `allow-stt-stream-start`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-stop`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-is-running`\n- `allow-tts-health`\n- `allow-tts-synthesize`\n- `allow-tts-stop-playback`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-llm-is-running`\n- `allow-llm-health`\n- `allow-llm-completion`\n- `allow-llm-chat-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-app-update-status`\n- `allow-convert-run`\n- `allow-compile-run`\n- `allow-convert-status`\n- `allow-doc-list-pinned`\n- `allow-dashboard-today-rhythm`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-health`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-redact`\n- `allow-memory-forget-all`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-canvas-delete-node`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-publish-static-site`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-ghost-dismiss`\n- `allow-atlas-get-stars`\n- `allow-secret-set`\n- `allow-secret-get`\n- `allow-search-docs-fts`\n- `allow-reindex-fts`\n- `allow-get-doc-tags`\n- `allow-add-doc-tag`\n- `allow-remove-doc-tag`\n- `allow-search-by-tag`",
+          "description": "Every application command used by the main window.\n#### This permission set includes:\n\n- `allow-doc-create`\n- `allow-open-external-file`\n- `allow-take-launch-file`\n- `allow-autostart-launch`\n- `allow-app-boot-ready`\n- `allow-open-default-apps`\n- `allow-doc-get`\n- `allow-widget-doc-get`\n- `allow-doc-save`\n- `allow-widget-doc-save`\n- `allow-doc-delete`\n- `allow-doc-toggle-pin`\n- `allow-doc-set-goal`\n- `allow-doc-move`\n- `allow-doc-search`\n- `allow-doc-list-by-workspace`\n- `allow-backlinks-get`\n- `allow-implicit-links-get`\n- `allow-usage-record`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-graph-query`\n- `allow-backlinks-extract`\n- `allow-unlinked-mentions`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-entities-backfill`\n- `allow-reader-update-position`\n- `allow-reader-set-shelf-status`\n- `allow-reader-set-rating`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-novel-get-beat-board`\n- `allow-novel-compile`\n- `allow-bible-scope-id`\n- `allow-bible-get-facts`\n- `allow-bible-upsert-fact`\n- `allow-bible-delete-fact`\n- `allow-bible-get-mentions`\n- `allow-bible-upsert-mention`\n- `allow-bible-delete-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-reject-suggestion`\n- `allow-bible-extract-mentions`\n- `allow-bible-rebuild-memory`\n- `allow-conversation-create`\n- `allow-conversation-list`\n- `allow-conversation-add-message`\n- `allow-conversation-get-messages`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-provider-probe`\n- `allow-memory-decay-activity`\n- `allow-memory-smart-tabs`\n- `allow-memory-record-metric`\n- `allow-memory-get-metrics`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-patterns`\n- `allow-dashboard-goals`\n- `allow-get-reopen-never-finish`\n- `allow-dashboard-activity-heatmap`\n- `allow-dashboard-writing-activity`\n- `allow-dashboard-library-stats`\n- `allow-dashboard-writing-time-patterns`\n- `allow-script-character-list`\n- `allow-script-character-add`\n- `allow-script-location-list`\n- `allow-script-location-add`\n- `allow-script-timeline-get`\n- `allow-script-timeline-add`\n- `allow-script-role-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-vault-rename-preview`\n- `allow-vault-rename-execute`\n- `allow-atomic-save`\n- `allow-widget-atomic-save`\n- `allow-setup-file-watcher`\n- `allow-memory-get-streak`\n- `allow-doc-search-full`\n- `allow-doc-get-stats`\n- `allow-snapshot-create`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-snapshot-delete-old`\n- `allow-backup-create`\n- `allow-backup-list`\n- `allow-backup-restore`\n- `allow-backup-delete`\n- `allow-backup-prune`\n- `allow-rag-chunk-document`\n- `allow-rag-search`\n- `allow-rag-get-context`\n- `allow-ai-structurize`\n- `allow-perf-benchmark`\n- `allow-fs-list-dir`\n- `allow-fs-read-file`\n- `allow-fs-read-binary`\n- `allow-fs-rename`\n- `allow-fs-delete`\n- `allow-fs-move`\n- `allow-fs-create-dir`\n- `allow-fs-write-file`\n- `allow-attachment-save`\n- `allow-attachment-read`\n- `allow-fs-reveal`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-usage-events`\n- `allow-clear-tab-states`\n- `allow-sidecar-python-probe`\n- `allow-sidecars-dir`\n- `allow-get-workspace-context`\n- `allow-get-vault-path`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-is-running`\n- `allow-stt-health`\n- `allow-stt-transcribe`\n- `allow-stt-stream-start`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-stop`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-is-running`\n- `allow-tts-health`\n- `allow-tts-synthesize`\n- `allow-tts-stop-playback`\n- `allow-tts-stream-start`\n- `allow-tts-stream-chunk`\n- `allow-tts-stream-stop`\n- `allow-tts-render-start`\n- `allow-tts-render-cancel`\n- `allow-tts-render-demand`\n- `allow-tts-render-set-speed`\n- `allow-tts-render-page`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-llm-is-running`\n- `allow-llm-health`\n- `allow-llm-completion`\n- `allow-llm-chat-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-app-update-status`\n- `allow-convert-run`\n- `allow-compile-run`\n- `allow-convert-status`\n- `allow-doc-list-pinned`\n- `allow-dashboard-today-rhythm`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-health`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-redact`\n- `allow-memory-forget-all`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-canvas-delete-node`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-publish-static-site`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-ghost-dismiss`\n- `allow-atlas-get-stars`\n- `allow-secret-set`\n- `allow-secret-get`\n- `allow-search-docs-fts`\n- `allow-reindex-fts`\n- `allow-get-doc-tags`\n- `allow-add-doc-tag`\n- `allow-remove-doc-tag`\n- `allow-search-by-tag`",
           "type": "string",
           "const": "main",
-          "markdownDescription": "Every application command used by the main window.\n#### This permission set includes:\n\n- `allow-doc-create`\n- `allow-open-external-file`\n- `allow-take-launch-file`\n- `allow-autostart-launch`\n- `allow-app-boot-ready`\n- `allow-open-default-apps`\n- `allow-doc-get`\n- `allow-widget-doc-get`\n- `allow-doc-save`\n- `allow-widget-doc-save`\n- `allow-doc-delete`\n- `allow-doc-toggle-pin`\n- `allow-doc-set-goal`\n- `allow-doc-move`\n- `allow-doc-search`\n- `allow-doc-list-by-workspace`\n- `allow-backlinks-get`\n- `allow-implicit-links-get`\n- `allow-usage-record`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-graph-query`\n- `allow-backlinks-extract`\n- `allow-unlinked-mentions`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-entities-backfill`\n- `allow-reader-update-position`\n- `allow-reader-set-shelf-status`\n- `allow-reader-set-rating`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-novel-get-beat-board`\n- `allow-novel-compile`\n- `allow-bible-scope-id`\n- `allow-bible-get-facts`\n- `allow-bible-upsert-fact`\n- `allow-bible-delete-fact`\n- `allow-bible-get-mentions`\n- `allow-bible-upsert-mention`\n- `allow-bible-delete-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-reject-suggestion`\n- `allow-bible-extract-mentions`\n- `allow-bible-rebuild-memory`\n- `allow-conversation-create`\n- `allow-conversation-list`\n- `allow-conversation-add-message`\n- `allow-conversation-get-messages`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-provider-probe`\n- `allow-memory-decay-activity`\n- `allow-memory-smart-tabs`\n- `allow-memory-record-metric`\n- `allow-memory-get-metrics`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-patterns`\n- `allow-dashboard-goals`\n- `allow-get-reopen-never-finish`\n- `allow-dashboard-streak-heatmap`\n- `allow-dashboard-writing-time-patterns`\n- `allow-dashboard-writing-velocity`\n- `allow-dashboard-productivity-score`\n- `allow-script-character-list`\n- `allow-script-character-add`\n- `allow-script-location-list`\n- `allow-script-location-add`\n- `allow-script-timeline-get`\n- `allow-script-timeline-add`\n- `allow-script-role-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-vault-rename-preview`\n- `allow-vault-rename-execute`\n- `allow-atomic-save`\n- `allow-widget-atomic-save`\n- `allow-setup-file-watcher`\n- `allow-memory-get-streak`\n- `allow-doc-search-full`\n- `allow-doc-get-stats`\n- `allow-snapshot-create`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-snapshot-delete-old`\n- `allow-backup-create`\n- `allow-backup-list`\n- `allow-backup-restore`\n- `allow-backup-delete`\n- `allow-backup-prune`\n- `allow-rag-chunk-document`\n- `allow-rag-search`\n- `allow-rag-get-context`\n- `allow-ai-structurize`\n- `allow-perf-benchmark`\n- `allow-fs-list-dir`\n- `allow-fs-read-file`\n- `allow-fs-rename`\n- `allow-fs-delete`\n- `allow-fs-move`\n- `allow-fs-create-dir`\n- `allow-fs-write-file`\n- `allow-attachment-save`\n- `allow-attachment-read`\n- `allow-fs-reveal`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-usage-events`\n- `allow-clear-tab-states`\n- `allow-sidecar-python-probe`\n- `allow-sidecars-dir`\n- `allow-get-workspace-context`\n- `allow-get-vault-path`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-is-running`\n- `allow-stt-health`\n- `allow-stt-transcribe`\n- `allow-stt-stream-start`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-stop`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-is-running`\n- `allow-tts-health`\n- `allow-tts-synthesize`\n- `allow-tts-stop-playback`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-llm-is-running`\n- `allow-llm-health`\n- `allow-llm-completion`\n- `allow-llm-chat-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-app-update-status`\n- `allow-convert-run`\n- `allow-compile-run`\n- `allow-convert-status`\n- `allow-doc-list-pinned`\n- `allow-dashboard-today-rhythm`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-health`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-redact`\n- `allow-memory-forget-all`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-canvas-delete-node`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-publish-static-site`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-ghost-dismiss`\n- `allow-atlas-get-stars`\n- `allow-secret-set`\n- `allow-secret-get`\n- `allow-search-docs-fts`\n- `allow-reindex-fts`\n- `allow-get-doc-tags`\n- `allow-add-doc-tag`\n- `allow-remove-doc-tag`\n- `allow-search-by-tag`"
+          "markdownDescription": "Every application command used by the main window.\n#### This permission set includes:\n\n- `allow-doc-create`\n- `allow-open-external-file`\n- `allow-take-launch-file`\n- `allow-autostart-launch`\n- `allow-app-boot-ready`\n- `allow-open-default-apps`\n- `allow-doc-get`\n- `allow-widget-doc-get`\n- `allow-doc-save`\n- `allow-widget-doc-save`\n- `allow-doc-delete`\n- `allow-doc-toggle-pin`\n- `allow-doc-set-goal`\n- `allow-doc-move`\n- `allow-doc-search`\n- `allow-doc-list-by-workspace`\n- `allow-backlinks-get`\n- `allow-implicit-links-get`\n- `allow-usage-record`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-graph-query`\n- `allow-backlinks-extract`\n- `allow-unlinked-mentions`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-entities-backfill`\n- `allow-reader-update-position`\n- `allow-reader-set-shelf-status`\n- `allow-reader-set-rating`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-novel-get-beat-board`\n- `allow-novel-compile`\n- `allow-bible-scope-id`\n- `allow-bible-get-facts`\n- `allow-bible-upsert-fact`\n- `allow-bible-delete-fact`\n- `allow-bible-get-mentions`\n- `allow-bible-upsert-mention`\n- `allow-bible-delete-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-reject-suggestion`\n- `allow-bible-extract-mentions`\n- `allow-bible-rebuild-memory`\n- `allow-conversation-create`\n- `allow-conversation-list`\n- `allow-conversation-add-message`\n- `allow-conversation-get-messages`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-provider-probe`\n- `allow-memory-decay-activity`\n- `allow-memory-smart-tabs`\n- `allow-memory-record-metric`\n- `allow-memory-get-metrics`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-patterns`\n- `allow-dashboard-goals`\n- `allow-get-reopen-never-finish`\n- `allow-dashboard-activity-heatmap`\n- `allow-dashboard-writing-activity`\n- `allow-dashboard-library-stats`\n- `allow-dashboard-writing-time-patterns`\n- `allow-script-character-list`\n- `allow-script-character-add`\n- `allow-script-location-list`\n- `allow-script-location-add`\n- `allow-script-timeline-get`\n- `allow-script-timeline-add`\n- `allow-script-role-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-vault-rename-preview`\n- `allow-vault-rename-execute`\n- `allow-atomic-save`\n- `allow-widget-atomic-save`\n- `allow-setup-file-watcher`\n- `allow-memory-get-streak`\n- `allow-doc-search-full`\n- `allow-doc-get-stats`\n- `allow-snapshot-create`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-snapshot-delete-old`\n- `allow-backup-create`\n- `allow-backup-list`\n- `allow-backup-restore`\n- `allow-backup-delete`\n- `allow-backup-prune`\n- `allow-rag-chunk-document`\n- `allow-rag-search`\n- `allow-rag-get-context`\n- `allow-ai-structurize`\n- `allow-perf-benchmark`\n- `allow-fs-list-dir`\n- `allow-fs-read-file`\n- `allow-fs-read-binary`\n- `allow-fs-rename`\n- `allow-fs-delete`\n- `allow-fs-move`\n- `allow-fs-create-dir`\n- `allow-fs-write-file`\n- `allow-attachment-save`\n- `allow-attachment-read`\n- `allow-fs-reveal`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-usage-events`\n- `allow-clear-tab-states`\n- `allow-sidecar-python-probe`\n- `allow-sidecars-dir`\n- `allow-get-workspace-context`\n- `allow-get-vault-path`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-is-running`\n- `allow-stt-health`\n- `allow-stt-transcribe`\n- `allow-stt-stream-start`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-stop`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-is-running`\n- `allow-tts-health`\n- `allow-tts-synthesize`\n- `allow-tts-stop-playback`\n- `allow-tts-stream-start`\n- `allow-tts-stream-chunk`\n- `allow-tts-stream-stop`\n- `allow-tts-render-start`\n- `allow-tts-render-cancel`\n- `allow-tts-render-demand`\n- `allow-tts-render-set-speed`\n- `allow-tts-render-page`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-llm-is-running`\n- `allow-llm-health`\n- `allow-llm-completion`\n- `allow-llm-chat-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-app-update-status`\n- `allow-convert-run`\n- `allow-compile-run`\n- `allow-convert-status`\n- `allow-doc-list-pinned`\n- `allow-dashboard-today-rhythm`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-health`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-redact`\n- `allow-memory-forget-all`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-canvas-delete-node`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-publish-static-site`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-ghost-dismiss`\n- `allow-atlas-get-stars`\n- `allow-secret-set`\n- `allow-secret-get`\n- `allow-search-docs-fts`\n- `allow-reindex-fts`\n- `allow-get-doc-tags`\n- `allow-add-doc-tag`\n- `allow-remove-doc-tag`\n- `allow-search-by-tag`"
         },
         {
-          "description": "Every application command reachable from a workspace the companion can display. The widget can host any workspace the user picks, so it carries the full workspace surface: documents, search, logs, dashboards, graph, canvas, novel, script, reader, projects, AI, voice, and memory. Deliberately withheld: credential access (secret_get/secret_set) and whole-vault administration (backup, vault rename, autostart launch, provider and Python probes) - the companion holds no secrets and has no Settings surface, so granting those would widen its attack surface for no feature it can use. Updater and process-exit stay on the main window only.\n#### This permission set includes:\n\n- `allow-add-doc-tag`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-ai-structurize`\n- `allow-app-boot-ready`\n- `allow-app-update-status`\n- `allow-atlas-get-stars`\n- `allow-atomic-save`\n- `allow-attachment-read`\n- `allow-attachment-save`\n- `allow-backlinks-extract`\n- `allow-backlinks-get`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-delete-fact`\n- `allow-bible-delete-mentions`\n- `allow-bible-extract-mentions`\n- `allow-bible-get-facts`\n- `allow-bible-get-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-rebuild-memory`\n- `allow-bible-reject-suggestion`\n- `allow-bible-scope-id`\n- `allow-bible-upsert-fact`\n- `allow-bible-upsert-mention`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-canvas-delete-node`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-tab-states`\n- `allow-clear-usage-events`\n- `allow-compile-run`\n- `allow-conversation-add-message`\n- `allow-conversation-create`\n- `allow-conversation-get-messages`\n- `allow-conversation-list`\n- `allow-convert-run`\n- `allow-convert-status`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-goals`\n- `allow-dashboard-patterns`\n- `allow-dashboard-productivity-score`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-streak-heatmap`\n- `allow-dashboard-today-rhythm`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-writing-time-patterns`\n- `allow-dashboard-writing-velocity`\n- `allow-doc-create`\n- `allow-doc-delete`\n- `allow-doc-get`\n- `allow-doc-get-stats`\n- `allow-doc-list-by-workspace`\n- `allow-doc-list-pinned`\n- `allow-doc-move`\n- `allow-doc-save`\n- `allow-doc-search`\n- `allow-doc-search-full`\n- `allow-doc-set-goal`\n- `allow-doc-toggle-pin`\n- `allow-entities-backfill`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-fs-create-dir`\n- `allow-fs-delete`\n- `allow-fs-list-dir`\n- `allow-fs-move`\n- `allow-fs-read-file`\n- `allow-fs-rename`\n- `allow-fs-reveal`\n- `allow-fs-write-file`\n- `allow-get-doc-tags`\n- `allow-get-reopen-never-finish`\n- `allow-get-vault-path`\n- `allow-get-workspace-context`\n- `allow-ghost-dismiss`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-graph-query`\n- `allow-implicit-links-get`\n- `allow-llm-chat-completion`\n- `allow-llm-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-llm-health`\n- `allow-llm-is-running`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-memory-decay-activity`\n- `allow-memory-forget-all`\n- `allow-memory-get-metrics`\n- `allow-memory-get-streak`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-record-metric`\n- `allow-memory-redact`\n- `allow-memory-sidecar-health`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-smart-tabs`\n- `allow-novel-compile`\n- `allow-novel-get-beat-board`\n- `allow-open-default-apps`\n- `allow-open-external-file`\n- `allow-perf-benchmark`\n- `allow-publish-static-site`\n- `allow-rag-chunk-document`\n- `allow-rag-get-context`\n- `allow-rag-search`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-reader-set-rating`\n- `allow-reader-set-shelf-status`\n- `allow-reader-update-position`\n- `allow-reindex-fts`\n- `allow-remove-doc-tag`\n- `allow-script-character-add`\n- `allow-script-character-list`\n- `allow-script-location-add`\n- `allow-script-location-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-script-role-list`\n- `allow-script-timeline-add`\n- `allow-script-timeline-get`\n- `allow-search-by-tag`\n- `allow-search-docs-fts`\n- `allow-setup-file-watcher`\n- `allow-sidecars-dir`\n- `allow-snapshot-create`\n- `allow-snapshot-delete-old`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-stt-health`\n- `allow-stt-is-running`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-start`\n- `allow-stt-stream-stop`\n- `allow-stt-transcribe`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-take-launch-file`\n- `allow-tts-health`\n- `allow-tts-is-running`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-stop-playback`\n- `allow-tts-synthesize`\n- `allow-unlinked-mentions`\n- `allow-usage-record`\n- `allow-widget-atomic-save`\n- `allow-widget-doc-get`\n- `allow-widget-doc-save`",
+          "description": "The companion widget is a frame around ONE mini widget (Quick note or Reader), not a window that hosts a tab, so it gets only the four commands those mini widgets call: the boot-ready poll, today's log (get or create) plus save for Quick note, and the bookshelf read for Reader. Everything else is withheld on purpose, including credentials, vault administration, AI, voice, memory, search and raw file-system access. Updater and process-exit stay on the main window only.\n#### This permission set includes:\n\n- `allow-app-boot-ready`\n- `allow-doc-save`\n- `allow-log-get-or-create`\n- `allow-reader-get-bookshelf`",
           "type": "string",
           "const": "widget",
-          "markdownDescription": "Every application command reachable from a workspace the companion can display. The widget can host any workspace the user picks, so it carries the full workspace surface: documents, search, logs, dashboards, graph, canvas, novel, script, reader, projects, AI, voice, and memory. Deliberately withheld: credential access (secret_get/secret_set) and whole-vault administration (backup, vault rename, autostart launch, provider and Python probes) - the companion holds no secrets and has no Settings surface, so granting those would widen its attack surface for no feature it can use. Updater and process-exit stay on the main window only.\n#### This permission set includes:\n\n- `allow-add-doc-tag`\n- `allow-ai-generate`\n- `allow-ai-generate-stream`\n- `allow-ai-structurize`\n- `allow-app-boot-ready`\n- `allow-app-update-status`\n- `allow-atlas-get-stars`\n- `allow-atomic-save`\n- `allow-attachment-read`\n- `allow-attachment-save`\n- `allow-backlinks-extract`\n- `allow-backlinks-get`\n- `allow-bible-confirm-suggestion`\n- `allow-bible-delete-fact`\n- `allow-bible-delete-mentions`\n- `allow-bible-extract-mentions`\n- `allow-bible-get-facts`\n- `allow-bible-get-mentions`\n- `allow-bible-get-suggestions`\n- `allow-bible-rebuild-memory`\n- `allow-bible-reject-suggestion`\n- `allow-bible-scope-id`\n- `allow-bible-upsert-fact`\n- `allow-bible-upsert-mention`\n- `allow-canvas-connect`\n- `allow-canvas-delete-edge`\n- `allow-canvas-delete-node`\n- `allow-canvas-list`\n- `allow-canvas-upsert-node`\n- `allow-clear-conversations`\n- `allow-clear-messages`\n- `allow-clear-snapshots`\n- `allow-clear-tab-states`\n- `allow-clear-usage-events`\n- `allow-compile-run`\n- `allow-conversation-add-message`\n- `allow-conversation-create`\n- `allow-conversation-get-messages`\n- `allow-conversation-list`\n- `allow-convert-run`\n- `allow-convert-status`\n- `allow-craft-metrics-trend`\n- `allow-dashboard-goals`\n- `allow-dashboard-patterns`\n- `allow-dashboard-productivity-score`\n- `allow-dashboard-recent-docs`\n- `allow-dashboard-streak-heatmap`\n- `allow-dashboard-today-rhythm`\n- `allow-dashboard-workspace-counts`\n- `allow-dashboard-writing-days`\n- `allow-dashboard-writing-time-patterns`\n- `allow-dashboard-writing-velocity`\n- `allow-doc-create`\n- `allow-doc-delete`\n- `allow-doc-get`\n- `allow-doc-get-stats`\n- `allow-doc-list-by-workspace`\n- `allow-doc-list-pinned`\n- `allow-doc-move`\n- `allow-doc-save`\n- `allow-doc-search`\n- `allow-doc-search-full`\n- `allow-doc-set-goal`\n- `allow-doc-toggle-pin`\n- `allow-entities-backfill`\n- `allow-entities-list`\n- `allow-entity-occurrences`\n- `allow-fs-create-dir`\n- `allow-fs-delete`\n- `allow-fs-list-dir`\n- `allow-fs-move`\n- `allow-fs-read-file`\n- `allow-fs-rename`\n- `allow-fs-reveal`\n- `allow-fs-write-file`\n- `allow-get-doc-tags`\n- `allow-get-reopen-never-finish`\n- `allow-get-vault-path`\n- `allow-get-workspace-context`\n- `allow-ghost-dismiss`\n- `allow-ghost-fork`\n- `allow-ghost-list`\n- `allow-ghost-merge`\n- `allow-graph-query`\n- `allow-implicit-links-get`\n- `allow-llm-chat-completion`\n- `allow-llm-completion`\n- `allow-small-models-dir`\n- `allow-scan-small-models`\n- `allow-llm-health`\n- `allow-llm-is-running`\n- `allow-llm-start`\n- `allow-llm-stop`\n- `allow-log-get-or-create`\n- `allow-log-list-entries`\n- `allow-memory-decay-activity`\n- `allow-memory-forget-all`\n- `allow-memory-get-metrics`\n- `allow-memory-get-streak`\n- `allow-memory-learn`\n- `allow-memory-recall`\n- `allow-memory-record-metric`\n- `allow-memory-redact`\n- `allow-memory-sidecar-health`\n- `allow-memory-sidecar-running`\n- `allow-memory-sidecar-start`\n- `allow-memory-sidecar-stop`\n- `allow-memory-smart-tabs`\n- `allow-novel-compile`\n- `allow-novel-get-beat-board`\n- `allow-open-default-apps`\n- `allow-open-external-file`\n- `allow-perf-benchmark`\n- `allow-publish-static-site`\n- `allow-rag-chunk-document`\n- `allow-rag-get-context`\n- `allow-rag-search`\n- `allow-reader-get-bookshelf`\n- `allow-reader-import-book`\n- `allow-reader-set-rating`\n- `allow-reader-set-shelf-status`\n- `allow-reader-update-position`\n- `allow-reindex-fts`\n- `allow-remove-doc-tag`\n- `allow-script-character-add`\n- `allow-script-character-list`\n- `allow-script-location-add`\n- `allow-script-location-list`\n- `allow-script-role-assign`\n- `allow-script-role-create`\n- `allow-script-role-delete`\n- `allow-script-role-list`\n- `allow-script-timeline-add`\n- `allow-script-timeline-get`\n- `allow-search-by-tag`\n- `allow-search-docs-fts`\n- `allow-setup-file-watcher`\n- `allow-sidecars-dir`\n- `allow-snapshot-create`\n- `allow-snapshot-delete-old`\n- `allow-snapshot-list`\n- `allow-snapshot-restore`\n- `allow-stt-health`\n- `allow-stt-is-running`\n- `allow-stt-start`\n- `allow-stt-stop`\n- `allow-stt-stream-chunk`\n- `allow-stt-stream-start`\n- `allow-stt-stream-stop`\n- `allow-stt-transcribe`\n- `allow-tabs-get`\n- `allow-tabs-set`\n- `allow-take-launch-file`\n- `allow-tts-health`\n- `allow-tts-is-running`\n- `allow-tts-start`\n- `allow-tts-stop`\n- `allow-tts-stop-playback`\n- `allow-tts-synthesize`\n- `allow-unlinked-mentions`\n- `allow-usage-record`\n- `allow-widget-atomic-save`\n- `allow-widget-doc-get`\n- `allow-widget-doc-save`"
+          "markdownDescription": "The companion widget is a frame around ONE mini widget (Quick note or Reader), not a window that hosts a tab, so it gets only the four commands those mini widgets call: the boot-ready poll, today's log (get or create) plus save for Quick note, and the bookshelf read for Reader. Everything else is withheld on purpose, including credentials, vault administration, AI, voice, memory, search and raw file-system access. Updater and process-exit stay on the main window only.\n#### This permission set includes:\n\n- `allow-app-boot-ready`\n- `allow-doc-save`\n- `allow-log-get-or-create`\n- `allow-reader-get-bookshelf`"
         },
         {
           "description": "Enables the add_doc_tag command without any pre-configured scope.",
@@ -495,10 +495,22 @@
           "markdownDescription": "Enables the craft_metrics_trend command without any pre-configured scope."
         },
         {
+          "description": "Enables the dashboard_activity_heatmap command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dashboard-activity-heatmap",
+          "markdownDescription": "Enables the dashboard_activity_heatmap command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dashboard_goals command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dashboard-goals",
           "markdownDescription": "Enables the dashboard_goals command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the dashboard_library_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dashboard-library-stats",
+          "markdownDescription": "Enables the dashboard_library_stats command without any pre-configured scope."
         },
         {
           "description": "Enables the dashboard_patterns command without any pre-configured scope.",
@@ -507,22 +519,10 @@
           "markdownDescription": "Enables the dashboard_patterns command without any pre-configured scope."
         },
         {
-          "description": "Enables the dashboard_productivity_score command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-dashboard-productivity-score",
-          "markdownDescription": "Enables the dashboard_productivity_score command without any pre-configured scope."
-        },
-        {
           "description": "Enables the dashboard_recent_docs command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dashboard-recent-docs",
           "markdownDescription": "Enables the dashboard_recent_docs command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the dashboard_streak_heatmap command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-dashboard-streak-heatmap",
-          "markdownDescription": "Enables the dashboard_streak_heatmap command without any pre-configured scope."
         },
         {
           "description": "Enables the dashboard_today_rhythm command without any pre-configured scope.",
@@ -537,6 +537,12 @@
           "markdownDescription": "Enables the dashboard_workspace_counts command without any pre-configured scope."
         },
         {
+          "description": "Enables the dashboard_writing_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-dashboard-writing-activity",
+          "markdownDescription": "Enables the dashboard_writing_activity command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dashboard_writing_days command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dashboard-writing-days",
@@ -547,12 +553,6 @@
           "type": "string",
           "const": "allow-dashboard-writing-time-patterns",
           "markdownDescription": "Enables the dashboard_writing_time_patterns command without any pre-configured scope."
-        },
-        {
-          "description": "Enables the dashboard_writing_velocity command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-dashboard-writing-velocity",
-          "markdownDescription": "Enables the dashboard_writing_velocity command without any pre-configured scope."
         },
         {
           "description": "Enables the doc_create command without any pre-configured scope.",
@@ -673,6 +673,12 @@
           "type": "string",
           "const": "allow-fs-move",
           "markdownDescription": "Enables the fs_move command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the fs_read_binary command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-fs-read-binary",
+          "markdownDescription": "Enables the fs_read_binary command without any pre-configured scope."
         },
         {
           "description": "Enables the fs_read_file command without any pre-configured scope.",
@@ -1221,6 +1227,36 @@
           "markdownDescription": "Enables the tts_port command without any pre-configured scope."
         },
         {
+          "description": "Enables the tts_render_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-render-cancel",
+          "markdownDescription": "Enables the tts_render_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_render_demand command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-render-demand",
+          "markdownDescription": "Enables the tts_render_demand command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_render_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-render-page",
+          "markdownDescription": "Enables the tts_render_page command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_render_set_speed command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-render-set-speed",
+          "markdownDescription": "Enables the tts_render_set_speed command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_render_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-render-start",
+          "markdownDescription": "Enables the tts_render_start command without any pre-configured scope."
+        },
+        {
           "description": "Enables the tts_start command without any pre-configured scope.",
           "type": "string",
           "const": "allow-tts-start",
@@ -1237,6 +1273,24 @@
           "type": "string",
           "const": "allow-tts-stop-playback",
           "markdownDescription": "Enables the tts_stop_playback command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_stream_chunk command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-stream-chunk",
+          "markdownDescription": "Enables the tts_stream_chunk command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_stream_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-stream-start",
+          "markdownDescription": "Enables the tts_stream_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tts_stream_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tts-stream-stop",
+          "markdownDescription": "Enables the tts_stream_stop command without any pre-configured scope."
         },
         {
           "description": "Enables the tts_synthesize command without any pre-configured scope.",
@@ -1593,10 +1647,22 @@
           "markdownDescription": "Denies the craft_metrics_trend command without any pre-configured scope."
         },
         {
+          "description": "Denies the dashboard_activity_heatmap command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dashboard-activity-heatmap",
+          "markdownDescription": "Denies the dashboard_activity_heatmap command without any pre-configured scope."
+        },
+        {
           "description": "Denies the dashboard_goals command without any pre-configured scope.",
           "type": "string",
           "const": "deny-dashboard-goals",
           "markdownDescription": "Denies the dashboard_goals command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the dashboard_library_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dashboard-library-stats",
+          "markdownDescription": "Denies the dashboard_library_stats command without any pre-configured scope."
         },
         {
           "description": "Denies the dashboard_patterns command without any pre-configured scope.",
@@ -1605,22 +1671,10 @@
           "markdownDescription": "Denies the dashboard_patterns command without any pre-configured scope."
         },
         {
-          "description": "Denies the dashboard_productivity_score command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-dashboard-productivity-score",
-          "markdownDescription": "Denies the dashboard_productivity_score command without any pre-configured scope."
-        },
-        {
           "description": "Denies the dashboard_recent_docs command without any pre-configured scope.",
           "type": "string",
           "const": "deny-dashboard-recent-docs",
           "markdownDescription": "Denies the dashboard_recent_docs command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the dashboard_streak_heatmap command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-dashboard-streak-heatmap",
-          "markdownDescription": "Denies the dashboard_streak_heatmap command without any pre-configured scope."
         },
         {
           "description": "Denies the dashboard_today_rhythm command without any pre-configured scope.",
@@ -1635,6 +1689,12 @@
           "markdownDescription": "Denies the dashboard_workspace_counts command without any pre-configured scope."
         },
         {
+          "description": "Denies the dashboard_writing_activity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-dashboard-writing-activity",
+          "markdownDescription": "Denies the dashboard_writing_activity command without any pre-configured scope."
+        },
+        {
           "description": "Denies the dashboard_writing_days command without any pre-configured scope.",
           "type": "string",
           "const": "deny-dashboard-writing-days",
@@ -1645,12 +1705,6 @@
           "type": "string",
           "const": "deny-dashboard-writing-time-patterns",
           "markdownDescription": "Denies the dashboard_writing_time_patterns command without any pre-configured scope."
-        },
-        {
-          "description": "Denies the dashboard_writing_velocity command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-dashboard-writing-velocity",
-          "markdownDescription": "Denies the dashboard_writing_velocity command without any pre-configured scope."
         },
         {
           "description": "Denies the doc_create command without any pre-configured scope.",
@@ -1771,6 +1825,12 @@
           "type": "string",
           "const": "deny-fs-move",
           "markdownDescription": "Denies the fs_move command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the fs_read_binary command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-fs-read-binary",
+          "markdownDescription": "Denies the fs_read_binary command without any pre-configured scope."
         },
         {
           "description": "Denies the fs_read_file command without any pre-configured scope.",
@@ -2319,6 +2379,36 @@
           "markdownDescription": "Denies the tts_port command without any pre-configured scope."
         },
         {
+          "description": "Denies the tts_render_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-render-cancel",
+          "markdownDescription": "Denies the tts_render_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_render_demand command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-render-demand",
+          "markdownDescription": "Denies the tts_render_demand command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_render_page command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-render-page",
+          "markdownDescription": "Denies the tts_render_page command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_render_set_speed command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-render-set-speed",
+          "markdownDescription": "Denies the tts_render_set_speed command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_render_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-render-start",
+          "markdownDescription": "Denies the tts_render_start command without any pre-configured scope."
+        },
+        {
           "description": "Denies the tts_start command without any pre-configured scope.",
           "type": "string",
           "const": "deny-tts-start",
@@ -2335,6 +2425,24 @@
           "type": "string",
           "const": "deny-tts-stop-playback",
           "markdownDescription": "Denies the tts_stop_playback command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_stream_chunk command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-stream-chunk",
+          "markdownDescription": "Denies the tts_stream_chunk command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_stream_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-stream-start",
+          "markdownDescription": "Denies the tts_stream_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tts_stream_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tts-stream-stop",
+          "markdownDescription": "Denies the tts_stream_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the tts_synthesize command without any pre-configured scope.",
@@ -4441,6 +4549,204 @@
           "type": "string",
           "const": "core:window:deny-unminimize",
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`",
+          "type": "string",
+          "const": "notification:default",
+          "markdownDescription": "This permission set configures which\nnotification features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all notification related features.\n\n\n#### This default permission set includes:\n\n- `allow-is-permission-granted`\n- `allow-request-permission`\n- `allow-notify`\n- `allow-register-action-types`\n- `allow-register-listener`\n- `allow-cancel`\n- `allow-get-pending`\n- `allow-remove-active`\n- `allow-get-active`\n- `allow-check-permissions`\n- `allow-show`\n- `allow-batch`\n- `allow-list-channels`\n- `allow-delete-channel`\n- `allow-create-channel`\n- `allow-permission-state`"
+        },
+        {
+          "description": "Enables the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-batch",
+          "markdownDescription": "Enables the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-cancel",
+          "markdownDescription": "Enables the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-check-permissions",
+          "markdownDescription": "Enables the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-create-channel",
+          "markdownDescription": "Enables the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-delete-channel",
+          "markdownDescription": "Enables the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-active",
+          "markdownDescription": "Enables the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-get-pending",
+          "markdownDescription": "Enables the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-is-permission-granted",
+          "markdownDescription": "Enables the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-list-channels",
+          "markdownDescription": "Enables the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-notify",
+          "markdownDescription": "Enables the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-permission-state",
+          "markdownDescription": "Enables the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-action-types",
+          "markdownDescription": "Enables the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-remove-active",
+          "markdownDescription": "Enables the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-request-permission",
+          "markdownDescription": "Enables the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:allow-show",
+          "markdownDescription": "Enables the show command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-batch",
+          "markdownDescription": "Denies the batch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-cancel",
+          "markdownDescription": "Denies the cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check_permissions command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-check-permissions",
+          "markdownDescription": "Denies the check_permissions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-create-channel",
+          "markdownDescription": "Denies the create_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_channel command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-delete-channel",
+          "markdownDescription": "Denies the delete_channel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-active",
+          "markdownDescription": "Denies the get_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_pending command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-get-pending",
+          "markdownDescription": "Denies the get_pending command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_permission_granted command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-is-permission-granted",
+          "markdownDescription": "Denies the is_permission_granted command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the list_channels command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-list-channels",
+          "markdownDescription": "Denies the list_channels command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the notify command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-notify",
+          "markdownDescription": "Denies the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the permission_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-permission-state",
+          "markdownDescription": "Denies the permission_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_action_types command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-action-types",
+          "markdownDescription": "Denies the register_action_types command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_active command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-remove-active",
+          "markdownDescription": "Denies the remove_active command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_permission command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-request-permission",
+          "markdownDescription": "Denies the request_permission command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show command without any pre-configured scope.",
+          "type": "string",
+          "const": "notification:deny-show",
+          "markdownDescription": "Denies the show command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nprocess features are by default exposed.\n\n#### Granted Permissions\n\nThis enables to quit via `allow-exit` and restart via `allow-restart`\nthe application.\n\n#### This default permission set includes:\n\n- `allow-exit`\n- `allow-restart`",

@@ -871,6 +871,9 @@ case "app_boot_ready":
       return doc.content as T;
     }
 
+    case "fs_read_binary":
+      throw new Error("Binary file previews need the desktop vault; this browser preview has no binary files.");
+
     case "fs_write_file": {
       // Preview has no real files: resolve the same way as fs_read_file and
       // persist into the matched doc so Files → edit → save round-trips.
@@ -902,28 +905,25 @@ case "app_boot_ready":
       throw new Error("Static site generation needs the desktop app; nothing was published in this preview.");
     }
 
-    case "dashboard_productivity_score": {
+    case "dashboard_library_stats": {
       const docs = store.docs;
       const totalWords = docs.reduce((sum, d) => sum + d.word_count, 0);
       const totalDocs = docs.length;
       const avgWords = totalDocs > 0 ? totalWords / totalDocs : 0;
-      const activeDays = new Set(store.docs.map(d => d.updated_at.slice(0, 10))).size;
-      const score = Math.min(100, Math.round((totalWords / 10000) * 30 + activeDays * 2 + (totalDocs * 0.5)));
-      return { score: Math.min(100, score), totalWords, totalDocs, activeDays, avgWords: Math.round(avgWords) } as T;
+      const activeDays = Object.values(store.rhythm).filter((hours) => hours.some((count) => count > 0)).length;
+      return { totalWords, totalDocs, activeDays, avgWords: Math.round(avgWords) } as T;
     }
 
-    case "dashboard_writing_velocity": {
+    case "dashboard_writing_activity": {
       const last7Days = Array.from({ length: 7 }, (_, i) => {
         const date = new Date();
         date.setDate(date.getDate() - i);
         return date.toISOString().slice(0, 10);
       }).reverse();
-      const dailyWords = new Map<string, number>();
-      for (const d of store.docs) {
-        const day = d.updated_at.slice(0, 10);
-        dailyWords.set(day, (dailyWords.get(day) || 0) + d.word_count);
-      }
-      return last7Days.map(date => ({ date, words: dailyWords.get(date) || 0 })) as T;
+      return last7Days.map((date) => ({
+        date,
+        activity: (store.rhythm[date] ?? []).reduce((sum, count) => sum + count, 0),
+      })) as T;
     }
 
     // Role Assignment for Scripts
@@ -1045,24 +1045,18 @@ case "app_boot_ready":
       return reopenData as T;
     }
 
-    case "dashboard_streak_heatmap": {
-      const heatmap: { date: string; words: number }[] = [];
-      for (const d of store.docs) {
-        const day = d.updated_at.slice(0, 10);
-        const existing = heatmap.find(h => h.date === day);
-        if (existing) existing.words += d.word_count;
-        else heatmap.push({ date: day, words: d.word_count });
-      }
-      return heatmap.sort((a, b) => a.date.localeCompare(b.date)) as T;
+    case "dashboard_activity_heatmap": {
+      return Object.entries(store.rhythm)
+        .map(([date, hours]) => ({ date, activity: hours.reduce((sum, count) => sum + count, 0) }))
+        .sort((a, b) => a.date.localeCompare(b.date)) as T;
     }
 
     case "dashboard_writing_time_patterns": {
       const patterns: { hour: number; count: number }[] = [];
       for (let h = 0; h < 24; h++) patterns.push({ hour: h, count: 0 });
-      for (const d of store.docs) {
-        const hour = new Date(d.updated_at).getHours();
-        const p = patterns.find(p => p.hour === hour);
-        if (p) p.count++;
+      for (const [day, buckets] of Object.entries(store.rhythm)) {
+        if (Date.now() - Date.parse(`${day}T00:00:00Z`) > 90 * 864e5) continue;
+        for (let hour = 0; hour < 24; hour++) patterns[hour].count += buckets[hour] ?? 0;
       }
       return patterns as T;
     }
@@ -1105,33 +1099,47 @@ case "app_boot_ready":
     }
 
     case "dashboard_writing_days": {
-      const days = new Set<string>();
-      for (const d of store.docs) {
-        days.add(d.updated_at.slice(0, 10));
-      }
-      return [...days].sort().slice(-90) as T;
+      return Object.entries(store.rhythm)
+        .filter(([, hours]) => hours.some((count) => count > 0))
+        .map(([day]) => day)
+        .sort()
+        .slice(-90) as T;
     }
 
     case "dashboard_patterns": {
       const hours = new Array(24).fill(0) as number[];
-      for (const d of store.docs) {
-        hours[new Date(d.updated_at).getHours()]++;
+      for (const [day, buckets] of Object.entries(store.rhythm)) {
+        if (Date.now() - Date.parse(`${day}T00:00:00Z`) > 30 * 864e5) continue;
+        for (let hour = 0; hour < 24; hour++) hours[hour] += buckets[hour] ?? 0;
       }
       const peak = hours.indexOf(Math.max(...hours));
-      const counts = new Map<string, number>();
+      const counts = new Map<string, { thisWeek: number; lastWeek: number }>();
+      const now = Date.now();
       for (const d of store.docs) {
-        counts.set(d.workspace, (counts.get(d.workspace) ?? 0) + 1);
+        const lastWrite = store.opens[d.id]?.lastWrite;
+        if (!lastWrite) continue;
+        const age = now - Date.parse(lastWrite);
+        if (age < 0 || age >= 14 * 864e5) continue;
+        const count = counts.get(d.workspace) ?? { thisWeek: 0, lastWeek: 0 };
+        if (age < 7 * 864e5) count.thisWeek++;
+        else count.lastWeek++;
+        counts.set(d.workspace, count);
       }
-      const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-      const weekWords = store.docs
-        .filter((d) => Date.now() - +new Date(d.updated_at) < 7 * 864e5)
-        .reduce((n, d) => n + d.word_count, 0);
+      const top = [...counts.entries()].sort((a, b) => b[1].thisWeek - a[1].thisWeek)[0];
+      const thisWeek = Object.entries(store.rhythm)
+        .filter(([day]) => now - Date.parse(`${day}T00:00:00Z`) < 7 * 864e5)
+        .reduce((sum, [, buckets]) => sum + buckets.reduce((n, count) => n + count, 0), 0);
+      const priorWeeks = Object.entries(store.rhythm)
+        .filter(([day]) => {
+          const age = now - Date.parse(`${day}T00:00:00Z`);
+          return age >= 7 * 864e5 && age < 35 * 864e5;
+        })
+        .reduce((sum, [, buckets]) => sum + buckets.reduce((n, count) => n + count, 0), 0);
+      const momentum = priorWeeks > 0 ? Math.round((thisWeek - priorWeeks / 4) / (priorWeeks / 4) * 100) : 0;
       return {
         peak_hour: `${peak}:00`,
-        most_active_workspace: top ? { workspace: top[0], this_week: top[1], last_week: 0 } : null,
-        momentum: weekWords,
-        // No session-length tracking in preview yet — 0 (unknown), never a made-up number.
-        avg_session_minutes: 0,
+        most_active_workspace: top ? { workspace: top[0], this_week: top[1].thisWeek, last_week: top[1].lastWeek } : null,
+        momentum,
       } as T;
     }
 
@@ -1408,6 +1416,14 @@ case "app_boot_ready":
       // Dev-path mirror; browsers never spawn, callers gate on isTauri.
       return "src-tauri/sidecars" as T;
 
+    case "small_models_dir":
+      // Dev-path mirror; no writable app-data dir in the browser preview.
+      return "src-tauri/sidecars/models" as T;
+
+    case "scan_small_models":
+      // No GGUF files ship with the web preview — empty list, not an error.
+      return [] as T;
+
     case "stt_start":
     case "stt_stop":
     case "stt_stream_start":
@@ -1445,6 +1461,13 @@ case "app_boot_ready":
     case "tts_stop_playback":
       return undefined as T;
 
+    case "tts_render_start":
+    case "tts_render_cancel":
+    case "tts_render_demand":
+    case "tts_render_page":
+    case "tts_render_set_speed":
+      throw new Error("Render-ahead read-aloud needs the desktop app — browsers use speechSynthesis directly.");
+
     case "tts_is_running":
       return false as T;
 
@@ -1452,7 +1475,12 @@ case "app_boot_ready":
       return { status: "unavailable", ready: false, model_loaded: false, error: "Desktop only" } as T;
 
     case "tts_synthesize":
-      throw new Error("Read-aloud voices need the desktop app's Kokoro sidecar. Your browser can still read via its built-in speech if enabled.");
+      throw new Error("Read-aloud voices need the desktop app's Phonon sidecar. Your browser can still read via its built-in speech if enabled.");
+
+    case "tts_stream_start":
+    case "tts_stream_chunk":
+    case "tts_stream_stop":
+      throw new Error("Streaming read-aloud needs the desktop app's Phonon sidecar. Your browser can still read via its built-in speech if enabled.");
 
     // Ghosts (scene forking) — browser preview stubs
     case "ghost_fork": {

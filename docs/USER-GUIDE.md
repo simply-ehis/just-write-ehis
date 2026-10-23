@@ -56,7 +56,7 @@ Novel Studio Story Bible as suggested entries. Confirm an entry to make it
 canonical, or reject it. Confirmed entities show their quoted appearances,
 and different values for the same trait show a non-blocking contradiction
 badge with scene links. **Rebuild Memory** explicitly rechecks the project;
-locked documents and unavailable local models are skipped safely.
+unavailable local models are skipped safely.
 
 
 - **Updates** (desktop): Settings → About → Check, or automatic on launch.

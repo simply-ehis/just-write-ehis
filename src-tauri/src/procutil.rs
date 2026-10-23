@@ -66,11 +66,6 @@ pub fn set_log_dir(dir: PathBuf) {
     let _ = LOG_DIR.set(dir);
 }
 
-/// The folder sidecar logs live in, when one was recorded.
-pub fn log_dir() -> Option<&'static PathBuf> {
-    LOG_DIR.get()
-}
-
 /// The null device — infallible fallback when logging is unavailable.
 fn null_stdio() -> Stdio {
     Stdio::null()

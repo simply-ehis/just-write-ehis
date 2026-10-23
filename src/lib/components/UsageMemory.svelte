@@ -8,12 +8,12 @@
   // Data state — derived from the shared dashboard store (single truth:
   // Home cards read the same cache, commands underneath unchanged).
   let reopenNeverFinish = $derived($dashboardStats.reopenNeverFinish);
-  let streakHeatmap = $derived($dashboardStats.streakHeatmap);
+  let activityHeatmap = $derived($dashboardStats.activityHeatmap);
   let writingTimePatterns = $derived($dashboardStats.writingTimePatterns);
-  let writingVelocity = $derived($dashboardStats.writingVelocity);
-  let productivityScore = $derived($dashboardStats.productivityScore);
+  let writingActivity = $derived($dashboardStats.writingActivity);
+  let libraryStats = $derived($dashboardStats.libraryStats);
   let loading = $state(true);
-  let activeTab = $state<'reopen' | 'streak' | 'patterns' | 'velocity'>('reopen');
+  let activeTab = $state<'reopen' | 'streak' | 'patterns' | 'activity'>('reopen');
 
   // $effect runs on mount and whenever the open doc/workspace changes.
   $effect(() => {
@@ -37,9 +37,9 @@
     }).catch((e) => domainError("Memory", "couldn't reopen document", e));
   }
 
-  let maxWords = $derived(streakHeatmap.reduce((m, d) => Math.max(m, d.words), 0));
+  let maxActivity = $derived(activityHeatmap.reduce((m, d) => Math.max(m, d.activity), 0));
   let maxPatternCount = $derived(writingTimePatterns.reduce((m, p) => Math.max(m, p.count), 0));
-  let maxVelocityWords = $derived(writingVelocity.reduce((m, v) => Math.max(m, v.words), 0));
+  let maxDailyActivity = $derived(writingActivity.reduce((m, day) => Math.max(m, day.activity), 0));
   let mostActiveHour = $derived.by(() => {
     let best = 0;
     for (const p of writingTimePatterns) {
@@ -53,7 +53,7 @@
     return new Date(dateStr).toLocaleDateString();
   }
 
-  function getStreakColor(count: number, max: number): string {
+  function getActivityColor(count: number, max: number): string {
     if (count === 0) return "var(--surface-overlay)";
     const intensity = Math.min(count / Math.max(max, 1), 1);
     const hue = 120 - intensity * 120; // green to red
@@ -73,13 +73,13 @@
         <Icon name="refresh" size={14} /> Reopen & Never Finish
       </button>
       <button class={activeTab === 'streak' ? 'active' : ''} onclick={() => activeTab = 'streak'}>
-        <Icon name="calendar" size={14} /> Streak Heatmap
+        <Icon name="calendar" size={14} /> Activity Heatmap
       </button>
       <button class={activeTab === 'patterns' ? 'active' : ''} onclick={() => activeTab = 'patterns'}>
         <Icon name="clock" size={14} /> Writing-Time Patterns
       </button>
-      <button class={activeTab === 'velocity' ? 'active' : ''} onclick={() => activeTab = 'velocity'}>
-        <Icon name="chart" size={14} /> Writing Velocity
+      <button class={activeTab === 'activity' ? 'active' : ''} onclick={() => activeTab = 'activity'}>
+        <Icon name="chart" size={14} /> Writing Activity
       </button>
     </div>
   </div>
@@ -117,36 +117,36 @@
       </div>
     {:else if activeTab === 'streak'}
       <div class="streak-panel">
-        {#if productivityScore}
+        {#if libraryStats}
           <div class="streak-summary">
             <div class="streak-metric">
-              <span class="metric-value">{productivityScore.score}</span>
-              <span class="metric-label">Productivity Score</span>
+              <span class="metric-value">{libraryStats.totalWords.toLocaleString()}</span>
+              <span class="metric-label">Words in Library</span>
             </div>
             <div class="streak-metric">
-              <span class="metric-value">{productivityScore.totalWords.toLocaleString()}</span>
-              <span class="metric-label">Total Words</span>
+              <span class="metric-value">{libraryStats.totalDocs}</span>
+              <span class="metric-label">Documents</span>
             </div>
             <div class="streak-metric">
-              <span class="metric-value">{productivityScore.activeDays}</span>
-              <span class="metric-label">Active Days</span>
+              <span class="metric-value">{libraryStats.activeDays}</span>
+              <span class="metric-label">Writing Days</span>
             </div>
             <div class="streak-metric">
-              <span class="metric-value">{productivityScore.avgWords.toLocaleString()}</span>
-              <span class="metric-label">Avg Words/Day</span>
+              <span class="metric-value">{libraryStats.avgWords.toLocaleString()}</span>
+              <span class="metric-label">Avg Words/Document</span>
             </div>
           </div>
         {/if}
-        <div class="streak-heatmap">
-          {#if streakHeatmap.length === 0}
+        <div class="activity-heatmap">
+          {#if activityHeatmap.length === 0}
             <p class="empty-hint">No writing activity yet.</p>
           {:else}
             <div class="heatmap-grid">
-              {#each streakHeatmap as day}
+              {#each activityHeatmap as day}
                 <div 
                   class="heatmap-cell" 
-                  style="background: {getStreakColor(day.words, maxWords)};"
-                  title="{formatDate(day.date)}: {day.words} words"
+                  style="background: {getActivityColor(day.activity, maxActivity)};"
+                  title="{formatDate(day.date)}: {day.activity} saved writing updates"
                 ></div>
               {/each}
             </div>
@@ -160,7 +160,7 @@
       </div>
     {:else if activeTab === 'patterns'}
       <div class="patterns-panel">
-        <h3>Writing Time Patterns (24h)</h3>
+        <h3>Writing Activity by Hour</h3>
         <div class="pattern-chart">
           {#if writingTimePatterns.length === 0}
             <p class="empty-hint">No writing time data yet.</p>
@@ -171,7 +171,7 @@
                   <div 
                     class="bar" 
                     style="height: {Math.max((p.count / maxPatternCount) * 100, 2)}%"
-                    title="{formatHour(p.hour)}: {p.count} sessions"
+                    title="{formatHour(p.hour)}: {p.count} saved writing updates"
                   ></div>
                   <span class="bar-label">{formatHour(p.hour)}</span>
                 </div>
@@ -181,24 +181,24 @@
         </div>
         <div class="pattern-stats">
           <p>Most active: {mostActiveHour}h</p>
-          <p>Total sessions: {totalSessions}</p>
+          <p>Saved updates: {totalSessions}</p>
         </div>
       </div>
-    {:else if activeTab === 'velocity'}
-      <div class="velocity-panel">
-        <h3>Writing Velocity (Last 7 Days)</h3>
-        {#if writingVelocity.length === 0}
-          <p class="empty-hint">No writing velocity data yet.</p>
+    {:else if activeTab === 'activity'}
+      <div class="activity-panel">
+        <h3>Saved Writing Activity (Last 7 Days)</h3>
+        {#if writingActivity.length === 0}
+            <p class="empty-hint">No saved writing activity yet.</p>
         {:else}
-          <div class="velocity-chart">
-            {#each writingVelocity as v}
-              <div class="velocity-day">
-                <div 
-                  class="velocity-bar" 
-                  style="height: {Math.max((v.words / maxVelocityWords) * 100, 2)}%"
-                  title="{formatDate(v.date)}: {v.words} words"
+          <div class="activity-chart">
+            {#each writingActivity as day}
+              <div class="activity-day">
+                <div
+                  class="activity-bar"
+                  style="height: {Math.max((day.activity / maxDailyActivity) * 100, 2)}%"
+                  title="{formatDate(day.date)}: {day.activity} saved writing updates"
                 ></div>
-                <span class="velocity-label">{v.date.slice(5)}</span>
+                <span class="activity-label">{day.date.slice(5)}</span>
               </div>
             {/each}
           </div>
@@ -362,7 +362,7 @@
     letter-spacing: 0.5px;
   }
 
-  .streak-heatmap {
+  .activity-heatmap {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
@@ -461,19 +461,19 @@
     padding: var(--space-4);
   }
 
-  /* Velocity Panel */
-  .velocity-panel {
+  /* Daily activity chart */
+  .activity-panel {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
   }
 
-  .velocity-panel h3 {
+  .activity-panel h3 {
     margin: 0;
     font-size: 14px;
   }
 
-  .velocity-chart {
+  .activity-chart {
     display: flex;
     align-items: flex-end;
     gap: 8px;
@@ -484,7 +484,7 @@
     border-radius: var(--radius-md);
   }
 
-  .velocity-day {
+  .activity-day {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -494,14 +494,14 @@
     gap: 4px;
   }
 
-  .velocity-bar {
+  .activity-bar {
     width: 100%;
     background: linear-gradient(180deg, var(--accent-primary), var(--accent-hover));
     border-radius: 2px 2px 0 0;
     transition: height 0.3s ease;
   }
 
-  .velocity-label {
+  .activity-label {
     font-size: 10px;
     color: var(--text-muted);
   }

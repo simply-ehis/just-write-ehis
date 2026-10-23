@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { templates, type Template, resolveVariables, createDocFromTemplate, getTemplatesForWorkspace } from "$lib/stores/templates";
+import { templates, type Template, createDocFromTemplate } from "$lib/stores/templates";
   import { currentWorkspace } from "$lib/stores/app";
+import { settings } from "$lib/stores/settings";
+import { api } from "$lib/api";
   import { showToast } from "$lib/stores/notifications";
   import Icon from "./Icon.svelte";
   import { get } from "svelte/store";
@@ -17,9 +19,12 @@
   let showVariableModal = $state(false);
   let selectedTemplate: Template | null = $state(null);
   let variableValues: Record<string, string> = $state({});
+  let showGenerator = $state(false);
+  let templateIdea = $state("");
+  let generating = $state(false);
 
   let filteredTemplates = $derived(
-    get(templates)
+    $templates
       .filter((t) => t.workspace === workspace || t.workspace === "global")
       .filter((t) => t.name.toLowerCase().includes(search.toLowerCase()) || t.description.toLowerCase().includes(search.toLowerCase()))
   );
@@ -78,6 +83,43 @@
     selectedTemplate = null;
   }
 
+  async function generateTemplate() {
+    const idea = templateIdea.trim();
+    if (!idea || generating) return;
+    generating = true;
+    try {
+      const config = get(settings);
+      const response = await api.aiGenerate({
+        prompt: `Create a reusable Markdown starter template for: ${idea}\n\nReturn only the template body. Keep it concise, use clear headings where useful, and include {{date}} only where it belongs. Do not fill it with sample prose.`,
+        mode: "chat",
+        provider: config.mainModelEndpoint || undefined,
+        model: config.mainModelName || undefined,
+        api_key: config.apiKey || undefined,
+      });
+      const content = response.content.trim().replace(/^```(?:markdown)?\s*/i, "").replace(/\s*```$/, "");
+      if (!content) throw new Error("The model returned an empty template.");
+      const now = Date.now();
+      const name = `${idea.slice(0, 48)} Template`;
+      templates.update((all) => [{
+        id: `ai-${now}`,
+        name,
+        description: `AI-generated starter for ${idea}`,
+        content,
+        variables: [],
+        workspace,
+        createdAt: now,
+        updatedAt: now,
+      }, ...all]);
+      showToast(`Created template: ${name}`, "success");
+      showGenerator = false;
+      templateIdea = "";
+    } catch (error) {
+      showToast(`Couldn't generate a template: ${error instanceof Error ? error.message : error}`, "error");
+    } finally {
+      generating = false;
+    }
+  }
+
   onMount(() => {
     selectedIndex = 0;
   });
@@ -98,6 +140,28 @@
       aria-label="Search templates"
     />
     <span class="picker-hint">↑↓ Enter Esc</span>
+  </div>
+
+  <div class="template-generator">
+    <button class="generator-toggle" onclick={() => (showGenerator = !showGenerator)} aria-expanded={showGenerator}>
+      {showGenerator ? "Close AI template" : "Generate a starter with AI"}
+    </button>
+    {#if showGenerator}
+      <textarea
+        class="generator-prompt"
+        bind:value={templateIdea}
+        onkeydown={(event) => event.stopPropagation()}
+        placeholder="What are you writing? e.g. a grant proposal or a mystery chapter"
+        aria-label="Describe the template to generate"
+        rows={2}
+      ></textarea>
+      <div class="generator-footer">
+        <span>Only this request is sent to your selected AI provider.</span>
+        <button class="generator-submit" onclick={generateTemplate} disabled={generating || !templateIdea.trim()}>
+          {generating ? "Generating…" : "Create template"}
+        </button>
+      </div>
+    {/if}
   </div>
 
   <div class="picker-list" role="listbox">
@@ -237,6 +301,52 @@
   .picker-hint {
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  .template-generator {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .generator-toggle,
+  .generator-submit {
+    align-self: flex-start;
+    padding: 5px 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .generator-prompt {
+    width: 100%;
+    resize: vertical;
+    padding: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-elevated);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .generator-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .generator-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .picker-list {

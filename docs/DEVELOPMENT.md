@@ -99,7 +99,7 @@ Diagnose the live shell without a build step of your own: set
 3. Route branch in `src/App.svelte`; icon in `wsIcons` (`Sidebar.svelte`);
    accent in `app.css` + `TabBar.svelte`; palette entry; Home labels;
    mobile `BottomBar.svelte` more-menu. (See the Canvas commit for the full list.)
-4. Decide: does it restore last place (`lastPlace.ts` allowlist)? render locked docs?
+4. Decide whether it restores last place (`lastPlace.ts` allowlist) and whether workspace privacy rules apply to its AI actions.
 
 ## Dependencies
 

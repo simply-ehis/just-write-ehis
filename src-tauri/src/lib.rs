@@ -10,13 +10,8 @@ mod models;
 mod pdf;
 mod procutil;
 mod sidecar;
+mod tts_render;
 mod windows;
-
-/// True when the schema is in a state where writes are unsafe (e.g. a failed
-/// migration). Commands that mutate state must check this and refuse with a
-/// clear error rather than corrupting a half-migrated schema.
-#[derive(Clone, Copy)]
-pub struct ReadOnlyFlag(pub bool);
 
 use rusqlite::Connection;
 #[cfg(target_os = "windows")]
@@ -50,7 +45,7 @@ pub fn run() {
             let _ = main.show();
             let _ = main.set_focus();
         }
-        let Some(path) = windows::find_text_file(&args, Path::new(&cwd)) else {
+        let Some(path) = windows::find_supported_file(&args, Path::new(&cwd)) else {
             return;
         };
         if let Some(pending) = app.try_state::<windows::PendingLaunchFile>() {
@@ -62,6 +57,7 @@ pub fn run() {
     }));
     let builder = builder
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(target_os = "windows")]
     let builder = builder.plugin(
@@ -95,34 +91,18 @@ pub fn run() {
             std::fs::create_dir_all(&vault_path)
                 .map_err(|e| format!("Failed to create vault directory {:?}: {}", vault_path, e))?;
 
-            let db = database::Database::new(conn, vault_path).with_db_path(db_path.clone());
-            // A failed migration must not prevent the app from launching. The
-            // vault is on disk; the user can reach their files through the UI
-            // even if writes are disabled. The old code mapped the error out
-            // of setup, which aborted run() — the app refused to start with
-            // the vault present and no way in.
-            if let Err(e) = db.initialize() {
-                eprintln!("[db] migration failed, starting READ-ONLY: {}", e);
-                // Set the flag on the Database itself so save_doc and
-                // atomic_save can check it. The app.manage() call above
-                // is for any other consumer that wants to observe the state.
-                if let Ok(mut flag) = db.read_only.lock() {
-                    flag.0 = true;
-                }
-            }
-
-            // Populate the FTS index at startup. docs_fts is written ONLY by
-            // reindex_fts, and nothing called it — so the palette's search read
-            // an empty index forever and reported "no results" for everything.
-            // A full reindex is cheap at startup and keeps the index correct
-            // even if a save path forgets to refresh it.
-            match db.reindex_fts() {
-                Ok(n) => {
-                    if n > 0 {
-                        eprintln!("[fts] indexed {} documents at startup", n);
+            let mut db = database::Database::new(conn, vault_path).with_db_path(db_path.clone());
+            // Keep the vault available in read-only mode if migration fails.
+            match db.initialize() {
+                Ok(()) => {
+                    if let Err(e) = db.start_derived_index_worker() {
+                        eprintln!("[derived-index] worker unavailable: {e}");
                     }
                 }
-                Err(e) => eprintln!("[fts] startup reindex failed: {}", e),
+                Err(e) => {
+                    eprintln!("[db] migration failed, starting READ-ONLY: {}", e);
+                    db.read_only = true;
+                }
             }
 
             app.manage(db);
@@ -136,7 +116,7 @@ pub fn run() {
             {
                 let args: Vec<String> = std::env::args().collect();
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-                if let Some(path) = windows::find_text_file(&args, &cwd) {
+                if let Some(path) = windows::find_supported_file(&args, &cwd) {
                     app.state::<windows::PendingLaunchFile>().set(path.clone());
                     if let Some(main) = app.get_webview_window("main") {
                         let _ = main.show();
@@ -154,7 +134,18 @@ pub fn run() {
             }
             app.manage(sidecar::SttManager::new());
             app.manage(sidecar::TtsManager::new());
-            app.manage(sidecar::LlmManager::new(app.path().resource_dir().ok()));
+            app.manage(std::sync::Arc::new(tts_render::RenderRegistry::default()));
+            let user_models_dir = app_dir.join("models");
+            std::fs::create_dir_all(&user_models_dir).map_err(|e| {
+                format!(
+                    "Failed to create local models directory {:?}: {}",
+                    user_models_dir, e
+                )
+            })?;
+            app.manage(sidecar::LlmManager::new(
+                app.path().resource_dir().ok(),
+                user_models_dir,
+            ));
             let memory_dir = app_dir.join("ai-memory");
             std::fs::create_dir_all(&memory_dir).map_err(|e| {
                 format!(
@@ -305,10 +296,10 @@ pub fn run() {
             commands::dashboard_patterns,
             commands::dashboard_goals,
             commands::get_reopen_never_finish,
-            commands::dashboard_streak_heatmap,
+            commands::dashboard_activity_heatmap,
             commands::dashboard_writing_time_patterns,
-            commands::dashboard_writing_velocity,
-            commands::dashboard_productivity_score,
+            commands::dashboard_writing_activity,
+            commands::dashboard_library_stats,
             commands::script_character_list,
             commands::script_character_add,
             commands::script_location_list,
@@ -345,6 +336,7 @@ pub fn run() {
             commands::perf_benchmark,
             commands::fs_list_dir,
             commands::fs_read_file,
+            commands::fs_read_binary,
             commands::fs_rename,
             commands::fs_delete,
             commands::fs_move,
@@ -376,6 +368,14 @@ pub fn run() {
             commands::tts_health,
             commands::tts_synthesize,
             commands::tts_stop_playback,
+            commands::tts_stream_start,
+            commands::tts_stream_chunk,
+            commands::tts_stream_stop,
+            commands::tts_render_start,
+            commands::tts_render_cancel,
+            commands::tts_render_demand,
+            commands::tts_render_set_speed,
+            commands::tts_render_page,
             commands::llm_start,
             commands::llm_stop,
             commands::llm_is_running,

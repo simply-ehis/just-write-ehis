@@ -1,5 +1,5 @@
 /**
- * Audio store — STT (Moonshine Voice) + TTS (Kokoro-82M) state.
+ * Audio store — STT (Moonshine Voice) + TTS (Phonon) state.
  * Lazy-loads sidecars on first tap (A7.6).
  */
 import { writable, derived } from 'svelte/store';
@@ -7,7 +7,6 @@ import { api, isBrowserPreview } from '$lib/api';
 import { get } from 'svelte/store';
 import { settings } from './settings';
 import { showToast } from './notifications';
-import { validateModelForTask, getLlmMetadata, type LlmQuantization } from '$lib/modelRegistry';
 
 // ── STT state ───────────────────────────────────────────────────
 export const sttRunning = writable(false);
@@ -41,7 +40,7 @@ export const llmProbed = writable(false);
 export const STT_FETCH_HINT =
   "Moonshine is unavailable. Check the bundled model and Python runtime in Settings → AI & Providers.";
 export const TTS_FETCH_HINT =
-  "Kokoro is unavailable. Check the bundled voice model and Python runtime in Settings → AI & Providers.";
+  "Phonon is unavailable. Check the bundled model in Settings → AI & Providers.";
 
 /** Shared lock for the voice keyboard shortcuts (3.10). When two button
  * instances are mounted at once (e.g. Quick Capture over a workspace),
@@ -186,25 +185,17 @@ async function ensureSidecarOnce<THealth>(spec: SidecarSpec<THealth>): Promise<b
 // ── Derived ─────────────────────────────────────────────────────
 export const sttReady = derived(sttRunning, ($r) => $r);
 export const ttsReady = derived(ttsRunning, ($r) => $r);
+
+
 export const llmReady = derived(llmRunning, ($r) => $r);
 
-// ── Sidecar paths (from settings) ───────────────────────────────
-export function resolvePythonPath(): string {
-  return get(settings).pythonPath?.trim() || "python";
-}
-
+// ── Sidecar runtime paths ───────────────────────────────────────
 /**
- * Probed interpreter resolution for sidecar starts (all three call sites
- * are async): the Settings value first, then the Windows launchers (`py`,
- * `python3`, `python`). Raw portable exes often run where `python` is not
- * on PATH but `py` is — without this the sidecar fails with a bare
- * "Python not found" and STT/TTS/memory read as dead. Falls back to the
- * configured value (whose probe error then surfaces verbatim) when none
- * of the candidates respond.
+ * Resolve the installed Python command for sidecars. Probe common Windows
+ * launchers so users do not need to configure an executable path.
  */
 export async function resolvePythonPathProbed(): Promise<string> {
-  const configured = resolvePythonPath();
-  for (const candidate of [...new Set([configured, "py", "python3", "python"])]) {
+  for (const candidate of ["py", "python3", "python"]) {
     try {
       await api.sidecarPythonProbe(candidate);
       return candidate;
@@ -212,7 +203,7 @@ export async function resolvePythonPathProbed(): Promise<string> {
       /* try next */
     }
   }
-  return configured;
+  return "python";
 }
 
 /**
@@ -241,21 +232,11 @@ export function sttModelReady(health: { ready?: boolean; model_loaded: boolean }
 /** Start the Moonshine sidecar (lazy, first tap). */
 export async function ensureStt(): Promise<boolean> {
   const s = get(settings);
-  if (s.sttModel && s.sttModel.trim()) {
-    const validation = validateModelForTask(s.sttModel.trim(), "stt");
-    if (!validation.ok) {
-      sttError.set(validation.error || "Invalid STT model");
-      sttRunning.set(false);
-      sttModelLoaded.set(false);
-      return false;
-    }
-  }
-  
   const ok = await ensureSidecar({
     kind: "Moonshine",
     isRunning: () => api.sttIsRunning(),
     start: async () => {
-      await api.sttStart(await resolvePythonPathProbed(), await getSidecarsDir(), s.sttModel || undefined);
+      await api.sttStart(await resolvePythonPathProbed(), await getSidecarsDir());
     },
     health: () => api.sttHealth(),
     modelReady: sttModelReady,
@@ -307,24 +288,16 @@ export function ttsModelReady(health: { ready?: boolean; model_loaded: boolean }
   return Boolean(health.ready ?? health.model_loaded);
 }
 
-/** Start the Kokoro sidecar (lazy, first tap). */
+/** Start the Phonon sidecar (lazy, first tap). */
 export async function ensureTts(): Promise<boolean> {
   const s = get(settings);
-  if (s.ttsModel && s.ttsModel.trim()) {
-    const validation = validateModelForTask(s.ttsModel.trim(), "tts");
-    if (!validation.ok) {
-      ttsError.set(validation.error || "Invalid TTS model");
-      ttsRunning.set(false);
-      ttsModelLoaded.set(false);
-      return false;
-    }
-  }
-  
   const ok = await ensureSidecar({
-    kind: "Kokoro",
+    kind: "Phonon",
     isRunning: () => api.ttsIsRunning(),
     start: async () => {
-      await api.ttsStart(await resolvePythonPathProbed(), await getSidecarsDir(), s.ttsModel || undefined);
+      // Phonon is a Rust binary — no Python runtime needed. Pass "" for
+      // python_path; the sidecar ignores it when the exe is found.
+      await api.ttsStart("", await getSidecarsDir());
     },
     health: () => api.ttsHealth(),
     modelReady: ttsModelReady,
@@ -342,7 +315,7 @@ export async function ensureTts(): Promise<boolean> {
 /** Synthesize text → returns base64 WAV audio. Uses settings for all params. */
 export async function synthesizeText(
   text: string,
-  overrides?: { voice?: string; speed?: number; langCode?: string; splitPattern?: string; chunkSize?: number }
+  overrides?: { voice?: string; speed?: number; langCode?: string }
 ): Promise<{ audio: string; sampleRate: number } | null> {
   ttsError.set(null);
   markUsed("tts");
@@ -350,10 +323,15 @@ export async function synthesizeText(
   const voice = overrides?.voice ?? s.ttsVoice;
   const speed = overrides?.speed ?? s.ttsSpeed;
   const langCode = overrides?.langCode ?? s.ttsLangCode;
-  const splitPattern = overrides?.splitPattern ?? s.ttsSplitPattern;
-  const chunkSize = overrides?.chunkSize ?? s.ttsChunkSize;
   try {
-    const [audio, sampleRate] = await api.ttsSynthesize(text, voice, speed, langCode, splitPattern, chunkSize);
+    const [audio, sampleRate] = await api.ttsSynthesize(
+      text,
+      voice,
+      speed,
+      langCode,
+      "", // split_pattern — ignored by Phonon (sentence splitting is internal)
+      0,  // chunk_size — ignored by Phonon
+    );
     if (!audio) {
       // Server reachable but voiceless: bundle not fetched (or all chunks
       // failed). Say so plainly instead of a cryptic decode error.
@@ -378,7 +356,79 @@ export async function stopTtsPlayback(): Promise<void> {
   }
 }
 
-/** Stop the Kokoro sidecar (e.g. when TTS is toggled off). Best-effort. */
+// ── Streaming TTS ─────────────────────────────────────────────────
+/** Decode base64-encoded WAV bytes → Int16Array PCM at 24 kHz mono. */
+function decodeWav(wavBytes: Uint8Array): Int16Array {
+  // Walk RIFF chunks to find the 'data' chunk.
+  let offset = 0;
+  while (offset + 8 <= wavBytes.length) {
+    const chunkId = String.fromCharCode(...wavBytes.subarray(offset, offset + 4));
+    const chunkSize = new DataView(
+      wavBytes.buffer,
+      wavBytes.byteOffset + offset + 4,
+      4,
+    ).getUint32(0, true);
+    if (chunkId === "data") {
+      const pcm = new Int16Array(
+        wavBytes.buffer,
+        wavBytes.byteOffset + offset + 8,
+        chunkSize / 2,
+      );
+      return new Int16Array(pcm);
+    }
+    offset += 8 + chunkSize;
+    if (chunkSize % 2 !== 0) offset += 1; // RIFF padding
+  }
+  throw new Error("No data chunk in WAV");
+}
+
+/** Start a streaming TTS session. Returns { streamId, sampleRate } or null. */
+export async function startTtsStream(
+  text: string,
+  voice: string,
+): Promise<{ streamId: number; sampleRate: number } | null> {
+  ttsError.set(null);
+  markUsed("tts");
+  try {
+    const result = await api.ttsStreamStart(text, voice);
+    if (!result) {
+      ttsError.set(TTS_FETCH_HINT);
+      return null;
+    }
+    return { streamId: result[0], sampleRate: result[1] };
+  } catch (e) {
+    ttsError.set(String(e));
+    return null;
+  }
+}
+
+/** Pull the next PCM chunk from a streaming session. Returns null when done. */
+export async function streamTtsChunk(
+  streamId: number,
+): Promise<{ pcm: Int16Array; sampleRate: number } | null> {
+  try {
+    const result = await api.ttsStreamChunk(streamId);
+    if (!result) return null;
+    const [wavBytes, sampleRate] = result;
+    if (wavBytes.length === 0) return null;
+    const pcm = decodeWav(wavBytes);
+    return { pcm, sampleRate };
+  } catch (e) {
+    ttsError.set(String(e));
+    return null;
+  }
+}
+
+/** Stop a streaming session. */
+export async function stopTtsStream(streamId: number): Promise<void> {
+  try {
+    await api.ttsStreamStop(streamId);
+  } catch {
+    // Best effort
+  }
+}
+
+/** Stop the Phonon sidecar (e.g. when TTS is toggled off). Best-effort. */
 export async function stopTts(): Promise<void> {
   try {
     await api.ttsStop();
@@ -409,7 +459,7 @@ export async function ensureLlm(): Promise<boolean> {
     try {
       const models = await api.scanSmallModels();
       if (models.length > 0) {
-        smallModelName = models[0].name;
+        smallModelName = [...models].sort((a, b) => a.name.localeCompare(b.name))[0].name;
         // Persist the discovered model so it survives restarts
         // (settings write happens via the settings store elsewhere)
       } else {
@@ -421,27 +471,6 @@ export async function ensureLlm(): Promise<boolean> {
     }
   }
 
-  // Validate quantization setting
-  const quant = (s.smallModelQuantization || "q4_k_m") as LlmQuantization;
-  const meta = getLlmMetadata(quant);
-  if (!meta) {
-    llmError.set(`Unknown quantization: ${quant}. Valid: q4_k_m, q5_k_m, q8_0, q2_k, q3_k_m, q6_k`);
-    llmRunning.set(false);
-    llmModelLoaded.set(false);
-    return false;
-  }
-  
-  // Validate model file matches quantization (if user provided explicit model)
-  if (smallModelName && smallModelName.trim()) {
-    const validation = validateModelForTask(smallModelName.trim(), "llm");
-    if (!validation.ok) {
-      llmError.set(validation.error || "Invalid LLM model");
-      llmRunning.set(false);
-      llmModelLoaded.set(false);
-      return false;
-    }
-  }
-  
   const ok = await ensureSidecar({
     kind: "llama",
     isRunning: () => api.llmIsRunning(),
@@ -450,7 +479,6 @@ export async function ensureLlm(): Promise<boolean> {
         await getSidecarsDir(),
         smallModelName || undefined,
         s.smallModelContextLength || undefined,
-        s.smallModelQuantization || undefined,
       );
     },
     health: () => api.llmHealth(),
@@ -523,14 +551,14 @@ export async function warmStt(): Promise<void> {
   }
 }
 
-/** Warm Kokoro, then silent first-synthesis: the ONNX voice model loads
- * lazily on the first synthesize, so ensureTts alone still leaves the
- * first real read-aloud slow. Synthesize one period and drop the audio. */
+/** Warm Phonon, then silent first-synthesis: the model loads lazily on the
+ * first synthesize, so ensureTts alone still leaves the first real
+ * read-aloud slow. Synthesize one period and drop the audio. */
 export async function warmTts(): Promise<void> {
   try {
     if (!(await ensureTts())) return;
     const s = get(settings);
-    await api.ttsSynthesize(".", s.ttsVoice, s.ttsSpeed, s.ttsLangCode, s.ttsSplitPattern, s.ttsChunkSize);
+    await api.ttsSynthesize(".", s.ttsVoice, s.ttsSpeed, s.ttsLangCode, "", 0);
   } catch {
     /* warm is best-effort */
   }
@@ -594,7 +622,7 @@ function checkIdleOffload(): void {
     if (last !== undefined && now - last > timeout) {
       void stopTts().catch(() => {});
       lastUsedAt.delete("tts");
-      showToast("Kokoro voice model unloaded to save RAM.", "info");
+      showToast("Phonon voice model unloaded to save RAM.", "info");
     }
   }
   // LLM
@@ -612,7 +640,9 @@ function checkIdleOffload(): void {
 
 let _audioCtx: AudioContext | null = null;
 
-function getAudioContext(): AudioContext {
+/** Shared context for every playback path — the render-ahead player
+ * schedules on it too, so pause/resume state stays single-sourced. */
+export function getAudioContext(): AudioContext {
   if (!_audioCtx) {
     _audioCtx = new AudioContext();
   }

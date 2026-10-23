@@ -20,6 +20,8 @@ src-tauri/binaries/*
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.ruff_cache/
 
 # OS / editors
 .DS_Store
@@ -41,3 +43,10 @@ Thumbs.db
 .patchi/.env
 .patchi/keys.json
 .vercel
+
+# Freebuff local tool state
+.freebuff/
+
+
+# Top-level sidecar/phonon build output (678 MB of binaries — never commit)
+/sidecars/

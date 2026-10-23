@@ -22,16 +22,7 @@ export async function setWidgetAutostart(enabled: boolean): Promise<string | nul
   }
 }
 
-export async function promptWidgetAutostart(): Promise<string | null> {
-  if (isBrowserPreview() || !isWindowsRuntime() || get(settings).widgetAutostartPromptShown) return null;
-  // `confirm` is the only way this app asks, and a WebView that declines to
-  // show the dialog hands back `undefined` rather than `false`. Reading that
-  // as a refusal would burn the one-shot prompt and lock the user out of
-  // autostart for good with no way back, so an unanswered prompt is simply
-  // left unconsumed and can be asked again.
-  const answer = window.confirm("Also start Just Write ehis automatically with Windows? Choose Cancel to decline.");
-  if (typeof answer !== "boolean") return null;
-  settings.update((current) => ({ ...current, widgetAutostartPromptShown: true, widgetLaunchAtStartup: answer }));
-  if (!answer) return null;
-  return setWidgetAutostart(true);
-}
+// There is deliberately no native confirm() here. WebView2 titles a native
+// dialog with the page origin ("tauri.localhost says"), which read as a
+// network-permission request the first time the widget opened. Startup is
+// opt-in through the "Launch at startup" switch in Settings instead.

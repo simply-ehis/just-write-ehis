@@ -85,8 +85,9 @@ console.log("save-state: pending saves are flushed, not discarded");
   );
   check(
     "timers are nulled after the flush",
-    /saveTimeout = null;/.test(editor) && /flushTimeout = null;/.test(editor),
-    "timers not cleared, so a queued write could double-fire",
+    /function flushPendingSave\(\)[\s\S]{0,300}saveTimeout = null;/.test(editor) &&
+      /saveTimeout = setTimeout\([\s\S]{0,120}saveTimeout = null;/.test(editor),
+    "flush must null the queued-save timer, and the debounce must null it when it fires (the redundant 5s second full write was removed 2026-10-21 — disk is the truth, one atomic write per debounce + flush on blur/close/pagehide)",
   );
   check(
     "flush reports failure instead of pretending success",
@@ -99,7 +100,7 @@ console.log("save-state: every indicator surface shows the error phase");
 for (const [file, pattern] of [
   ["src/lib/components/StatusBar.svelte", /Save failed/],
   ["src/lib/components/BottomBar.svelte", /Save failed/],
-  ["src/WidgetApp.svelte", /Save failed/],
+  ["src/lib/components/widgets/QuickNoteWidget.svelte", /Couldn't save/],
 ]) {
   const src = await readFile(join(root, file), "utf8");
   check(`${file} surfaces a failed save`, pattern.test(src));

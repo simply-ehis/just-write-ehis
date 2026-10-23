@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tts-stream-chunk"
+description = "Enables the tts_stream_chunk command without any pre-configured scope."
+commands.allow = ["tts_stream_chunk"]
+
+[[permission]]
+identifier = "deny-tts-stream-chunk"
+description = "Denies the tts_stream_chunk command without any pre-configured scope."
+commands.deny = ["tts_stream_chunk"]

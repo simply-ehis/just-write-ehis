@@ -1373,20 +1373,22 @@
 
   .beat-board {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: flex-start;
     gap: var(--space-4);
     padding: var(--space-4);
     overflow-y: auto;
-    overflow-x: hidden;
-    flex: 0 0 auto;
-    width: 100%;
+    overflow-x: auto;
+    flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
   }
 
   .act-column {
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+    flex: 0 0 min(280px, 82vw);
     min-width: 0;
   }
 

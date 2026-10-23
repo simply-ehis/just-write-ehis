@@ -19,6 +19,7 @@
     ensureLlmFor,
     ensureStt,
     ensureTts,
+    isLocalLlmSentinel,
     llmError,
     llmStarting,
     playWavBase64,
@@ -29,13 +30,65 @@
     synthesizeText,
     ttsError,
   } from "$lib/stores/audio";
-  import { validateLlmModel, validatePythonPath, validateSttModel, validateTtsModel } from "$lib/sidecarValidate";
   import { stopHarness } from "$lib/memorySidecar";
   import { pinCaptureNotification } from "$lib/launch";
-  import { isWindowsRuntime, promptWidgetAutostart, setWidgetAutostart } from "$lib/widgetAutostart";
+import { requestOsNotificationPermission } from "$lib/osNotifications";
+  import { isWindowsRuntime, setWidgetAutostart } from "$lib/widgetAutostart";
+  import { clampUiScale, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_STEP } from "$lib/uiScale";
+  import { WIDGET_KINDS, widgetSpec } from "$lib/widgets/registry";
   import { domainError, warnOnce } from "$lib/errors";
   import { defaultAccentFor, ACCENT_PRESETS, resolveThemeMode } from "$lib/appearance";
   import { EDITOR_FONTS } from "$lib/editorTheme";
+
+  const AI_PERSONA_PRESETS = [
+    { label: "Default", value: "" },
+    { label: "Direct editor", value: "Be a concise, candid writing editor. Focus on clarity, structure, and voice. Give specific suggestions and preserve the writer's intent." },
+    { label: "Encouraging coach", value: "Be a warm, practical writing coach. Help the writer make steady progress with one manageable next step. Preserve their voice." },
+    { label: "Idea partner", value: "Be a curious brainstorming partner. Ask focused questions, explore alternatives, and help develop ideas without taking over the writing." },
+  ];
+  const CONTEXT_PRESETS = [2048, 4096, 8192, 16384, 32768, 65536];
+  const SNAPSHOT_RETENTION_PRESETS = [7, 30, 90, 180, 365];
+
+  /** Phonon voice catalog — id → label, from gradium/phonon-voices. */
+  const PHONON_VOICES: { id: string; label: string }[] = [
+    // English US — female
+    { id: "NbpkqMVS3CJeq2j8", label: "Zoey — female, warm (US)" },
+    { id: "NIWIOv5vTi5eRMj8", label: "Juniper — female, clear (US)" },
+    { id: "vjFyp2BcCyTlUmYb", label: "Everly — female, bright (US)" },
+    { id: "4SZHfMpw-p46Ywgs", label: "Harper — female, soft (US)" },
+    { id: "bXwrkHhURL1VFJdG", label: "Hadley — female, calm (US)" },
+    { id: "nGzMHMPAWGaJFHOo", label: "Delia — female, gentle (US)" },
+    // English US — male
+    { id: "LMDIYE0Oa377Qh6Z", label: "Easton — male, deep (US)" },
+    { id: "40QrMVgAxFiUnP9f", label: "Micah — male, neutral (US)" },
+    { id: "0zLApsZfVLLNaEGl", label: "Trevor — male, warm (US)" },
+    { id: "_6Aslh2DxfmnRLmP", label: "Russell — male, clear (US)" },
+    { id: "qIxlZ7Ei8KvWlyQH", label: "Preston — male, formal (US)" },
+    { id: "d9XCyhjo4JhkHF1d", label: "Miles — male, casual (US)" },
+    // English UK — female
+    { id: "6PWnV0Nq4wu7RVBT", label: "Maeve — female, refined (UK)" },
+    { id: "GgfEkEJtxZR7gnpy", label: "Freya — female, soft (UK)" },
+    { id: "uem82D50GRv2Dwma", label: "Pippa — female, bright (UK)" },
+    { id: "y9bQqIDnyxwqK01t", label: "Elodie-Rose — female, elegant (UK)" },
+    { id: "gDT1nz7Ie36ZhL-C", label: "Imogen — female, calm (UK)" },
+    { id: "m9MxpY6IUGXtWp76", label: "Lottie — female, gentle (UK)" },
+    // English UK — male
+    { id: "X6NceqF285Gr04gb", label: "Alfie — male, deep (UK)" },
+    { id: "YyKcxPG7iIgS3jsK", label: "Hugh — male, neutral (UK)" },
+    { id: "zUCxzrOrugTSis03", label: "Edwin — male, warm (UK)" },
+    { id: "JOW0vchyswkQUMDS", label: "Spencer — male, formal (UK)" },
+    { id: "dME3IWyZBvmh1n1q", label: "Toby — male, casual (UK)" },
+    { id: "Zn7g6NxLqXlJb7Qi", label: "Teddy — male, bright (UK)" },
+  ];
+
+  function modelQuantTag(name: string): string {
+    const match = name.match(/IQ\d+_[A-Z0-9]+|Q\d+(?:_K_[MSL]|_[01])/i);
+    return match?.[0].toUpperCase() ?? "quant unknown";
+  }
+
+  function nearestPreset(value: number, choices: number[]): number {
+    return choices.reduce((best, choice) => Math.abs(choice - value) < Math.abs(best - value) ? choice : best);
+  }
 
   // Resolved base mode for logos/color math — "system" tracks the OS live.
   let baseMode = $derived(resolveThemeMode($settings.themeMode));
@@ -59,29 +112,60 @@
     }
   }
 
-  // Sidecar input validation: shape-checked on blur with inline errors
-  // (existence/shape at start still fails closed server-side — see
-  // sidecar.rs ManagedSidecar + the python _resolve_model guards).
-  let pythonError = $state<string | null>(null);
-  let sttModelError = $state<string | null>(null);
-  let ttsModelError = $state<string | null>(null);
-  let llmModelError = $state<string | null>(null);
-  let pythonProbeToken = 0;
   let localModelTesting = $state<"stt" | "tts" | "llm" | null>(null);
   let localModelStatus = $state("");
+  let localModels = $state<{ name: string; path: string }[]>([]);
+  let localModelsLoading = $state(false);
 
-  async function probePythonPath() {
-    pythonError = validatePythonPath($settings.pythonPath);
-    if (pythonError || isBrowserPreview()) return;
-    const token = ++pythonProbeToken;
+  async function refreshLocalModels() {
+    if (isBrowserPreview() || localModelsLoading) return;
+    localModelsLoading = true;
     try {
-      const version = await api.sidecarPythonProbe($settings.pythonPath.trim() || "python");
-      if (token === pythonProbeToken) pythonError = null;
-      showToast(`Python OK: ${version}`, "success");
-    } catch (e) {
-      if (token === pythonProbeToken) {
-        pythonError = e instanceof Error ? e.message : String(e);
+      await api.smallModelsDir();
+      localModels = (await api.scanSmallModels()).sort((a, b) => a.name.localeCompare(b.name));
+      if (isLocalLlmSentinel($settings.smallModelEndpoint) && $settings.smallModelName && !localModels.some((model) => model.name === $settings.smallModelName)) {
+        settings.update((current) => ({ ...current, smallModelName: "" }));
       }
+    } catch (error) {
+      localModelStatus = `Couldn't read the models folder: ${error instanceof Error ? error.message : error}`;
+    } finally {
+      localModelsLoading = false;
+    }
+  }
+
+  function smallProviderPreset(): "local" | "openai" | "custom" {
+    if (!isBrowserPreview() && isLocalLlmSentinel($settings.smallModelEndpoint)) return "local";
+    return $settings.smallModelEndpoint.trim().replace(/\/+$/, "") === "https://api.openai.com/v1" ? "openai" : "custom";
+  }
+
+  function chooseSmallProvider(value: string) {
+    if (value === "local") {
+      $settings = { ...$settings, smallModelEndpoint: "http://127.0.0.1:8093/v1", smallModelName: "" };
+    } else if (value === "openai") {
+      $settings = { ...$settings, smallModelEndpoint: "https://api.openai.com/v1", smallModelName: "gpt-4o-mini" };
+    } else {
+      $settings = {
+        ...$settings,
+        smallModelEndpoint: smallProviderPreset() === "custom" ? $settings.smallModelEndpoint : "",
+        smallModelName: smallProviderPreset() === "custom" ? $settings.smallModelName : "",
+      };
+    }
+  }
+
+  function mainProviderPreset(): "openai" | "custom" {
+    return $settings.mainModelEndpoint.trim().replace(/\/+$/, "") === "https://api.openai.com/v1" ? "openai" : "custom";
+  }
+
+  function chooseMainProvider(value: string) {
+    if (value === "openai") {
+      $settings = { ...$settings, mainModelEndpoint: "https://api.openai.com/v1", mainModelName: "gpt-4o-mini" };
+    } else {
+      const isCustom = mainProviderPreset() === "custom";
+      $settings = {
+        ...$settings,
+        mainModelEndpoint: isCustom ? $settings.mainModelEndpoint : "",
+        mainModelName: isCustom ? $settings.mainModelName : "",
+      };
     }
   }
 
@@ -124,7 +208,7 @@
       } catch (e) {
         localModelStatus = `TTS audio failed to play: ${e instanceof Error ? e.message : e}`;
       }
-      // Success: leave Kokoro warm — stopping it here unloaded the model
+      // Success: leave Phonon warm — stopping it here unloaded the model
       // the user had just paid the cold-start cost for (and any hover-warm).
       return;
     } catch (error) {
@@ -148,15 +232,15 @@
     const wasRunning = await api.llmIsRunning().catch(() => false);
     try {
       if (!(await ensureLlm())) {
-        localModelStatus = $llmError || "Bundled LLM unavailable";
+        localModelStatus = $llmError || "Local model unavailable";
         return;
       }
       const text = (await api.llmCompletion("Reply with exactly READY", 8, 0)).trim();
       localModelStatus = text.toUpperCase() === "READY"
-        ? "Bundled LLM replied READY"
+        ? "Local model replied READY"
         : text
-          ? `Bundled LLM returned unexpected text: ${text.slice(0, 80)}`
-          : "Bundled LLM returned no text";
+          ? `Local model returned unexpected text: ${text.slice(0, 80)}`
+          : "Local model returned no text";
     } catch (error) {
       localModelStatus = error instanceof Error ? error.message : String(error);
     } finally {
@@ -240,6 +324,27 @@
   let testingSlot = $state<"small" | "main" | null>(null);
   let pinningNotif = $state(false);
   let notifStatus = $state("");
+  let osNotifStatus = $state("");
+
+  async function configureOsNotifications(enabled: boolean) {
+    if (!enabled) {
+      settings.update((current) => ({ ...current, desktopNotificationsEnabled: false }));
+      osNotifStatus = "OS error notifications are off.";
+      return;
+    }
+
+    const result = await requestOsNotificationPermission();
+    if (result === "enabled") {
+      settings.update((current) => ({ ...current, desktopNotificationsEnabled: true }));
+      osNotifStatus = "Notifications will appear while the app is hidden.";
+    } else if (result === "unsupported") {
+      osNotifStatus = "This runtime does not provide OS notifications.";
+    } else if (result === "denied") {
+      osNotifStatus = "Notifications are blocked in system settings.";
+    } else {
+      osNotifStatus = "Could not request notification permission.";
+    }
+  }
 
   async function pinNotification() {
     pinningNotif = true;
@@ -376,6 +481,14 @@
     window.location.reload();
   }
 
+  // Drag shows the number; the zoom is applied on release, because zooming
+  // while dragging moves the slider out from under the pointer.
+  let uiScaleDraft = $state<number | null>(null);
+  function commitUiScale(value: number) {
+    uiScaleDraft = null;
+    settings.update((current) => ({ ...current, uiScale: clampUiScale(value) }));
+  }
+
   async function setCompanionWidgetVisible(visible: boolean) {
     const previous = $settings.companionWidgetVisible;
     if (!visible && $settings.widgetLaunchAtStartup) {
@@ -384,10 +497,6 @@
         showToast(`Could not disable Windows startup: ${error}`, "error");
         return;
       }
-    }
-    if (visible) {
-      const error = await promptWidgetAutostart();
-      if (error) showToast(`Windows startup was not enabled: ${error}`, "error");
     }
     settings.update((current) => ({ ...current, companionWidgetVisible: visible }));
     if (isBrowserPreview()) return;
@@ -435,11 +544,6 @@
     }
   }
 
-  function setAssociatedFileExtensions(value: string) {
-    const extensions = [...new Set(value.split(",").map((item) => item.trim().replace(/^\./, "").toLowerCase()).filter(Boolean))];
-    settings.update((current) => ({ ...current, associatedFileExtensions: extensions }));
-  }
-
   const categories: { id: SettingsCategory; label: string; icon: string }[] = [
     { id: "general", label: "General", icon: "settings" },
     { id: "editor", label: "Editor & Writing", icon: "pencil" },
@@ -456,6 +560,15 @@
   ];
 
   onMount(() => {
+    const contextLength = nearestPreset($settings.smallModelContextLength, CONTEXT_PRESETS);
+    const retentionDays = nearestPreset($settings.snapshotRetentionDays, SNAPSHOT_RETENTION_PRESETS);
+    if (contextLength !== $settings.smallModelContextLength || retentionDays !== $settings.snapshotRetentionDays) {
+      settings.update((current) => ({
+        ...current,
+        smallModelContextLength: contextLength,
+        snapshotRetentionDays: retentionDays,
+      }));
+    }
     // Honest cold start: the real navigation→interactive time recorded at
     // boot (App.svelte reportBootMs). performance.now() here would only
     // measure "time since page load", which is always red and meaningless.
@@ -468,6 +581,7 @@
     getAppVersion(APP_VERSION).then((v) => (appVersion = v));
     if (!isBrowserPreview()) {
       api.getVaultPath().then((path) => (resolvedVaultPath = path)).catch(() => {});
+      void refreshLocalModels();
     }
     loadMemoryFactCount();
     api.appUpdateStatus()
@@ -757,6 +871,25 @@
             >System</button>
           </div>
         </div>
+        {#if !isBrowserPreview()}
+          <div class="setting-row">
+            <label for="setting-ui-scale">Interface size</label>
+            <div class="ui-scale-control">
+              <input
+                id="setting-ui-scale"
+                type="range"
+                min={UI_SCALE_MIN}
+                max={UI_SCALE_MAX}
+                step={UI_SCALE_STEP}
+                value={uiScaleDraft ?? $settings.uiScale}
+                oninput={(e) => (uiScaleDraft = Number(e.currentTarget.value))}
+                onchange={(e) => commitUiScale(Number(e.currentTarget.value))}
+              />
+              <span class="ui-scale-value">{Math.round((uiScaleDraft ?? $settings.uiScale) * 100)}%</span>
+              <button class="ui-scale-reset" onclick={() => commitUiScale(1)} disabled={$settings.uiScale === 1 && uiScaleDraft === null}>Reset</button>
+            </div>
+          </div>
+        {/if}
         <div class="setting-row accent-row-block">
           <span class="setting-label" id="setting-accent-label">Accent color</span>
           <div class="accent-pick" role="group" aria-labelledby="setting-accent-label">
@@ -810,25 +943,13 @@
           />
         </div>
         <div class="setting-row">
-          <label for="setting-widget-workspace">Widget workspace</label>
-          <select id="setting-widget-workspace" bind:value={$settings.widgetWorkspace}>
-            {#each workspaces as workspace}
-              <option value={workspace.id}>{workspace.label}</option>
+          <label for="setting-widget-kind">Widget type</label>
+          <select id="setting-widget-kind" bind:value={$settings.widgetKind}>
+            {#each WIDGET_KINDS as kind}
+              <option value={kind.id}>{kind.label}</option>
             {/each}
           </select>
-        </div>
-        <div class="setting-row">
-          <label for="setting-widget-dock-edge">Widget dock edge</label>
-          <select id="setting-widget-dock-edge" bind:value={$settings.widgetDockEdge}>
-            <option value="right">Right</option>
-            <option value="left">Left</option>
-            <option value="top">Top</option>
-            <option value="bottom">Bottom</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label for="setting-widget-dock-offset">Widget dock offset</label>
-          <input id="setting-widget-dock-offset" type="number" min="0" max="100000" bind:value={$settings.widgetDockOffset} onblur={() => clampSettingKey("widgetDockOffset")} />
+          <p class="setting-desc">{widgetSpec($settings.widgetKind).job} Drag it anywhere and resize it; it remembers its place.</p>
         </div>
         <div class="setting-row">
           <label for="setting-widget-startup">Start with Windows</label>
@@ -838,23 +959,7 @@
           <span class="setting-label">Default text editor</span>
           <button id="setting-default-app" class="secondary-btn" disabled={!isWindowsRuntime()} onclick={openDefaultApps}>Make Just Write ehis my default text editor</button>
         </div>
-        <div class="setting-row">
-          <label for="setting-associated-extensions">Associated file extensions</label>
-          <input id="setting-associated-extensions" type="text" value={$settings.associatedFileExtensions.join(", ")} onchange={(event) => setAssociatedFileExtensions((event.currentTarget as HTMLInputElement).value)} />
-        </div>
-        <p class="setting-hint">The installer registers the shipped .txt and .md associations. Editing this list changes the app preference; rebuild/reinstall to change Windows registration.</p>
         {/if}
-        <div class="setting-row">
-          <label for="setting-icon-set">Icon Set</label>
-          <select id="setting-icon-set" bind:value={$settings.iconSet}>
-            <option value="phosphor">Phosphor</option>
-            <option value="tabler">Tabler</option>
-          </select>
-        </div>
-        <div class="setting-row">
-          <label for="setting-streak-goal">Daily Streak Goal (words)</label>
-          <input id="setting-streak-goal" type="number" bind:value={$settings.streakGoal} min="0" max="10000" onblur={() => clampSettingKey("streakGoal")} />
-        </div>
         <div class="setting-row">
           <label for="setting-compact-mode">Compact mode (tighter chrome)</label>
           <input id="setting-compact-mode" type="checkbox" bind:checked={$settings.compactMode} />
@@ -890,11 +995,17 @@
         <h3>Editor & Writing</h3>
         <div class="setting-row">
           <label for="setting-font-size">Font Size</label>
-          <input id="setting-font-size" type="number" bind:value={$settings.fontSize} min="10" max="32" onblur={() => clampSettingKey("fontSize")} />
+          <div class="range-row">
+            <input id="setting-font-size" type="range" bind:value={$settings.fontSize} min="10" max="32" step="1" />
+            <span class="range-value">{$settings.fontSize}px</span>
+          </div>
         </div>
         <div class="setting-row">
           <label for="setting-line-height">Line Height</label>
-          <input id="setting-line-height" type="number" bind:value={$settings.lineHeight} min="1.0" max="3.0" step="0.1" onblur={() => clampSettingKey("lineHeight")} />
+          <div class="range-row">
+            <input id="setting-line-height" type="range" bind:value={$settings.lineHeight} min="1.0" max="3.0" step="0.1" />
+            <span class="range-value">{$settings.lineHeight.toFixed(1)}×</span>
+          </div>
         </div>
         <div class="setting-row">
           <label for="setting-font-family">Editor Font</label>
@@ -914,7 +1025,10 @@
         </div>
         <div class="setting-row">
           <label for="setting-focus-context-lines">Focus context lines</label>
-          <input id="setting-focus-context-lines" type="number" min="0" max="10" bind:value={$settings.focusContextLines} onblur={() => clampSettingKey("focusContextLines")} />
+          <div class="range-row">
+            <input id="setting-focus-context-lines" type="range" min="0" max="10" step="1" bind:value={$settings.focusContextLines} />
+            <span class="range-value">{$settings.focusContextLines} lines</span>
+          </div>
         </div>
         <div class="setting-row">
           <label for="setting-focus-dim-strength">Focus dim strength</label>
@@ -948,31 +1062,54 @@
           <p class="setting-desc">On the web both slots talk to HTTP endpoints you configure below — there is no bundled local model here. Ghost needs a reachable small slot to suggest anything.</p>
         {/if}
         <div class="setting-row">
-          <label for="setting-small-model-endpoint">Small Model Endpoint</label>
-          <input id="setting-small-model-endpoint" type="text" bind:value={$settings.smallModelEndpoint} placeholder="http://127.0.0.1:8093/v1" />
+          <label for="setting-small-provider">Small model provider</label>
+          <select id="setting-small-provider" value={smallProviderPreset()} onchange={(e) => chooseSmallProvider((e.currentTarget as HTMLSelectElement).value)}>
+            {#if !isBrowserPreview()}<option value="local">Local models folder</option>{/if}
+            <option value="openai">OpenAI</option>
+            <option value="custom">Custom OpenAI-compatible endpoint</option>
+          </select>
         </div>
-        <div class="setting-row">
-          <label for="setting-small-model-name">Small Model Name</label>
-          <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="lfm2.5-350m" />
-        </div>
+        {#if smallProviderPreset() === "custom"}
+          <div class="setting-row">
+            <label for="setting-small-model-endpoint">Endpoint</label>
+            <input id="setting-small-model-endpoint" type="text" bind:value={$settings.smallModelEndpoint} placeholder="https://provider.example/v1" />
+          </div>
+        {/if}
+        {#if !isBrowserPreview() && isLocalLlmSentinel($settings.smallModelEndpoint)}
+          <div class="setting-row">
+            <label for="setting-small-model-name">Local model</label>
+            <div class="range-row">
+              <select id="setting-small-model-name" bind:value={$settings.smallModelName}>
+                <option value="">Auto-select first model</option>
+                {#each localModels as model}
+                  <option value={model.name}>{model.name} · LLM · {modelQuantTag(model.name)} · FA · KV Q8_0</option>
+                {/each}
+              </select>
+              <button class="secondary-btn" onclick={refreshLocalModels} disabled={localModelsLoading}>
+                {localModelsLoading ? "Scanning…" : "Refresh"}
+              </button>
+            </div>
+          </div>
+        {:else if smallProviderPreset() === "custom"}
+          <div class="setting-row">
+            <label for="setting-small-model-name">Small model name</label>
+            <input id="setting-small-model-name" type="text" bind:value={$settings.smallModelName} placeholder="Model ID from provider" />
+          </div>
+        {/if}
         <p class="setting-desc">Light-task picks: the bundled local endpoint by default — or any OpenAI-compatible endpoint (OpenAI, Google, Anthropic via gateway, Custom). See docs/MODELS.md.</p>
-        {#if !isBrowserPreview()}
+        {#if !isBrowserPreview() && isLocalLlmSentinel($settings.smallModelEndpoint)}
           <div class="setting-row">
             <label for="setting-small-model-ctx">Small Model Context Length</label>
-            <input id="setting-small-model-ctx" type="number" min="1024" max="131072" step="1024" bind:value={$settings.smallModelContextLength} onblur={() => clampSettingKey("smallModelContextLength")} />
-          </div>
-          <div class="setting-row">
-            <label for="setting-small-model-quant">Small Model Quantization</label>
-            <select id="setting-small-model-quant" bind:value={$settings.smallModelQuantization} onblur={() => clampSettingKey("smallModelQuantization")}>
-              <option value="q4_k_m">Q4_K_M — balanced (default, ~267 MB)</option>
-              <option value="q5_k_m">Q5_K_M — higher quality (~320 MB)</option>
-              <option value="q8_0">Q8_0 — near-fp16 quality (~420 MB)</option>
-              <option value="q2_k">Q2_K — smallest, fastest (~160 MB)</option>
-              <option value="q3_k_m">Q3_K_M — fast, lower quality (~200 MB)</option>
-              <option value="q6_k">Q6_K — high quality (~380 MB)</option>
+            <select id="setting-small-model-ctx" bind:value={$settings.smallModelContextLength}>
+              <option value={2048}>2K</option>
+              <option value={4096}>4K</option>
+              <option value={8192}>8K</option>
+              <option value={16384}>16K</option>
+              <option value={32768}>32K</option>
+              <option value={65536}>64K</option>
             </select>
           </div>
-          <p class="setting-desc">llama-server <code>--ctx-size</code> for the bundled model (default 8192). Quantization affects quality/speed/size tradeoff. Takes effect on the next sidecar start — restart the small model to apply. Re-download with <code>python src-tauri/sidecars/fetch_sidecars.py --llm q8_0</code> to fetch a different quantization.</p>
+          <p class="setting-desc">The app loads GGUFs as-is; it does not change their quant. The picker shows the file quant plus runner flags: Flash Attention on, K/V cache Q8_0, one slot.</p>
         {/if}
         <div class="setting-row">
           <label for="setting-use-small-as-main">Use Small Model as Main</label>
@@ -984,14 +1121,23 @@
           <p class="setting-desc">Route the AI panel's chat, Composer, and Structurize at the small model instead of the main slot. Ghost routing is unchanged (local :8093 if enabled, else small slot).</p>
         {/if}
         <div class="setting-row">
-          <label for="setting-main-model-endpoint">Main Model Endpoint</label>
-          <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="https://api.openai.com/v1" />
+          <label for="setting-main-provider">Main model provider</label>
+          <select id="setting-main-provider" value={mainProviderPreset()} onchange={(e) => chooseMainProvider((e.currentTarget as HTMLSelectElement).value)}>
+            <option value="openai">OpenAI</option>
+            <option value="custom">Custom OpenAI-compatible endpoint</option>
+          </select>
         </div>
-        <div class="setting-row">
-          <label for="setting-main-model-name">Main Model Name</label>
-          <input id="setting-main-model-name" type="text" bind:value={$settings.mainModelName} placeholder="gpt-4o-mini" />
-        </div>
-        <p class="setting-desc">Main-slot picks: <code>OpenAI</code> · <code>Google (Gemini)</code> · <code>Anthropic (via gateway)</code> · <code>Custom</code> OpenAI-compatible endpoint. Paste endpoint + model, add the key below, then Test. See docs/MODELS.md.</p>
+        {#if mainProviderPreset() === "custom"}
+          <div class="setting-row">
+            <label for="setting-main-model-endpoint">Endpoint</label>
+            <input id="setting-main-model-endpoint" type="text" bind:value={$settings.mainModelEndpoint} placeholder="https://provider.example/v1" />
+          </div>
+          <div class="setting-row">
+            <label for="setting-main-model-name">Model name</label>
+            <input id="setting-main-model-name" type="text" bind:value={$settings.mainModelName} placeholder="Provider model ID" />
+          </div>
+        {/if}
+        <p class="setting-desc">OpenAI uses the default model. Custom endpoints need their URL and model ID. Add the key below, then Test.</p>
         <div class="setting-row">
           <span class="setting-label">Test Small Slot</span>
           <button class="clear-btn" onclick={() => testSlot("small")} disabled={testingSlot !== null}>
@@ -1026,19 +1172,24 @@
       </div>
 
       <div class="settings-section">
-        <h3>AI Persona (soul.md)</h3>
-        <p class="setting-desc">Define your AI's personality, style, and values. This is injected into every AI call.</p>
-        <textarea
-          class="persona-textarea"
-          bind:value={$settings.aiPersona}
-          placeholder="You are a terse, direct writing partner. You favor brevity over politeness. You challenge weak prose. You never apologize for having opinions..."
-          rows="8"
-        ></textarea>
+        <h3>AI writing style</h3>
+        <p class="setting-desc">Choose how the assistant responds. The style applies across AI features.</p>
+        <div class="setting-row">
+          <label for="setting-ai-persona">Writing style</label>
+          <select id="setting-ai-persona" bind:value={$settings.aiPersona}>
+            {#each AI_PERSONA_PRESETS as preset}
+              <option value={preset.value}>{preset.label}</option>
+            {/each}
+            {#if $settings.aiPersona && !AI_PERSONA_PRESETS.some((preset) => preset.value === $settings.aiPersona)}
+              <option value={$settings.aiPersona}>Current custom style</option>
+            {/if}
+          </select>
+        </div>
       </div>
 
       <div class="settings-section">
         <h3>Voice — STT & TTS</h3>
-        <p class="setting-desc">Desktop uses Moonshine-base GGUF via transcribe.cpp for speech-to-text and Kokoro v1.0 (sherpa-onnx) for text-to-speech. The web build uses the browser's built-in dictation and read-aloud voices instead. Desktop models lazy-load on first use. Torch-free, fully offline.</p>
+        <p class="setting-desc">Desktop uses Moonshine-base GGUF via transcribe.cpp for speech-to-text and Phonon q8 (Rust sidecar) for text-to-speech. The web build uses the browser's built-in dictation and read-aloud voices instead. Desktop models lazy-load on first use. Torch-free, fully offline.</p>
 
         <h4>Speech-to-Text (Moonshine-base GGUF)</h4>
         <div class="setting-row">
@@ -1052,17 +1203,10 @@
               {localModelTesting === "stt" ? "Loading…" : "Test STT"}
             </button>
           </div>
-          <div class="setting-row">
-            <label for="setting-stt-model">STT Model</label>
-            <input id="setting-stt-model" type="text" bind:value={$settings.sttModel} placeholder="bundled moonshine-base-Q8_0.gguf" onblur={() => (sttModelError = validateSttModel($settings.sttModel))} />
-          </div>
-          {#if sttModelError}
-            <p class="update-error">{sttModelError}</p>
-          {/if}
-          <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
+          <p class="setting-desc">Uses the speech model installed in the app models folder.</p>
         {/if}
 
-        <h4>Text-to-Speech (Kokoro-82M)</h4>
+        <h4>Text-to-Speech (Phonon q8)</h4>
         <div class="setting-row">
           <label for="setting-tts-enabled">TTS Enabled</label>
           <input id="setting-tts-enabled" type="checkbox" bind:checked={$settings.ttsEnabled} onchange={onTtsToggle} />
@@ -1074,78 +1218,17 @@
               {localModelTesting === "tts" ? "Generating…" : "Test TTS"}
             </button>
           </div>
-          <div class="setting-row">
-            <label for="setting-tts-model">TTS Weights Repo</label>
-            <input id="setting-tts-model" type="text" bind:value={$settings.ttsModel} placeholder="vendored kokoro-multi-lang-v1_0" onblur={() => (ttsModelError = validateTtsModel($settings.ttsModel))} />
-          </div>
-          {#if ttsModelError}
-            <p class="update-error">{ttsModelError}</p>
-          {/if}
-          <p class="setting-desc">Paste to swap: a local Kokoro bundle directory (model.onnx + voices.bin + tokens.txt + espeak-ng-data). Empty = vendored default. Takes effect on next sidecar start.</p>
+          <p class="setting-desc">Uses the voice model installed in the app models folder.</p>
         {:else}
           <p class="setting-desc">Voice and language come from your browser here — speed below still applies.</p>
         {/if}
         {#if !isBrowserPreview()}
         <div class="setting-row">
-          <label for="setting-tts-lang-code">Language</label>
-          <select id="setting-tts-lang-code" bind:value={$settings.ttsLangCode} onchange={(e) => {
-            // Auto-select first voice of new language
-            const lang = (e.target as HTMLSelectElement).value;
-            const defaultVoices: Record<string, string> = {
-              a: 'af_heart', b: 'bf_emma', j: 'jf_alpha', z: 'zf_xiaobei',
-              e: 'ef_dora', f: 'ff_siwis', h: 'hf_alpha', i: 'if_sara',
-              p: 'pf_dora',
-            };
-            $settings = { ...$settings, ttsLangCode: lang, ttsVoice: defaultVoices[lang] || 'af_heart' };
-          }}>
-            <option value="a">American English</option>
-            <option value="b">British English</option>
-            <option value="j">Japanese</option>
-            <option value="z">Mandarin Chinese</option>
-            <option value="e">Spanish</option>
-            <option value="f">French</option>
-            <option value="h">Hindi</option>
-            <option value="i">Italian</option>
-            <option value="p">Portuguese</option>
-          </select>
-        </div>
-        <div class="setting-row">
           <label for="setting-tts-voice">Voice</label>
           <select id="setting-tts-voice" bind:value={$settings.ttsVoice}>
-            {#if $settings.ttsLangCode === 'a'}
-              <option value="af_heart">Heart — female, warm (default)</option>
-              <option value="af_bella">Bella — female, confident</option>
-              <option value="af_nicole">Nicole — female, soft</option>
-              <option value="af_sarah">Sarah — female, clear</option>
-              <option value="af_sky">Sky — female, bright</option>
-              <option value="am_adam">Adam — male, deep</option>
-              <option value="am_michael">Michael — male, neutral</option>
-            {:else if $settings.ttsLangCode === 'b'}
-              <option value="bf_emma">Emma — female, refined</option>
-              <option value="bm_george">George — male, formal</option>
-              <option value="bm_lewis">Lewis — male, casual</option>
-            {:else if $settings.ttsLangCode === 'j'}
-              <option value="jf_alpha">Alpha — female</option>
-              <option value="jm_kumo">Kumo — male</option>
-            {:else if $settings.ttsLangCode === 'z'}
-              <option value="zf_xiaobei">Xiaobei — female</option>
-              <option value="zf_xiaoni">Xiaoni — female</option>
-              <option value="zm_yunjian">Yunjian — male</option>
-            {:else if $settings.ttsLangCode === 'e'}
-              <option value="ef_dora">Dora — female</option>
-              <option value="em_alex">Alex — male</option>
-            {:else if $settings.ttsLangCode === 'f'}
-              <option value="ff_siwis">Siwis — female</option>
-            {:else if $settings.ttsLangCode === 'h'}
-              <option value="hf_alpha">Alpha — female</option>
-              <option value="hm_omega">Omega — male</option>
-            {:else if $settings.ttsLangCode === 'i'}
-              <option value="if_sara">Sara — female</option>
-              <option value="im_nicola">Nicola — male</option>
-            {:else if $settings.ttsLangCode === 'p'}
-              <option value="pf_dora">Dora — female</option>
-              <option value="pm_alex">Alex — male</option>
-            {/if}
+            {#each PHONON_VOICES as voice}
+              <option value={voice.id}>{voice.label}</option>
+            {/each}
           </select>
         </div>
         <div class="setting-row">
@@ -1163,29 +1246,9 @@
           </div>
           <p class="setting-desc">0.5x = slow, 1.0x = normal, 2.0x = fast</p>
         </div>
-        <div class="setting-row">
-          <label for="setting-tts-chunk-size">Chunk Size (tokens)</label>
-          <div class="range-row">
-            <input
-              id="setting-tts-chunk-size"
-              type="range"
-              min="50"
-              max="500"
-              step="10"
-              bind:value={$settings.ttsChunkSize}
-            />
-            <span class="range-value">{$settings.ttsChunkSize}</span>
-          </div>
-          <p class="setting-desc">Max tokens per audio chunk. Lower = more sentence breaks, higher = smoother flow.</p>
-        </div>
-        <div class="setting-row">
-          <label for="setting-tts-split-pattern">Split Pattern (regex)</label>
-          <input id="setting-tts-split-pattern" type="text" bind:value={$settings.ttsSplitPattern} placeholder="\\n+" />
-          <p class="setting-desc">Regex for splitting text before chunking. Default: double newline.</p>
-        </div>
         {/if}
 
-        <h4>Local LLM (LFM 2.5-350M via llama.cpp)</h4>
+        <h4>Local model runner</h4>
         <div class="setting-row">
           <label for="setting-llm-enabled">LLM Enabled</label>
           <input id="setting-llm-enabled" type="checkbox" bind:checked={$settings.llmEnabled} onchange={onLlmToggle} />
@@ -1194,17 +1257,10 @@
           <div class="setting-row">
             <span class="setting-label">Runtime check</span>
             <button id="test-llm-setup" class="secondary-btn" onclick={testLlmSetup} disabled={localModelTesting !== null || !!$llmStarting}>
-              {localModelTesting === "llm" || $llmStarting ? "Testing…" : "Test bundled LLM"}
+              {localModelTesting === "llm" || $llmStarting ? "Testing…" : "Test local model"}
             </button>
           </div>
-          <div class="setting-row">
-            <label for="setting-llm-model">LLM Model</label>
-            <input id="setting-llm-model" type="text" bind:value={$settings.llmModel} placeholder="bundled lfm2.5-350m-q4_k_m.gguf" onblur={() => (llmModelError = validateLlmModel($settings.llmModel))} />
-          </div>
-          {#if llmModelError}
-            <p class="update-error">{llmModelError}</p>
-          {/if}
-          <p class="setting-desc">Paste to swap: a local <code>.gguf</code> path or a <code>models/</code> filename. Empty = bundled default. Takes effect on next sidecar start.</p>
+          <p class="setting-desc">Add a GGUF model to the app models folder, then select it in the Small Model setting above.</p>
         {:else}
           <p class="setting-desc">No bundled model on the web — point the small/main slots at reachable HTTP endpoints instead.</p>
         {/if}
@@ -1219,17 +1275,6 @@
           <p class="setting-desc">How long STT/TTS/LLM stay loaded after last use. Idle-offload frees RAM; offloaded models reload on next use.</p>
         </div>
 
-        <h4>System</h4>
-        {#if !isBrowserPreview()}
-          <div class="setting-row">
-            <label for="setting-python-path">Python command</label>
-            <input id="setting-python-path" type="text" bind:value={$settings.pythonPath} placeholder="python" onblur={probePythonPath} />
-            <p class="setting-desc">Use <code>python</code>, <code>python3</code>, or <code>py</code> from PATH. Custom executable paths are disabled.</p>
-          </div>
-          {#if pythonError}
-            <p class="update-error">{pythonError}</p>
-          {/if}
-        {/if}
       </div>
 
       <div class="settings-section">
@@ -1354,7 +1399,13 @@
         </div>
         <div class="setting-row">
           <label for="setting-snapshot-retention-days">Snapshot Retention (days)</label>
-          <input id="setting-snapshot-retention-days" type="number" bind:value={$settings.snapshotRetentionDays} min="7" max="365" onblur={() => clampSettingKey("snapshotRetentionDays")} />
+          <select id="setting-snapshot-retention-days" bind:value={$settings.snapshotRetentionDays}>
+            <option value={7}>1 week</option>
+            <option value={30}>1 month</option>
+            <option value={90}>3 months</option>
+            <option value={180}>6 months</option>
+            <option value={365}>1 year</option>
+          </select>
         </div>
         <BackupManager />
       </div>
@@ -1363,6 +1414,17 @@
       <div class="settings-section">
         <h3>Capture & Notifications</h3>
         <p class="setting-desc">Press Ctrl+Shift+F anywhere for the Quick Capture overlay, or use the Capture button in the status bar / mobile bottom bar. Quick Capture targets the Capture workspace by default but can send to any workspace.</p>
+        <div class="setting-row">
+          <label for="setting-desktop-notifications">Show desktop notifications while app is hidden</label>
+          <input
+            id="setting-desktop-notifications"
+            type="checkbox"
+            checked={$settings.desktopNotificationsEnabled}
+            onchange={(event) => configureOsNotifications(event.currentTarget.checked)}
+          />
+        </div>
+        <p class="setting-desc">Errors, external file conflicts, and long AI jobs notify through the operating system notification area when the app is hidden. Error text may include document details.</p>
+        {#if osNotifStatus}<p class="setting-desc" aria-live="polite">{osNotifStatus}</p>{/if}
         <div class="setting-row">
           <label for="setting-android-capture-method">Android Capture Method</label>
           <select id="setting-android-capture-method" bind:value={$settings.androidCaptureMethod}>
@@ -1908,7 +1970,6 @@
   }
 
   .setting-row input[type="text"],
-  .setting-row input[type="number"],
   .setting-row input[type="password"],
   .setting-row select {
     width: 240px;
@@ -2116,26 +2177,6 @@
     color: var(--text-primary);
   }
 
-  .persona-textarea {
-    width: 100%;
-    min-height: 120px;
-    padding: var(--space-3);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: var(--font-size-sm);
-    line-height: var(--line-height-relaxed);
-    resize: vertical;
-    margin-top: var(--space-2);
-  }
-
-  .persona-textarea:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-  }
-
   .setting-desc {
     font-size: var(--font-size-xs);
     color: var(--text-muted);
@@ -2235,4 +2276,9 @@
   .settings-section h4:first-of-type {
     margin-top: var(--space-2);
   }
+  .ui-scale-control { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .ui-scale-control input[type="range"] { flex: 1; min-width: 120px; accent-color: var(--accent-primary); }
+  .ui-scale-value { min-width: 3.2em; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
+  .ui-scale-reset { padding: 4px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--surface-overlay); color: var(--text-primary); cursor: pointer; }
+  .ui-scale-reset:disabled { opacity: 0.45; cursor: default; }
 </style>

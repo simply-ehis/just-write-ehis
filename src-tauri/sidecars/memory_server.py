@@ -19,10 +19,9 @@ Methods (params -> result):
   redact    {text}             -> {"text": "..."}
   clear     {}                 -> {"files_removed": N}
 
-recall deliberately returns the profile plus a directory listing, NOT every
-fact: the listing is metadata only, and read is how a file gets opened. Pass
-prefetch=true for the bundled model, which has no tool calling, so the
-sidecar keyword-matches and inlines the relevant file instead.
+recall returns the profile plus a directory listing by default. The app's
+current model path does not execute model-requested tools, so callers enable
+prefetch and the sidecar keyword-matches and inlines relevant topic files.
 
 The launcher sets JWE_MEMORY_TOKEN (still required at startup: the pipe is
 private, but the contract keeps old/new builds interchangeable).
@@ -67,9 +66,8 @@ def _dispatch(method: str, params: dict) -> dict:
     if method == "recall":
         q = str(params.get("q", ""))
         block = STORE.context_block(q)
-        # The bundled model cannot call tools, so pre-open the one or two
-        # files whose topic overlaps the query instead of trusting it to
-        # ask. Providers with tool support use the listing alone.
+        # The app does not yet execute model-requested tools, so pre-open the
+        # one or two files whose topic overlaps the query when requested.
         extra = []
         if params.get("prefetch"):
             for name in STORE.matching(q):

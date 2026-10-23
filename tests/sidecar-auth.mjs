@@ -133,10 +133,10 @@ check(
 // touch in-memory state. The point is to prove the framing works end to end.
 const FAST_METHOD = {
   "stt_server.py": { id: 7, method: "stream_start", params: {} },
-  "tts_server.py": { id: 7, method: "stop", params: {} },
+  "phonon-server.exe": { id: 7, method: "stop", params: {} },
 };
 
-for (const script of ["stt_server.py", "tts_server.py"]) {
+for (const script of ["stt_server.py"]) {
   const src = await read(`src-tauri/sidecars/${script}`);
   check(`${script} reads JWE_SIDECAR_TOKEN`, src.includes('os.environ.get("JWE_SIDECAR_TOKEN"'));
   check(

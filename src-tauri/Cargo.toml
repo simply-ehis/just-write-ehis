@@ -25,6 +25,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-updater = "=2.11.0"
 tauri-plugin-process = "2"
+# Desktop OS notifications (conflict-found, long AI job finished). The
+# WebView has no Notification API on Windows, so the Web path in
+# osNotifications.ts is the browser-preview fallback only.
+tauri-plugin-notification = "2"
 pulldown-cmark = "0.12"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

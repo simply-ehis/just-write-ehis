@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
   import { EditorView, keymap, highlightActiveLine, highlightSpecialChars } from "@codemirror/view";
+  import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+  import { bracketMatching } from "@codemirror/language";
   import WikilinkPreview from "./WikilinkPreview.svelte";
-  import { Compartment, EditorState } from "@codemirror/state";
+  import { Compartment, EditorState, type Text } from "@codemirror/state";
   import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
   import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
   import { markdown } from "@codemirror/lang-markdown";
@@ -21,6 +23,7 @@
   import TrendlineChart from "./TrendlineChart.svelte";
   import RhythmPanel from "./RhythmPanel.svelte";
   import FormatToolbar from "./FormatToolbar.svelte";
+  import DocTagBar from "./DocTagBar.svelte";
   import MicButton from "./MicButton.svelte";
   import { domainError, warnOnce } from "$lib/errors";
   import ReadAloudButton from "./ReadAloudButton.svelte";
@@ -45,7 +48,8 @@ import { countWords } from "$lib/text";
   // graph on every assignment — a busy-loop that starves timers.
   let editorView = $state.raw<EditorView | null>(null);
   let saveTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
-  let flushTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
+  let pendingText: Text | null = null;
+  let pendingTextDocId: string | null = null;
   let showExportMenu = $state(false);
   let ghostSuggestion = $state('');
   let ghostVisible = $state(false);
@@ -490,6 +494,9 @@ import { countWords } from "$lib/text";
     }
 
     const content = doc?.content ?? "";
+    liveContent = content;
+    pendingText = null;
+    pendingTextDocId = null;
 
     // Snippet expansion plugin. The expansion dispatch is deferred past
     // the update cycle (dispatch is illegal synchronously inside
@@ -545,10 +552,20 @@ import { countWords } from "$lib/text";
         EditorView.lineWrapping,
         highlightActiveLine(),
         highlightSpecialChars(),
+        closeBrackets(),
+        bracketMatching(),
         history(),
         keymap.of([
+          ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
+          {
+            key: "Mod-s",
+            run: () => {
+              flushPendingSave();
+              return true;
+            },
+          },
           // Find/replace (Ctrl+F) via @codemirror/search; panel themed above.
           ...searchKeymap,
           {
@@ -613,7 +630,7 @@ import { countWords } from "$lib/text";
         snippetPlugin,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
-            handleContentChange(update.state.doc.toString());
+            handleContentChange(update.state.doc);
             // Typing activity: lets the shell auto-hide chrome for focus.
             window.dispatchEvent(new CustomEvent("editor-typing"));
             // Slash command detection (A11.7)
@@ -655,8 +672,8 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
       saveQueue = saveQueue.then(async () => {
         try {
         const updated = await (companionMode
-          ? api.widgetDocSave(editingDocId, undefined, content)
-          : api.docSave(editingDocId, undefined, content));
+          ? api.widgetAtomicSave(editingDocId, content)
+          : api.atomicSave(editingDocId, content));
         if ($currentDoc?.id === editingDocId) $currentDoc = { ...$currentDoc, word_count: updated.word_count };
         if (!companionMode) scheduleStoryMemory(updated, content);
         const now = Date.now();
@@ -681,39 +698,34 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
       });
   }
 
-  function handleContentChange(content: string) {
+  function handleContentChange(document: Text) {
     if (!$currentDoc) return;
     const editingDocId = $currentDoc.id;
-    liveContent = content;
+    pendingText = document;
+    pendingTextDocId = editingDocId;
 
-// Epoch-scoped: the indicator follows the actual write, so a save that
-      // is superseded (or fails) can never report the wrong phase.
-      const saveEpoch = recordSave();
-      if (typewriterEnabled) {
-        requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
-      }
+    // Epoch-scoped: the indicator follows the actual write, so a save that
+    // is superseded (or fails) can never report the wrong phase.
+    const saveEpoch = recordSave();
+    if (typewriterEnabled) {
+      requestAnimationFrame(() => centerCursorIn(editorView, editorContainer));
+    }
 
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => queueDocSave(editingDocId, content, saveEpoch), 500);
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      saveTimeout = null;
+      const content = document.toString();
+      pendingText = null;
+      pendingTextDocId = null;
+      liveContent = content;
+      queueDocSave(editingDocId, content, saveEpoch);
+    }, 500);
 
-      if (flushTimeout) clearTimeout(flushTimeout);
-      flushTimeout = setTimeout(() => {
-        saveQueue = saveQueue.then(async () => {
-          try {
-            await (companionMode
-              ? api.widgetAtomicSave(editingDocId, content)
-              : api.atomicSave(editingDocId, content));
-            saveSettled(saveEpoch);
-          } catch (e) {
-            domainError("Write", "couldn't flush document to disk", e);
-            saveFailed(saveEpoch, e);
-          }
-        });
-      }, 5000);
-
-    if (!companionMode && $settings.ghostEnabled && content.length > 20) {
+    if (!companionMode && $settings.ghostEnabled && document.length > 20) {
       if (ghostDebounce) clearTimeout(ghostDebounce);
-      ghostDebounce = setTimeout(() => requestGhostSuggestion(content), 1500);
+      ghostDebounce = setTimeout(() => {
+        if ($currentDoc?.id === editingDocId) requestGhostSuggestion(document.toString());
+      }, 1500);
     }
   }
 
@@ -801,26 +813,34 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
     showExportMenu = false;
   }
 
+  let openDocId: string | null = null;
+
   $effect(() => {
-    // Triggers: open doc or container mount ONLY. createEditor reads AND
-    // writes editorView (destroy-guard + assign) — running it tracked would
-    // resubscribe to editorView and re-fire this effect forever (busy-loop
-    // that rebuilds the whole editor and starves timers).
+    // Rebuild only for a new document. Autosave metadata updates replace the
+    // store object but must preserve this view's history, cursor and text.
     const doc = $currentDoc;
     if (doc && editorContainer) {
       untrack(() => {
-        const prefs = loadFocusPrefs(doc.id, {
-          typewriter: $settings.typewriterDefault,
-          focus: $settings.focusDimmingDefault,
-        });
-        typewriterEnabled = prefs.typewriter;
-        focusDimming = prefs.focus;
-        createEditor(doc);
+        if (openDocId !== doc.id) {
+          flushPendingSave();
+          openDocId = doc.id;
+          const prefs = loadFocusPrefs(doc.id, {
+            typewriter: $settings.typewriterDefault,
+            focus: $settings.focusDimmingDefault,
+          });
+          typewriterEnabled = prefs.typewriter;
+          focusDimming = prefs.focus;
+          createEditor(doc);
+        }
       });
       refreshBibleWords(doc);
       refreshStoryMemory(doc);
       if (!companionMode) loadCraftMetrics(doc.id);
     } else {
+      untrack(() => {
+        flushPendingSave();
+        openDocId = null;
+      });
       refreshBibleWords(null);
       refreshStoryMemory(null);
     }
@@ -951,17 +971,23 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
    * rather than discarded.
    */
   function flushPendingSave() {
-    if (!saveTimeout && !flushTimeout) return;
+    if (!saveTimeout) return;
     if (saveTimeout) clearTimeout(saveTimeout);
-    if (flushTimeout) clearTimeout(flushTimeout);
     saveTimeout = null;
-    flushTimeout = null;
-    const id = $currentDoc?.id;
-    if (!id || !liveContent) return;
+    const id = pendingTextDocId ?? $currentDoc?.id;
+    const content = pendingText?.toString() ?? liveContent;
+    pendingText = null;
+    pendingTextDocId = null;
+    if (!id) return;
     const epoch = recordSave();
     saveQueue = saveQueue.then(async () => {
       try {
-        await api.atomicSave(id, liveContent);
+        const updated = await (companionMode
+          ? api.widgetAtomicSave(id, content)
+          : api.atomicSave(id, content));
+        if ($currentDoc?.id === id) $currentDoc = { ...$currentDoc, word_count: updated.word_count };
+        liveContent = content;
+        if (!companionMode) scheduleStoryMemory(updated, content);
         saveSettled(epoch);
       } catch (e) {
         // Nowhere left to show an error at this point; log rather than
@@ -985,7 +1011,7 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
   });
 </script>
 
-<svelte:window onclick={closeExportOnOutside} onpagehide={onPageHide} />
+<svelte:window onclick={closeExportOnOutside} onpagehide={onPageHide} onblur={flushPendingSave} />
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions: composite editor widget — keydown only drives the slash menu (arrows/Enter/Escape, no-op otherwise); all actions are buttons/inputs. -->
 <div
   class="editor-pane"
@@ -1168,6 +1194,9 @@ function queueDocSave(editingDocId: string, content: string, saveEpoch: number) 
       </div>
     {/if}
   </div>
+  {#if !companionMode && $currentDoc}
+    <DocTagBar docId={$currentDoc.id} />
+  {/if}
 
   {#if slashVisible && slashFiltered.length > 0}
     <div class="slash-menu" style="left: {slashPos.x}px; top: {slashPos.y}px;" role="listbox">

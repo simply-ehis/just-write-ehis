@@ -32,7 +32,7 @@ check("traversal stt rejected", v.validateSttModel("../x.gguf") !== null);
 check("non-gguf stt rejected", v.validateSttModel("model.onnx") !== null);
 
 check("empty tts ok (vendored)", v.validateTtsModel("") === null);
-check("legacy tts ok", v.validateTtsModel("hexgrad/Kokoro-82M") === null);
+check("phonon tts ok", v.validateTtsModel("phonon-40m-multilingual") === null);
 check("bundle dir ok", v.validateTtsModel("my-voices") === null);
 check("file-as-tts rejected", v.validateTtsModel("model.onnx") !== null);
 check("traversal tts rejected", v.validateTtsModel("../../etc") !== null);
@@ -40,13 +40,6 @@ check("traversal tts rejected", v.validateTtsModel("../../etc") !== null);
 check("empty llm ok (bundled)", v.validateLlmModel("") === null);
 check("llm gguf ok", v.validateLlmModel("lfm2.5-350m-q4_k_m.gguf") === null);
 check("llm traversal rejected", v.validateLlmModel("../evil.gguf") !== null);
-
-check("empty python rejected", v.validatePythonPath("") !== null);
-check("python path ok", v.validatePythonPath("python") === null);
-check("python3 path ok", v.validatePythonPath("python3") === null);
-check("windows python command ok", v.validatePythonPath("python.exe") === null);
-check("absolute python path rejected", v.validatePythonPath("C:/Python312/python.exe") !== null);
-check("command injection rejected", v.validatePythonPath("python -c") !== null);
 
 console.log(failures === 0 ? "SIDECAR-VALIDATE ALL PASS" : `SIDECAR-VALIDATE ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

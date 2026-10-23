@@ -128,8 +128,8 @@ a clear error suggesting a zip-of-chapters export instead of OOMing.
 ## Publish scope
 
 `publish_static_site` (Rust only — the TS twin was deleted) emits ONE
-`index.html`: pulldown-cmark bodies sanitized with ammonia, locked docs
-excluded, images inlined as data URIs (2 MB/file cap, skipped files
+`index.html`: pulldown-cmark bodies sanitized with ammonia, selected
+workspaces and draft settings determine included docs, images inlined as data URIs (2 MB/file cap, skipped files
 counted in the result), user `customCss`/`customJs` included with
 `</style`/`</script` breakouts neutralized. Per-page output is
 explicitly out of scope: single-file site only.

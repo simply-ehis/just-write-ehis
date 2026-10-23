@@ -7,12 +7,11 @@
  *  - stt/llm want a .gguf (bare name, models/-relative, or absolute);
  *  - tts wants a bundle dir (absolute or models/-relative), never a file.
  * Null = valid. Server-side existence/shape checks still apply at start
- * (fail closed with a clear error, never silent fallback). Python accepts
- * only PATH command names; reachability is proven by the probe.
+ * (fail closed with a clear error, never silent fallback).
  */
 
 const LEGACY_STT_IDS = new Set(["moonshine-v2-q6", "moonshine-v2-q4", "moonshine/tiny"]);
-const LEGACY_TTS_IDS = new Set(["hexgrad/Kokoro-82M", "hexgrad/kokoro-82m"]);
+const LEGACY_TTS_IDS = new Set<string>();
 
 /**
  * True when a `..` segment climbs out of models/. Absolute paths are NOT
@@ -65,15 +64,6 @@ export function validateLlmModel(value: string): string | null {
   if (bad) return bad;
   if (!v.toLowerCase().endsWith(".gguf") && v.includes(".")) {
     return "LLM model should be a .gguf file.";
-  }
-  return null;
-}
-
-export function validatePythonPath(value: string): string | null {
-  const v = (value || "").trim().toLowerCase();
-  if (!v) return "Python path is empty — STT/TTS/memory sidecars need it; other features still work.";
-  if (!/^(python|python3|py)(\.exe)?$/.test(v)) {
-    return "Use python, python3, or py from PATH.";
   }
   return null;
 }

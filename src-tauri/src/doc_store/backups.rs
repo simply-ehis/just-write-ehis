@@ -19,15 +19,11 @@ impl Database {
         // a username with an apostrophe would otherwise break the SQL.
         let quoted = backup_path.to_string_lossy().replace('\'', "''");
 
-        // VACUUM INTO copies the entire database. Run it on a SECOND connection
-        // when the backing file is known, so the app's only connection stays free to
-        // serve autosave, search and RAG for the duration; WAL allows a reader
-        // alongside the writer. Previously this ran under `self.conn.lock()`, which
-        // meant one full-database copy stalled every other command.
+        // Use a second connection so a full copy does not block normal queries.
         //
         // A read-only connection cannot VACUUM, so this one is opened read/write;
         // it is used for this one statement and dropped immediately.
-        let db_file = self.db_path.lock().ok().and_then(|p| p.clone());
+        let db_file = self.db_path.clone();
         match db_file {
             Some(path) => {
                 let backup_conn = rusqlite::Connection::open(&path)

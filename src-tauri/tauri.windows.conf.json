@@ -8,16 +8,22 @@
       "sidecars/fetch_sidecars.py",
       "sidecars/requirements.txt",
       "sidecars/stt_server.py",
-      "sidecars/tts_server.py",
       "sidecars/memory_server.py",
       "sidecars/harness/*",
-      "sidecars/models/**/*",
+      "sidecars/models/llama-server.exe",
+      "sidecars/models/*.dll",
+      "sidecars/models/moonshine-base-Q8_0.gguf",
+      "../sidecars/models/phonon/**/*",
       "sidecars/bin/**/*"
     ],
     "fileAssociations": [
       {
-        "ext": ["txt", "md"],
-        "description": "Text and Markdown document"
+        "ext": ["txt", "md", "markdown", "mdx", "text", "log", "csv", "json", "yaml", "yml", "toml", "xml", "htm", "html", "css", "js", "ts", "rs", "py", "sql", "ini", "conf"],
+        "description": "Text, Markdown, and source document"
+      },
+      {
+        "ext": ["pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "docx"],
+        "description": "PDF, image, and Word documents"
       }
     ],
     "windows": {

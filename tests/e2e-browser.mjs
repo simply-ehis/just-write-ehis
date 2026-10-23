@@ -331,7 +331,7 @@ async function modelWiring() {
   const editor = await readFile(join(root, "src/lib/components/EditorPane.svelte"), "utf8");
   const settings = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
   check("provider test buttons exist", settings.includes("testSlot") && settings.includes("Test Main Slot"));
-  check("voice model fields exist", settings.includes("sttModel") && settings.includes("ttsModel"));
+  check("voice models use app defaults", !settings.includes("setting-stt-model") && !settings.includes("setting-tts-model"));
   check("local model runtime checks exist", settings.includes("testSttSetup") && settings.includes("testTtsSetup") && settings.includes("testLlmSetup"));
   check("bundled LLM toggle makes a real request", panel.includes("ensureLlm()") && panel.includes("api.llmCompletion") && !panel.includes("sidecarHarnessDir"));
   const audioStore = await readFile(join(root, "src/lib/stores/audio.ts"), "utf8");
@@ -343,8 +343,7 @@ async function modelWiring() {
   const nativeCommands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("renderer cannot choose arbitrary sidecar roots", nativeCommands.includes("trusted_sidecars_dir") && nativeCommands.includes("outside the application resource root"));
   check("renderer cannot choose arbitrary Python executables", nativeCommands.includes("trusted_python_command") && nativeCommands.includes("custom Python paths are disabled"));
-  const sidecarValidation = await readFile(join(root, "src/lib/sidecarValidate.ts"), "utf8");
-  check("Python setting matches native allowlist", sidecarValidation.includes("python3") && sidecarValidation.includes("Use python, python3, or py from PATH"));
+  check("Python command is selected automatically", !settings.includes("setting-python-path") && (await readFile(join(root, "src/lib/stores/audio.ts"), "utf8")).includes('for (const candidate of ["py", "python3", "python"])'));
   check("PIN verification removed from backend", !nativeCommands.includes("fn verify_pin_value") && !nativeCommands.includes("app_lock_verify"));
   const tauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.conf.json"), "utf8"));
   const windowsTauriConfig = JSON.parse(await readFile(join(root, "src-tauri/tauri.windows.conf.json"), "utf8"));
@@ -352,18 +351,18 @@ async function modelWiring() {
   const windowsResources = windowsTauriConfig.bundle?.resources ?? [];
   check("native runtime build is Windows desktop-only", !tauriConfig.build?.beforeBuildCommand?.includes("build:sidecars") && windowsTauriConfig.build?.beforeBuildCommand?.includes("build:sidecars") && baseResources.every((resource) => windowsResources.includes(resource)) && windowsResources.includes("sidecars/bin/**/*"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
-  check("voice model defaults set", stores.includes('sttModel: ""') && stores.includes('ttsModel: ""'));
+  check("local models are discovered from the app folder", settings.includes("scanSmallModels()") && settings.includes("Auto-select first model"));
   const commands = await readFile(join(root, "src-tauri/src/commands.rs"), "utf8");
   check("Rust passes model to sidecars", commands.includes("model: Option<String>"));
   const stt = await readFile(join(root, "src-tauri/sidecars/stt_server.py"), "utf8");
   check("STT honors model override (argv[1])", stt.includes("sys.argv[1]"));
-  const tts = await readFile(join(root, "src-tauri/sidecars/tts_server.py"), "utf8");
-  check("TTS honors repo override (argv[1])", tts.includes("sys.argv[1]"));
+  const phonon = await readFile(join(root, "sidecars", "phonon-server", "src", "main.rs"), "utf8");
+  check("Phonon honors model override (argv[1])", phonon.includes("args[1]"));
 }
 
 async function modelsDocWiring() {
   const models = await readFile(join(root, "docs/MODELS.md"), "utf8");
-  check("models doc locks voice picks", models.includes("Moonshine streaming only") && models.includes("Kokoro-82M only"));
+  check("models doc locks voice picks", models.includes("Moonshine streaming only") && models.includes("Phonon"));
   check("models doc lists cloud providers only", models.includes("OpenAI") && models.includes("Anthropic") && models.includes("Custom") && !models.includes("ollama pull") && !models.includes("llama3.2"));
   check("models doc states chat-completions contract", models.includes("Provider notes") && models.includes("/chat/completions"));
 }
@@ -487,7 +486,8 @@ async function memorySidecarLive() {
     const redacted = await request("redact", { text: "token=hf_abcdefghijklmnopqrstuvwx" });
     check("memory redacts pasted keys", !redacted.text.includes("hf_abcdefghij"), redacted.text);
     const cleared = await request("clear", {});
-    check("memory clears stored facts", cleared.facts === 0, `facts=${cleared.facts}`);
+    // The file store's clear contract is files_removed (memory_server.py docstring).
+    check("memory clears stored facts", cleared.files_removed >= 1, `files_removed=${cleared.files_removed}`);
   } catch (err) {
     check("memory sidecar stdio RPC", false, String(err));
   } finally {
@@ -509,7 +509,7 @@ async function writePathWiring() {
   const gw = await readFile(join(root, "src/lib/ghostWidget.ts"), "utf8");
   check("ghost renders inline at cursor", gw.includes("cm-ghost-inline") && gw.includes("setGhostEffect") && gw.includes("ghostField"));
   const rs = await readFile(join(root, "src-tauri/src/doc_store.rs"), "utf8");
-  check("saves re-chunk retrieval", rs.includes("refresh_rag_chunks(&req.id)") && rs.includes("refresh_rag_chunks(doc_id)"));
+  check("saves re-chunk retrieval", rs.includes("update_derived_indexes(&req.id, &doc.content, true, &changed_titles)") && rs.includes("self.refresh_rag_chunks(doc_id)"));
   check("deletes purge vectors", rs.includes("DELETE FROM rag_vec WHERE chunk_id NOT IN"));
 }
 
@@ -564,7 +564,7 @@ async function auditBatchWiring() {
   const rsec = await readFile(join(root, "src/lib/readerSections.ts"), "utf8");
   check("section splitter + TTS strip + chunker", rsec.includes("splitSections") && rsec.includes("stripForTts") && rsec.includes("chunkText"));
   const raloud = await readFile(join(root, "src/lib/components/ReadAloudButton.svelte"), "utf8");
-  check("read-aloud section mode", raloud.includes("getSections") && raloud.includes("onSection") && raloud.includes("chunkText"));
+  check("read-aloud section mode", raloud.includes("getSections") && raloud.includes("onSection") && raloud.includes("sentenceChunks"));
   const convert = await readFile(join(root, "src-tauri/src/convert.rs"), "utf8");
   check("export preprocess shared", convert.includes("fn prepare_export") && convert.includes("fn resolve_wikilinks") && convert.includes("fn inline_embeds") && convert.includes("fn inject_frontmatter"));
   check("compile join demotes + caps", convert.includes("fn demote_headings") && convert.includes("fn join_manuscript") && convert.includes("COMPILE_CHAR_CAP"));
@@ -617,7 +617,7 @@ async function auditBatchWiring() {
   check("web speech error reasons", vlib.includes("voiceErrorReason") && vlib.includes("not-allowed"));
   check("browser speech synthesis helpers", vlib.includes("ttsSupported") && vlib.includes("speakBrowserText") && vlib.includes("stopBrowserSpeech") && vlib.includes("browserTtsLocale"));
   const spane = await readFile(join(root, "src/lib/components/SettingsPane.svelte"), "utf8");
-  check("settings voice validation", spane.includes("probePythonPath") && spane.includes("validateSttModel") && spane.includes("sidecarPythonProbe"));
+  check("settings offer local model selection", spane.includes("setting-small-model-name") && spane.includes("refreshLocalModels") && !spane.includes("setting-python-path"));
   check("python probe wired end to end", (await readFile(join(root, "src/lib/api.ts"), "utf8")).includes("sidecarPythonProbe") && (await readFile(join(root, "src/lib/browserBackend.ts"), "utf8")).includes("sidecar_python_probe"));
   const props = await readFile(join(root, "src/lib/components/PropertiesView.svelte"), "utf8");
   check("saved views + calendar", props.includes("saveCurrentView") && props.includes("calendarCells"));
@@ -628,7 +628,10 @@ async function auditBatchWiring() {
 
 async function settingsAreaWiring() {
   const api = await readFile(join(root, "src/lib/api.ts"), "utf8");
-  check("orphaned dashboard commands deleted", !api.includes("dashboardHeatmapData") && !api.includes("dashboardActivityHeatmap") && !api.includes("dashboardWordCountTimeline") && !api.includes("analyticsHeatmapHourly") && !api.includes("analyticsActivityTimeline") && api.includes("dashboardWritingVelocity") && api.includes("dashboardProductivityScore"));
+  // The dashboard migrated (api + commands.rs + store + UsageMemory together):
+  // activity-heatmap/writing-activity/library-stats are the live trio; the
+  // streak-heatmap/writing-velocity/productivity-score trio is retired.
+  check("orphaned dashboard commands deleted", !api.includes("dashboardHeatmapData") && !api.includes("dashboardWordCountTimeline") && !api.includes("analyticsHeatmapHourly") && !api.includes("analyticsActivityTimeline") && !api.includes("dashboardStreakHeatmap") && !api.includes("dashboardWritingVelocity") && !api.includes("dashboardProductivityScore") && api.includes("dashboardActivityHeatmap") && api.includes("dashboardWritingActivity") && api.includes("dashboardLibraryStats"));
   const stores = await readFile(join(root, "src/lib/stores/settings.ts"), "utf8");
   check("dead sync keys deleted", !stores.includes("fileWatcherEnabled") && !stores.includes("conflictBehavior") && stores.includes("validateSettings") && stores.includes("resetSettings"));
   check("retired ollama defaults migrate", stores.includes("migrateRetiredProviders") && (await readFile(join(root, "src/lib/settingsValidate.ts"), "utf8")).includes("RETIRED_MAIN_MODELS"));
@@ -641,7 +644,7 @@ async function settingsAreaWiring() {
   }
   const dash = await readFile(join(root, "src/lib/stores/dashboard.ts"), "utf8");
   const usage = await readFile(join(root, "src/lib/components/UsageMemory.svelte"), "utf8");
-  check("dashboard single-truth store", dash.includes("refreshDashboardStats") && dash.includes("dashboardStreakHeatmap") && usage.includes("stores/dashboard") && !usage.includes("api.getReopenNeverFinish?.()"));
+  check("dashboard single-truth store", dash.includes("refreshDashboardStats") && dash.includes("dashboardActivityHeatmap") && usage.includes("stores/dashboard") && !usage.includes("api.getReopenNeverFinish?.()"));
 }
 
 async function secretsWiring() {

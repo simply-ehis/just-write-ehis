@@ -1,4 +1,6 @@
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
+import { settings } from "$lib/stores/settings";
+import { notifyHiddenAppError } from "$lib/osNotifications";
 
 export type ToastKind = "success" | "error" | "warning" | "info";
 export type BannerKind = "warning" | "error" | "info";
@@ -48,6 +50,10 @@ export function showToast(
     const evict = next.find((x) => x.kind !== "error") ?? next[0];
     return next.filter((x) => x.id !== evict.id);
   });
+
+  if (kind === "error" && get(settings).desktopNotificationsEnabled) {
+    notifyHiddenAppError(message);
+  }
 
   // Errors latch until dismissed — a 3s window is not enough to notice
   // (let alone act on) a failed save. Toast.svelte is click-to-dismiss.

@@ -1,13 +1,12 @@
-"""sidecar-resolve — fail-closed model path checks for stt_server.py /
-tts_server.py: traversal rejected, missing explicit picks error (never
-silent fallback to bundled), empty/legacy still default.
+"""sidecar-resolve — fail-closed model path checks for stt_server.py:
+traversal rejected, missing explicit picks error (never silent fallback to
+bundled), empty/legacy still default.
 
-Loads only the stdlib prefix of each server (constants + resolvers), so
+Loads only the stdlib prefix of the STT server (constants + resolvers), so
 no model weights or native bindings are needed.
 
 Run: python tests/sidecar-resolve.py
 """
-import importlib.util
 import os
 import sys
 import tempfile
@@ -35,11 +34,6 @@ def load_prefix(path, stop_marker):
 
 
 stt = load_prefix(os.path.join(SIDECARS, "stt_server.py"), "def _find_transcribe_cli")
-tts_path = os.path.join(SIDECARS, "tts_server.py")
-tts = load_prefix(tts_path, "def _find(")
-tts_spec = importlib.util.spec_from_file_location("tts_server_full", tts_path)
-tts_full = importlib.util.module_from_spec(tts_spec)
-tts_spec.loader.exec_module(tts_full)
 
 orig_argv = list(sys.argv)
 
@@ -93,34 +87,6 @@ try:
         os.unlink(gguf)
         os.unlink(onnx)
 
-    # ── TTS ──
-    sys.argv = ["tts_server.py", ""]
-    check("tts empty -> vendored", tts["_model_dir"]() == tts["DEFAULT_MODEL_DIR"])
-    sys.argv = ["tts_server.py", "hexgrad/Kokoro-82M"]
-    check("tts legacy -> vendored", tts["_model_dir"]() == tts["DEFAULT_MODEL_DIR"])
-
-    for evil in ["../evil", "..\\evil"]:
-        sys.argv = ["tts_server.py", evil]
-        try:
-            tts["_model_dir"]()
-            check(f"tts traversal rejected ({evil})", False, "resolved instead of raising")
-        except RuntimeError:
-            check(f"tts traversal rejected ({evil})", True)
-
-    sys.argv = ["tts_server.py", "C:/definitely/missing/bundle"]
-    try:
-        tts["_model_dir"]()
-        check("tts missing dir errors", False, "fell back silently")
-    except RuntimeError:
-        check("tts missing dir errors", True)
-
-    with tempfile.TemporaryDirectory() as d:
-        sys.argv = ["tts_server.py", d]
-        check("tts explicit existing dir accepted",
-              tts["_model_dir"]() == os.path.realpath(d))
-        engine = tts_full._TtsEngine()
-        check("tts incomplete bundle not ready", not engine.ready)
-        check("tts incomplete bundle explains missing files", "missing" in (engine.ready_error or ""))
 finally:
     sys.argv = orig_argv
 

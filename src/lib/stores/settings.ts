@@ -42,23 +42,34 @@ export interface AppSettings {
   focusDimStrength: number;
   /** Custom accent override (#rrggbb) — empty means the style's accent. */
   accentOverride: string;
-  iconSet: "phosphor" | "tabler";
   /** Sidebar footer (Auto-sort / New Doc / AI Panel / streak) collapsed. */
   sidebarFooterCollapsed: boolean;
-  streakGoal: number;
   /** Tighter chrome (tabs, breadcrumb, nav) without changing layout. */
   compactMode: boolean;
   autoHideChrome: boolean;
   companionWidgetVisible: boolean;
+  /** @deprecated Retired with the old "window that hosts any tab" widget; kept so older settings files still validate. */
   widgetWorkspace: string;
+  /** @deprecated Retired (the widget no longer collapses to a bubble). */
   widgetCollapsed: boolean;
+  /** @deprecated Retired (no edge docking). */
   widgetDockEdge: "left" | "right" | "top" | "bottom";
+  /** @deprecated Retired (no edge docking). */
   widgetDockOffset: number;
+  /** Which mini widget the companion window shows (see lib/widgets/registry.ts). */
+  widgetKind: "quicknote" | "reader";
+  /** Last window geometry as "x,y,w,h" in logical px; "" = first-run corner. */
+  widgetGeometry: string;
+  /** The Reader widget's own place (it never writes the main Reader's position). */
+  widgetReaderDocId: string;
+  widgetReaderSection: string;
+  widgetReaderSize: number;
   widgetLaunchAtStartup: boolean;
   widgetAutostartPromptShown: boolean;
-  associatedFileExtensions: string[];
 
   fontSize: number;
+  /** Whole-interface zoom, 0.8-1.6 (native webview zoom; desktop only). */
+  uiScale: number;
   lineHeight: number;
   fontFamily: string;
   readerFont: "serif" | "sans" | "mono";
@@ -76,10 +87,8 @@ export interface AppSettings {
 
   smallModelEndpoint: string;
   smallModelName: string;
-  /** llama-server --ctx-size for the bundled small model (takes effect on next sidecar start). */
+  /** llama-server context preset (takes effect on next local model start). */
   smallModelContextLength: number;
-  /** llama.cpp quantization for the bundled LFM 2.5-350M model. One of: q4_k_m (default), q5_k_m, q8_0, q2_k, q3_k_m, q6_k. */
-  smallModelQuantization: "q4_k_m" | "q5_k_m" | "q8_0" | "q2_k" | "q3_k_m" | "q6_k";
   /** Route the AI panel's main slot (chat/composer/structurize) at the small model. */
   useSmallAsMain: boolean;
   mainModelEndpoint: string;
@@ -101,6 +110,7 @@ export interface AppSettings {
   snapshotRetentionDays: number;
 
   androidCaptureMethod: "notification" | "widget" | "share-target";
+  desktopNotificationsEnabled: boolean;
   weeklyTriageReminder: boolean;
   streakReminder: boolean;
   logsStampPlace: boolean;
@@ -138,24 +148,15 @@ export interface AppSettings {
   // App updates (Tauri shell only; browser preview is rebuilt, not updated)
   autoCheckUpdates: boolean;
 
-  // Audio: STT (Moonshine-base GGUF via transcribe.cpp) + TTS (Kokoro v1.0 via sherpa-onnx)
+  // Audio: STT (Moonshine-base GGUF via transcribe.cpp) + TTS (Phonon q8 via Rust sidecar)
   sttEnabled: boolean;
-  /** Paste-to-swap STT model: local .gguf path or models/ filename; empty = bundled default. */
-  sttModel: string;
-  /** Paste-to-swap TTS bundle dir (model.onnx + voices.bin + tokens.txt); empty = vendored default. */
-  ttsModel: string;
   ttsEnabled: boolean;
   ttsVoice: string;
   ttsLangCode: string;
   ttsSpeed: number;
-  ttsChunkSize: number;
-  ttsSplitPattern: string;
-  pythonPath: string;
 
-  // LLM: llama.cpp server (LFM 2.5-350M) for ghost autocomplete
+  // Local llama.cpp model used by ghost autocomplete
   llmEnabled: boolean;
-  /** Paste-to-swap LLM model: local .gguf path or models/ filename; empty = bundled default. */
-  llmModel: string;
   /** How long to keep STT/TTS/LLM loaded after last use.
    *  idle-5min = offload 5 min after last use (default);
    *  session  = offload 30 min after last use (long writing session);
@@ -171,11 +172,10 @@ const defaultSettings: AppSettings = {
   theme: "default",
   themeMode: "light",
   accentOverride: "",
-  iconSet: "phosphor",
   sidebarFooterCollapsed: false,
-  streakGoal: 500,
 
   fontSize: 15,
+  uiScale: 1,
   lineHeight: 1.7,
   fontFamily: "Georgia",
   // Reader prose controls (per-Reader, persisted). Size 16 reproduces the
@@ -197,9 +197,8 @@ const defaultSettings: AppSettings = {
   formatToolbarOpen: false,
 
   smallModelEndpoint: "http://127.0.0.1:8093/v1",
-  smallModelName: "lfm2.5-350m",
-  smallModelContextLength: 8192,
-  smallModelQuantization: "q4_k_m",
+  smallModelName: "",
+  smallModelContextLength: 16384,
   useSmallAsMain: false,
   mainModelEndpoint: "https://api.openai.com/v1",
   mainModelName: "gpt-4o-mini",
@@ -219,6 +218,7 @@ const defaultSettings: AppSettings = {
   snapshotRetentionDays: 30,
 
   androidCaptureMethod: "notification",
+  desktopNotificationsEnabled: false,
   weeklyTriageReminder: true,
   streakReminder: true,
   logsStampPlace: false,
@@ -261,24 +261,22 @@ const defaultSettings: AppSettings = {
   widgetCollapsed: true,
   widgetDockEdge: "right",
   widgetDockOffset: 96,
+  widgetKind: "quicknote",
+  widgetGeometry: "",
+  widgetReaderDocId: "",
+  widgetReaderSection: "",
+  widgetReaderSize: 15,
   widgetLaunchAtStartup: false,
   widgetAutostartPromptShown: false,
-  associatedFileExtensions: ["txt", "md"],
 
   autoCheckUpdates: true,
 
   sttEnabled: true,
-  sttModel: "",
-  ttsModel: "",
   ttsEnabled: true,
-  ttsVoice: "af_heart",
-  ttsLangCode: "a",
+  ttsVoice: "default",
+  ttsLangCode: "en",
   ttsSpeed: 1.0,
-  ttsChunkSize: 150,
-  ttsSplitPattern: "\\n+",
-  pythonPath: "python",
   llmEnabled: true,
-  llmModel: "",
   modelRetention: "idle-5min",
   rhythmHeatmapInStatusBar: false,
 };

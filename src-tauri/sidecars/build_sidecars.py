@@ -12,9 +12,11 @@ OUTPUT = ROOT / "bin"
 VENV = ROOT / ".runtime-build-venv"
 REQUIRED_ASSETS = (
     ROOT / "models" / "moonshine-base-Q8_0.gguf",
-    ROOT / "models" / "kokoro-multi-lang-v1_0" / "voices.bin",
-    ROOT / "models" / "kokoro-multi-lang-v1_0" / "tokens.txt",
-    ROOT / "models" / "kokoro-multi-lang-v1_0" / "espeak-ng-data",
+    ROOT / "models" / "phonon" / "model.q8.gguf",
+    ROOT / "models" / "phonon" / "config.json",
+    ROOT / "models" / "phonon" / "tokenizer.json",
+    ROOT / "models" / "phonon" / "default-voice.safetensors",
+    ROOT / "models" / "phonon" / "voices.jsonl",
     ROOT / "models" / "llama-server.exe",
     ROOT / "models" / "llama.dll",
     ROOT / "models" / "llama-server-impl.dll",
@@ -32,14 +34,17 @@ def validate_assets() -> None:
     if os.name != "nt":
         raise SystemExit("Native sidecars currently support Windows packaging only.")
     missing = [str(path) for path in REQUIRED_ASSETS if not path.exists()]
-    tts_dir = ROOT / "models" / "kokoro-multi-lang-v1_0"
-    if not (tts_dir / "model.int8.onnx").is_file() and not (tts_dir / "model.onnx").is_file():
-        missing.append(str(tts_dir / "model.int8.onnx or model.onnx"))
+    phonon_dir = ROOT / "models" / "phonon"
+    if not (phonon_dir / "voices.jsonl").is_file():
+        missing.append(str(phonon_dir / "voices.jsonl"))
+    voices_dir = phonon_dir / "voices"
+    if not voices_dir.is_dir() or not any(voices_dir.glob("*.safetensors")):
+        missing.append(str(voices_dir / "*.safetensors"))
     if missing:
         raise SystemExit(
             "Missing release assets: "
             + ", ".join(missing)
-            + ". Run fetch_sidecars.py --stt --tts --llm, then retry."
+            + ". Run fetch_sidecars.py --stt --phonon --llm, then retry."
         )
 
 
@@ -78,6 +83,20 @@ def build_one(python: Path, name: str, script: Path, extra: list[str]) -> None:
     shutil.copy2(built, OUTPUT / built.name)
 
 
+def build_rust_sidecar(name: str) -> None:
+    """Build a Rust sidecar crate with cargo --release and copy the exe to OUTPUT."""
+    crate_dir = ROOT / name
+    if not crate_dir.is_dir():
+        raise RuntimeError(f"Rust sidecar crate not found: {crate_dir}")
+    run(["cargo", "build", "--release"], crate_dir)
+    built = crate_dir / "target" / "release" / f"{name}.exe"
+    if not built.is_file():
+        raise RuntimeError(f"cargo build --release did not create {built}")
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(built, OUTPUT / built.name)
+    print(f"[build] Rust sidecar ready: {OUTPUT / built.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
@@ -99,7 +118,7 @@ def main() -> None:
             "--copy-metadata", "transcribe_cpp_native",
         ],
     )
-    build_one(python, "tts-server", ROOT / "tts_server.py", ["--collect-all", "sherpa_onnx"])
+    build_rust_sidecar("phonon-server")
     build_one(python, "memory-server", ROOT / "memory_server.py", ["--add-data", f"{ROOT / 'harness'}{os.pathsep}harness"])
     print(f"Native sidecars ready in {OUTPUT}")
 

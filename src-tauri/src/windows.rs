@@ -42,7 +42,7 @@ impl AutostartLaunch {
     }
 }
 
-pub fn find_text_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
+pub fn find_supported_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
     args.iter()
         .filter(|arg| !arg.starts_with("--"))
         .find_map(|arg| {
@@ -67,7 +67,12 @@ pub fn find_text_file(args: &[String], cwd: &Path) -> Option<PathBuf> {
                 "rs", "go", "java", "c", "cpp", "h", "hpp", "cs", "php", "rb", "swift", "kt",
                 "scala", "sh", "bash", "zsh", "ps1", "bat", "cmd",
             ];
-            text_exts.contains(&extension.as_str()).then_some(candidate)
+            let preview_exts = [
+                "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "docx",
+            ];
+            (text_exts.contains(&extension.as_str())
+                || preview_exts.contains(&extension.as_str()))
+            .then_some(candidate)
         })
 }
 
@@ -80,7 +85,7 @@ mod windows_tests {
         let dir = std::env::temp_dir();
         let probe = dir.join("jwe-probe-notes.md");
         std::fs::write(&probe, "# probe").unwrap();
-        let found = find_text_file(&[probe.to_string_lossy().into_owned()], &dir);
+        let found = find_supported_file(&[probe.to_string_lossy().into_owned()], &dir);
         assert_eq!(found, Some(probe.clone()));
         let _ = std::fs::remove_file(&probe);
     }
@@ -89,7 +94,7 @@ mod windows_tests {
     fn non_text_args_are_ignored() {
         let dir = std::env::temp_dir();
         assert_eq!(
-            find_text_file(&["--widget-autostart".to_string()], &dir),
+            find_supported_file(&["--widget-autostart".to_string()], &dir),
             None
         );
     }
@@ -97,9 +102,9 @@ mod windows_tests {
     #[test]
     fn binaries_and_missing_files_are_ignored() {
         let dir = std::env::temp_dir();
-        assert_eq!(find_text_file(&["app.exe".to_string()], &dir), None);
+        assert_eq!(find_supported_file(&["app.exe".to_string()], &dir), None);
         assert_eq!(
-            find_text_file(&["jwe-no-such-file-xyz.md".to_string()], &dir),
+            find_supported_file(&["jwe-no-such-file-xyz.md".to_string()], &dir),
             None
         );
     }
@@ -109,7 +114,7 @@ mod windows_tests {
         let dir = std::env::temp_dir().join(format!("jwe-rel-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("rel.md"), "# rel").unwrap();
-        let found = find_text_file(&["rel.md".to_string()], &dir);
+        let found = find_supported_file(&["rel.md".to_string()], &dir);
         assert_eq!(found, Some(dir.join("rel.md")));
         let _ = std::fs::remove_dir_all(&dir);
     }

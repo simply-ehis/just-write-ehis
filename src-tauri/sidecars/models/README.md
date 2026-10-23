@@ -6,8 +6,8 @@ Release fetches require the SHA-256 values in `fetch_sidecars.py`; set
 
 ```sh
 python src-tauri/sidecars/fetch_sidecars.py --stt   # moonshine-base GGUF
-python src-tauri/sidecars/fetch_sidecars.py --tts   # kokoro-multi-lang-v1_0 bundle
-python src-tauri/sidecars/fetch_sidecars.py --llm   # llama-server + LFM 2.5-350M GGUF
+python src-tauri/sidecars/fetch_sidecars.py --phonon   # phonon-40m-multilingual
+python src-tauri/sidecars/fetch_sidecars.py --llm   # llama-server only
 ```
 
 Expected layout after fetching:
@@ -15,10 +15,15 @@ Expected layout after fetching:
 ```
 models/
   moonshine-base-Q8_0.gguf
-  kokoro-multi-lang-v1_0/   (model.int8.onnx, voices.bin, tokens.txt, espeak-ng-data/)
+  phonon/   (model.q8.gguf, config.json, tokenizer.json, default-voice.safetensors, voices.jsonl, voices/*.safetensors/)
   llama-server.exe + runtime DLLs
-  lfm2.5-350m-q4_k_m.gguf
 ```
+
+Small LLM weights are not bundled. Place a GGUF directly in the app data
+`models` folder; Settings scans that folder and lets you select the file.
+The Windows resource list includes only the LLM server, STT weight, and TTS
+assets, so a local GGUF in this development folder is not copied into the
+installer.
 
 `build_sidecars.py` packages the Python servers and their native inference
 dependencies under `sidecars/bin/`; model files stay here so one copy is

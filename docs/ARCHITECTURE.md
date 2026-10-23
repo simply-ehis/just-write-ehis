@@ -22,7 +22,7 @@ snapshots, RAG-keyword, dashboards, canvas, export md/txt/html, …).
 Anything needing native binaries (the Typst CLI, updater, file watcher)
 fails in preview with a message saying so — never silently. Voice is the
 exception: preview uses the browser's built-in speech recognition and
-synthesis instead of the desktop Moonshine/Kokoro sidecars.
+synthesis instead of the desktop Moonshine STT / Phonon TTS sidecars.
 
 Rule: **a new Tauri command is not done** until `api.ts` + `browserBackend.ts`
 + `lib.rs` handler registration all exist. `tests/e2e-browser.mjs` asserts
@@ -41,17 +41,26 @@ this statically (api ⊆ backend cases).
 | `docx.rs` | WordprocessingML writer (`zip` + XML, hand-rolled — the `docx` crate pulls a broken transitive dep) |
 | `epub.rs` | EPUB 3 writer (`zip` + `quick-xml`; mimetype STORED first, nav + NCX) |
 | `pdf.rs` | Typst source generation + escaping; invokes the bundled Typst CLI per export |
-| `sidecar.rs` | native-first process managers for memory, Moonshine STT, Kokoro TTS, and llama.cpp LLM; Python scripts are the source/dev fallback |
+| `sidecar.rs` | native-first process managers for memory, Moonshine STT, Phonon TTS, and llama.cpp LLM; Python scripts are the source/dev fallback |
+| `tts_render.rs` | render-ahead TTS: one job → pages of PCM + sample-accurate segment timeline (bounded ~45 s producer, exact pause silence, raw i16le page fetch) |
 | `models.rs` | shared structs (all `#[serde(default)]` for forward compat) |
 
-Hot save path: keystroke → SQLite WAL (crash-safe) → 5s debounce flush to
-the `.md` file on disk → snapshot only on meaningful diff. File watcher +
-atomic saves keep external sync tools (Syncthing etc.) safe.
+Save path: the editor debounces changes, then sends one document save to
+Rust. Rust commits the document row, writes the Markdown file, and returns
+the saved document; a failed file write is reported as a save failure.
+Snapshots are created only for meaningful changes. Entity, backlink, and
+  RAG refreshes are queued on a separate SQLite connection when the derived
+  index worker is available; otherwise they run synchronously as a best-effort
+  fallback, with failures logged. The
+SQLite connection is still mutex-protected, and most IPC commands are still
+synchronous; responsiveness under a large real vault remains a runtime
+measurement. File watcher + atomic saves keep external sync tools
+(Syncthing etc.) safe.
 
 ## Frontend (`src/`)
 
 - `stores/`: `app` (workspace/doc/tabs/panels), `settings` (persisted,
-  localStorage), `lock` (session-only unlocks), `lastPlace` (per-workspace
+  localStorage), `lastPlace` (per-workspace
   restore), `writeBack` (AI→editor pipe), `saveState`, `notifications`.
 - Components are one-workspace-per-file plus shared pieces (`Icon`,
   `CommandPalette`, `TabBar`, `InspectorPanel`, …).
@@ -86,12 +95,12 @@ Secrets (API keys) live in the OS keychain, not localStorage; a boot
 migration strips any legacy `apiKey` from localStorage
 (`stripPersistedSecrets`, `settings.ts`). Files on disk stay plaintext —
 the future encrypted vault (see `TODOS.md`) is what would provide at-rest
-secrecy. The earlier PIN / app-lock session gate and per-document lock were
-removed 2026-10-09 (see `CHANGELOG.md`).
+secrecy. The PIN / app-lock session gate and per-document lock were removed
+2026-10-09 (see `CHANGELOG.md`). There is no session lock in the current app.
 
 ## Companion window
 
-The desktop shell has exactly two windows in one process: `main` and the taskbar-skipped `widget` declared in `tauri.conf.json`. `?widget=1` dynamically mounts `WidgetApp.svelte`, not `App.svelte`; the widget starts as a transparent 56px figure, resizes into a docked panel, and lazy-loads exactly one selected canonical workspace. It has no application sidebar, tab bar, breadcrumb, inspector, command palette, watcher, sidecar, or RAG initializer. Write reuses `EditorPane` in companion mode; the other canonical workspace IDs use their existing lazy workspace components, with Files deep-linking to Library. Both labels are listed in `capabilities/default.json`. See `docs/WIDGET.md` for lifecycle, proof output, and pending native measurements.
+The desktop shell has exactly two windows in one process: `main` and the taskbar-skipped `widget` declared in `tauri.conf.json`. `?widget=1` dynamically mounts `WidgetApp.svelte`, not `App.svelte`. The widget is a resizable frame (280x180 minimum) around ONE mini single-job widget (Quick note or Reader, see `src/lib/widgets/registry.ts`); it never hosts a full workspace, and its ACL is a four-command allowlist. It has no application sidebar, tab bar, inspector, command palette, watcher, sidecar, or RAG initializer. Both labels are listed in `capabilities/default.json`. See `docs/WIDGET.md` for the design, lifecycle and verification.
 
 ## Auto Story Memory
 
@@ -100,8 +109,7 @@ project-scoped evidence keyed to a source scene; `bible_suggestions` holds
 unmatched local-model candidates until the user confirms them. Automatic
 extraction is queued only after a successful document save, runs through the
 managed local llama.cpp `LlmManager` on loopback, and retries silently when
-that model is unavailable. Source and project lock chains are checked before
-any text is sent. The editor lookup is a CodeMirror decoration/hover pass over
+that model is unavailable. The editor lookup is a CodeMirror decoration/hover pass over
 already-loaded fact keys; it never calls a model per hover. Browser preview
 persists the same mention/suggestion records but reports local extraction as
 skipped because the native model is unavailable there.
@@ -114,6 +122,31 @@ Settings/runtime button → `stores/audio.ts` → Tauri command → `sidecar.rs`
 bundle and runtime are usable before its intentional lazy synthesis; LLM
 health means llama.cpp is serving, and the Settings check then performs a
 real completion. Windows `tauri.windows.conf.json` runs `build_sidecars.py` first.
+
+## Read-aloud render pipeline
+
+Read-aloud no longer synthesizes per sentence. The frontend segments the
+snapshot once (`readerSections.splitSegments` — char offsets into the
+source, 200-char cap, sentence/paragraph/section pause classes), then
+starts ONE render job (`tts_render_start`). The Rust `TtsRenderer` loops
+per-sentence synthesis against the Phonon sidecar, inserts pauses as
+generated silence (exactly `ms × 24` samples at 24 kHz), records
+`SegmentTiming` offsets in the same pass that writes the PCM, and emits
+pages (~45–90 s, snapped to paragraph boundaries) as `tts://render-page`
+events; the frontend pulls each page as raw i16le bytes
+(`tts_render_page` — no base64). The producer is bounded: it renders
+until ~45 s beyond the demanded playhead (`tts_render_demand`), flushing
+whatever it holds before blocking so playback is never starved.
+
+`src/lib/tts/player.ts` schedules pages gapless on one AudioContext
+(`start = anchor + (pageStart − anchorSample) / rate`, late pages trimmed
+exactly to the clock) and one ~10 Hz tick maps `ctx.currentTime` →
+`playheadSample` → binary search over the timeline to drive
+`onSentence`/`onSection`, the transport, and progress. If playback meets
+the render frontier it HOLDS on the current sample (context suspend —
+anchor math survives untouched) and resumes when the page lands; it never
+stutters and never calls synthesis mid-sentence. `ReadAloudButton` is
+thin UI over this; the browser preview keeps its speechSynthesis queue.
 
 ## Theming
 
