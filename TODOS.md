@@ -5,17 +5,6 @@
 
 ## In flight (2026-10-21)
 
-- [ ] **Phonon TTS migration (external, in-flight — NOT agent work)**
-  — uncommitted edits appeared 2026-10-23 ~09:52–10:01: `sidecar.rs`
-  resolves `phonon-server.exe` (replacing `tts-server.exe`) and
-  `tts_start`'s Rust param is now `_python_path`. Two consequences:
-  `tests/e2e-browser.mjs` fails 2 pins (bundled-runtime preference +
-  invoke-arg spelling), and `_python_path` is a runtime arg-mismatch
-  (`pythonPath`/`python_path` invoke keys match nothing → `tts_start`
-  will error when read-aloud starts). This reverses the recorded
-  "Phonon — SKIPPED" decision, so it needs the owner's confirmation
-  before anyone builds on it.
-
 - [x] **Verify-and-finish pass** — complete 2026-10-21. All gates green:
   svelte-check 0/0, build green, cargo check warning-free, cargo test
   139/0 (1 ignored), 46/46 direct `tests/*.mjs`, all variant suites,
@@ -26,9 +15,18 @@
   Full accounting: `DELIVERY-REPORT-2026-10-21.md`.
 - [ ] **Read-aloud v2** — plan at
   `artifacts/tts-read-aloud-2026-10-21/TTS-READ-ALOUD-plan.md`:
-  1. **Phonon swap — SKIPPED (owner decision 2026-10-22)**: Kokoro
-     (sherpa-onnx, `tts_server.py`) stays the live TTS engine. No
-     `ptts`/Phonon integration work is planned unless reopened.
+  1. **Phonon swap — DONE (owner reopened + committed 2026-10-23;
+     verified end-to-end, see CHANGELOG)**: `phonon-server.exe` is the
+     live TTS engine; `tts_server.py` remains only as an unbundled
+     transition fallback. Open follow-ups:
+     (a) `tts_start(model)` passes the model NAME but phonon-server
+     treats argv[1] as a model DIR — dormant today (no caller passes
+     `model`), decide a name → dir mapping when multi-model lands;
+     (b) the python fallback is absent from bundle resources, so
+     releases ship exe-only — add `sidecars/tts_server.py` + kokoro
+     weights to resources only if the fallback must actually ship;
+     (c) Windows listen pass on real voices (smoke proves WAV output,
+     not quality) — harness supports it via the listen harness.
   2. **Render-ahead audio pipeline** — **phases 1–2 DONE (2026-10-21)**:
      segmentation with source offsets
      (`readerSections.splitSegments`), Rust `TtsRenderer`

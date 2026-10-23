@@ -1,5 +1,54 @@
 ﻿# Changelog
 
+## Unreleased (Phonon TTS swap — owner pass verified end-to-end)
+
+**The swap (owner commits 6a1aca2/b461a33).** Kokoro/sherpa-onnx is
+replaced by `phonon-server.exe`, a Rust sidecar under
+`src-tauri/sidecars/phonon-server/` speaking the same JSON-lines stdio
+protocol (health/synthesize/stream_*/stop), with boot guard
+`JWE_SIDECAR_TOKEN` (same contract as the Python sidecars; the backend
+already sets it at spawn). `fetch_sidecars.py --phonon` fetches the
+Gradium 31M English q8 checkpoint + the 102-voice catalog.
+
+**Verification pass (2026-10-23) fixed five real defects:**
+1. Voice fetch URL was doubled — `PHONON_VOICE_BASE` ended in
+   `/voices/` while each catalog `filename` already starts with
+   `voices/`, so every voice 404'd; and the first failure aborted the
+   loop, leaving ALL 102 voices missing while the run looked mostly
+   fine. Dest path was likewise nested `voices/voices/`, which the
+   runtime never scans (it looks flat under `voices/`).
+2. `config.json`/`tokenizer.json`/`default-voice.safetensors` all
+   verified against the GGUF's pin key — with real pins every non-GGUF
+   file would fail. Now keyed per artifact, with real SHA-256s for all
+   five core files plus 102 per-voice pins committed as
+   `src-tauri/sidecars/phonon_voice_pins.json`; a fully pinned re-run
+   exits 0 verifying everything.
+3. `default-voice.safetensors` was never registered — it lives in the
+   model root, but only `voices/` was scanned and the catalog doesn't
+   reference it, so bare `synthesize` (no voice) ALWAYS failed with
+   "no voice 'default' registered". `voices.rs` now registers it as
+   "default"; health's `default_voice` falls back to the catalog
+   preference and reports `default`.
+4. The windows bundle resource glob pointed at
+   `../sidecars/models/phonon/**/*` (repo-root — never where fetch
+   writes) → now `sidecars/models/phonon/**/*`.
+5. e2e pins updated: bundled-executable preference now asserts the
+   `phonon-server.exe`-before-`tts_server.py` ordering, and the crate
+   pin follows the relocated `src-tauri/sidecars/phonon-server/` path.
+
+**IPC note.** `tts_start`'s contract comment moved ABOVE the param
+list: the e2e arg-spelling pin captures params up to the first closing
+paren, and comment text inside the list hid `python_path`.
+
+**Smoke (exe over a pipe, both argv[1] model dir and
+`JWE_SIDECARS_DIR` fallback):** boot guard refuses a tokenless spawn;
+ready line; health ok (24 kHz, 205 registered voices, default
+voice = "default"); synthesize with default and named voice (Zoey)
+returns valid WAV; unknown method errors without killing the process;
+EOF exits 0. Gates: cargo 152/0, svelte-check 0/0, build green, e2e
+216/216, tts-timeline 46/46, source suite 359/359, all surface
+suites, assets preflight.
+
 ## Unreleased (read-aloud phase 4: WSOLA speed + pill progress)
 
 **WSOLA speed in the renderer (plan phase 4).** Speed no longer rides on
@@ -30,13 +79,11 @@ input, pause-silence exactness under stretch, and job-speed clamping —
 cargo 152/0. Node: `tests/tts-timeline.mjs` 46/46 (progress units +
 wiring pins on both sides of the command).
 
-NOTE: `tests/e2e-browser.mjs` currently has 2 failures caused by
-EXTERNAL uncommitted working-tree edits (not this phase): `sidecar.rs`
-now resolves `phonon-server.exe` where the pin expects `tts-server.exe`,
-and `tts_start`'s Rust param was renamed `_python_path`, which no invoke
-arg spelling matches (a real runtime arg-mismatch for `tts_start`).
-Left untouched pending the owner's direction on the in-flight Phonon
-migration.
+NOTE (resolved 2026-10-23): the 2 external-edit e2e failures
+(`tts-server.exe` pin + `_python_path` arg spelling) were fixed in
+the Phonon verification pass above; e2e is 216/216.
+
+
 
 Files changed: `src-tauri/src/tts_render.rs` (WSOLA + live speed +
 tests), `src-tauri/src/{commands.rs,lib.rs}` (set_speed),

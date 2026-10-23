@@ -3226,13 +3226,15 @@ pub async fn stt_stream_stop(stt: State<'_, sidecar::SttManager>) -> Result<Stri
 
 // ── TTS: Phonon ──────────────────────────────────────────────
 
+// Param name `python_path` is part of the IPC contract: invoke sends
+// `pythonPath` / `python_path`, and Tauri matches arg names EXACTLY — a
+// differently spelled param silently receives nothing and errors at
+// runtime. The value is unused when phonon-server.exe resolves — Rust
+// binary. Keep this note above the fn: the e2e arg-spelling pin parses
+// the param list, and comment text inside it hides the real params.
 #[tauri::command]
 pub fn tts_start(
     tts: State<'_, sidecar::TtsManager>,
-    // Param name is part of the IPC contract: invoke sends `pythonPath` /
-    // `python_path`, and Tauri matches arg names EXACTLY — a differently
-    // spelled param silently receives nothing and errors at runtime.
-    // The value is unused when phonon-server.exe resolves (Rust binary).
     python_path: String,
     sidecars_dir: String,
     model: Option<String>,
