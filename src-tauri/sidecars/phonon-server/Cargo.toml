@@ -1,0 +1,16 @@
+[package]
+name = "phonon-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ptts = { version = "=0.4.0", default-features = false, features = ["hf"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level = 3
+lto = false
+codegen-units = 4
