@@ -3229,7 +3229,11 @@ pub async fn stt_stream_stop(stt: State<'_, sidecar::SttManager>) -> Result<Stri
 #[tauri::command]
 pub fn tts_start(
     tts: State<'_, sidecar::TtsManager>,
-    _python_path: String,
+    // Param name is part of the IPC contract: invoke sends `pythonPath` /
+    // `python_path`, and Tauri matches arg names EXACTLY — a differently
+    // spelled param silently receives nothing and errors at runtime.
+    // The value is unused when phonon-server.exe resolves (Rust binary).
+    python_path: String,
     sidecars_dir: String,
     model: Option<String>,
 ) -> Result<(), String> {
@@ -3237,7 +3241,7 @@ pub fn tts_start(
     // Phonon is a Rust binary — no Python needed. The dummy "python" return
     // from python_for_sidecar is ignored by TtsManager::start when the exe
     // is found; the Python fallback (tts_server.py) is kept for transition.
-    let _python = python_for_sidecar(&_python_path, &sidecars_dir, "phonon-server.exe")?;
+    let _python = python_for_sidecar(&python_path, &sidecars_dir, "phonon-server.exe")?;
     tts.start(&_python, &sidecars_dir, model.as_deref())
 }
 

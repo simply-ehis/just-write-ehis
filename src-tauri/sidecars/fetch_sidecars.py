@@ -15,6 +15,7 @@ Release fetches refuse unpinned artifacts unless JWE_ALLOW_UNPINNED_SIDECARS=1 i
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -55,9 +56,21 @@ PHONON_31M_EN_Q8 = (
 PHONON_VOICES_JSONL = (
     f"{PHONON_BASE}phonon-voices/resolve/main/voices.jsonl"
 )
-PHONON_VOICE_BASE = (
-    f"{PHONON_BASE}phonon-voices/resolve/main/voices/"
-)
+# Repo root: catalog `filename` values already carry the `voices/` prefix,
+# so joining this base + filename yields the correct HF path.
+PHONON_VOICE_BASE = f"{PHONON_BASE}phonon-voices/resolve/main/"
+
+# Per-voice embedding pins: catalog filename → sha256, generated from a
+# verified fetch. Catalog entries without a pin download unpinned and require
+# JWE_ALLOW_UNPINNED_SIDECARS=1 until pinned (same policy as the SHA256 map).
+PHONON_VOICE_PINS_PATH = HERE / "phonon_voice_pins.json"
+
+
+def _phonon_voice_pins() -> dict:
+    if PHONON_VOICE_PINS_PATH.is_file():
+        with PHONON_VOICE_PINS_PATH.open(encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
 # LLM server. Keep the release pinned; model GGUFs are user-provided.
 LLM_SERVER_URL = (
@@ -90,9 +103,11 @@ SHA256 = {
     "llm_server": "",
     "llm_gguf": "",
     "typst_cli": "19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736",
-    "phonon_31m_q8": "",
-    "phonon_voices_jsonl": "",
-    "phonon_voice": "",  # per-voice, verified individually
+    "phonon_31m_q8": "a7d9aad2cd6dc66473f24a08bc6d2939030ef4d751ef82349361fbef3272dbae",
+    "phonon_31m_config": "b5d0f88353638370d94035b7d73d7d6577c0554d78f8d7ecfd40490aae39ae85",
+    "phonon_31m_tokenizer": "691a00068fa7b989f2f3e5ae5daa2d1a5bb319f2d5360deafcfb19a8bb6e7936",
+    "phonon_31m_default_voice": "dc537478eaadc1a5257fcda2e3501ab81e14c111a5d95a5838f350db2afd0f1a",
+    "phonon_voices_jsonl": "874f34998ce581b94f2b8912aa015639f52b5fd62eba3ba11e1b64dcaed7d802",
 }
 ALLOW_UNPINNED = os.environ.get("JWE_ALLOW_UNPINNED_SIDECARS") == "1"
 
@@ -285,40 +300,62 @@ def fetch_phonon() -> None:
 
     # 2) config.json — needed by ptts checkpoint loader
     config_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/config.json"
-    _download(config_url, model_dir / "config.json", "PHONON-31M-EN-CONFIG", SHA256["phonon_31m_q8"])
+    _download(config_url, model_dir / "config.json", "PHONON-31M-EN-CONFIG", SHA256["phonon_31m_config"])
 
     # 3) tokenizer.json — needed by ptts with `hf` feature
     tok_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/tokenizer.json"
-    _download(tok_url, model_dir / "tokenizer.json", "PHONON-31M-EN-TOK", SHA256["phonon_31m_q8"])
+    _download(tok_url, model_dir / "tokenizer.json", "PHONON-31M-EN-TOK", SHA256["phonon_31m_tokenizer"])
 
     # 4) default-voice.safetensors — auto-discovered as "default" voice
     dv_url = PHONON_31M_EN_Q8.rsplit("/", 1)[0] + "/default-voice.safetensors"
-    _download(dv_url, model_dir / "default-voice.safetensors", "PHONON-31M-EN-DV", SHA256["phonon_31m_q8"])
+    _download(dv_url, model_dir / "default-voice.safetensors", "PHONON-31M-EN-DV", SHA256["phonon_31m_default_voice"])
 
     # 5) voices.jsonl — catalog of available voices
     _download(PHONON_VOICES_JSONL, model_dir / "voices.jsonl", "PHONON-VOICES-JSONL", SHA256["phonon_voices_jsonl"])
 
-    # 6) individual voice embeddings — parse voices.jsonl, download each
-    import json as _json
+    # 6) individual voice embeddings — parse voices.jsonl, download each.
+    #    Catalog filenames carry a `voices/` prefix (the repo path); files
+    #    land flat under models/phonon/voices/, where phonon-server's
+    #    directory scan and voices.jsonl catalog handler both look for them.
+    voice_pins = _phonon_voice_pins()
     voices_dir = model_dir / "voices"
     voices_dir.mkdir(parents=True, exist_ok=True)
-    with (model_dir / "voices.jsonl").open() as vf:
+    failed = []
+    with (model_dir / "voices.jsonl").open(encoding="utf-8") as vf:
         for line in vf:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            entry = _json.loads(line)
+            entry = json.loads(line)
             name = entry.get("name", "")
             filename = entry.get("filename", "")
             if not name or not filename:
                 continue
-            voice_path = voices_dir / filename
+            voice_path = voices_dir / Path(filename).name
             if voice_path.exists():
-                continue
+                # Already fetched: re-verify against the pin when one exists.
+                pin = voice_pins.get(filename, "")
+                if pin and _sha256(voice_path) != pin:
+                    voice_path.unlink()
+                else:
+                    continue
             voice_url = PHONON_VOICE_BASE + filename
-            _download(voice_url, voice_path, f"PHONON-VOICE-{name}", SHA256["phonon_voice"])
+            try:
+                _download(
+                    voice_url,
+                    voice_path,
+                    f"PHONON-VOICE-{name}",
+                    voice_pins.get(filename, ""),
+                )
+            except Exception as e:  # one stale catalog entry must not abort the rest
+                failed.append(f"{name} ({filename}): {e}")
+                print(f"[PHONON-VOICE-{name}] FAILED: {e}", flush=True)
 
-    print(f"[PHONON] {model} ready → {model_dir}", flush=True)
+    if failed:
+        raise RuntimeError(
+            f"{len(failed)} phonon voice(s) failed to fetch:\n  " + "\n  ".join(failed)
+        )
+    print(f"[PHONON] ready → {model_dir}", flush=True)
 
 
 def _extract_zip(archive: Path, dest_dir: Path) -> None:
