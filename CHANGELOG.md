@@ -1,6 +1,8 @@
 ﻿# Changelog
 
-## Unreleased (Phonon model name — directory mapping)
+## 0.2.3 (2026-10-24)
+
+### Phonon model name — directory mapping
 
 **Decision: the model registry key IS the on-disk directory name** — the
 registry already documents "metadata by filename or directory name", so
@@ -23,7 +25,7 @@ e2e 217/217, tts-timeline 51/51, svelte-check 0/0, build, source
 all three launch paths (explicit dir, env default, legacy fallback)
 synthesizes valid WAV and exits 0.
 
-## Unreleased (Phonon TTS swap — owner pass verified end-to-end)
+### Phonon TTS swap — owner pass verified end-to-end
 
 **The swap (owner commits 6a1aca2/b461a33).** Kokoro/sherpa-onnx is
 replaced by `phonon-server.exe`, a Rust sidecar under
@@ -72,7 +74,7 @@ EOF exits 0. Gates: cargo 152/0, svelte-check 0/0, build green, e2e
 216/216, tts-timeline 46/46, source suite 359/359, all surface
 suites, assets preflight.
 
-## Unreleased (read-aloud phase 4: WSOLA speed + pill progress)
+### read-aloud phase 4: WSOLA speed + pill progress
 
 **WSOLA speed in the renderer (plan phase 4).** Speed no longer rides on
 native synthesis: `tts_render.rs` gained a pitch-preserving WSOLA
@@ -115,7 +117,7 @@ tests), `src-tauri/src/{commands.rs,lib.rs}` (set_speed),
 (binding), `src/lib/components/ReadAloudButton.svelte` (shortcut, push,
 pill %), `tests/tts-timeline.mjs`.
 
-## Unreleased (listen-test harness for the render-ahead TTS)
+### listen-test harness for the render-ahead TTS
 
 **Desktop listen-test harness** — a dev overlay for the manual Windows
 listen pass over the render-ahead pipeline (gaps / mid-page skips / speed
@@ -154,7 +156,7 @@ e2e-browser all pass (fixed the icon pin — harness used `close`, the map
 calls it `x`), affected suites (shell-nav, ws-toggles, onboard-flow, tabs,
 lazy, map, theme-sweep) green. No Rust changes.
 
-## Unreleased (desktop notifications wired, Node Map fixed)
+### desktop notifications wired, Node Map fixed
 
 **Two desktop notification events (owner decision: "those 2 first").**
 `tauri-plugin-notification` is registered (Rust plugin + `notification:default`
@@ -225,7 +227,7 @@ Tests: svelte-check 0/0, build green, cargo check warning-free, cargo test
 146/0 (1 ignored), 49/49 direct `tests/*.mjs` + all 4 variant suites,
 smoke 3/3, memory-files ALL PASS, test:assets OK.
 
-## Unreleased (sidecar console silenced, logs visible)
+### sidecar console silenced, logs visible
 
 **Visible terminal on model load eliminated.** Every sidecar spawn (LLM, STT,
 TTS, memory, typst, python probe) now uses `CREATE_NO_WINDOW` on Windows, so
@@ -250,7 +252,7 @@ handle.
 Files changed: `src-tauri/src/procutil.rs` (new), `sidecar.rs`, `ipc.rs`,
 `lib.rs`, `commands.rs`.
 
-## Unreleased (bundled LLM reached over a socket nobody was listening on)
+### bundled LLM reached over a socket nobody was listening on
 
 Writers saw `llm socket connect failed: ... (os error 10061)` when a feature
 routed to the bundled LLM. That model does not bind TCP: `llama-server` sits on
@@ -270,7 +272,7 @@ the small slot when the local LLM fails" - lands on the same server that had
 just refused the request whenever the small slot is left on its default, so a
 failed (or switched-off) local model guaranteed a second raw error.
 
-### Fixed
+#### Fixed
 - **Sentinel-routed requests ensure readiness first.** All four backend commands
   call `LlmManager::ensure_ready()`, which starts the sidecar when it is down,
   polls until `/health` reports ok (30s cap), fails fast if the child dies, and
@@ -289,7 +291,7 @@ failed (or switched-off) local model guaranteed a second raw error.
 - **`LlmManager::start()` is idempotent** - a second start no longer unlinks the
   socket a live `llama-server` is already bound to.
 
-### Tests
+#### Tests
 - `tests/ghost-routing.mjs` (new, wired into `test:source`) drives the real
   module graph against a recording `api` stub: the circular fallback reaches no
   backend, a failed local start reaches neither backend, and a remote small slot
@@ -298,7 +300,7 @@ failed (or switched-off) local model guaranteed a second raw error.
   that `commands.rs` still recognises the same two host literals.
 - Two Rust tests pin the friendly-error mapping and its pass-through case.
 
-## Unreleased (companion widget can now host every workspace)
+### companion widget can now host every workspace
 
 The widget window's ACL and its workspace picker disagreed.
 `SettingsPane` offered all 12 workspaces for "Widget workspace", but
@@ -312,7 +314,7 @@ Measured against the real `api.ts` mappings before the fix: novel denied 20 of
 23 commands, reader 7 of 8, script 7 of 8, canvas 6 of 8, and `home` — the
 fallback value for an unrecognized setting — 9 of 11.
 
-### Changed
+#### Changed
 - **`permissions/widget.toml` now carries 162 of the 174 app commands** — the
   same surface as `main`, minus 12 credential and whole-vault admin commands:
   `secret_get`/`secret_set`, the five `backup_*`, both `vault_rename_*`,
@@ -324,7 +326,7 @@ fallback value for an unrecognized setting — 9 of 11.
   `sidecars_dir` *are* granted — they look privileged but are reachable from
   workspaces (FileBrowser, read-aloud audio).
 
-### Tests
+#### Tests
 - `widget-invariants.mjs` now asserts the widget carries exactly main's
   workspace surface minus the exclusion list, as an **exact** match rather than
   a subset: missing silently breaks a workspace, and extra re-opens the surface
@@ -336,7 +338,7 @@ fallback value for an unrecognized setting — 9 of 11.
 Gates: `cargo test --release --lib` 136 passed, `npm run check` 0/0, 16/16 JS
 suites, NSIS build exit 0.
 
-## Unreleased (production-readiness audit: security fix + four red suites cleared)
+### production-readiness audit: security fix + four red suites cleared
 
 Deep audit of the desktop app for release blockers. One real Rust
 security defect was found and fixed; the rest were test-harness and
@@ -346,7 +348,7 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
 `test:reader`, `test:readersec`, `test:mobile`, `test:ghost`,
 `test:writeback`, `test:audiostop`, and `test:aipanel` suites pass.
 
-### Fixed
+#### Fixed
 - **Security: backup restore/delete accepted a path escape from the
   renderer** (`doc_store/backups.rs`). `backup_restore` and `backup_delete`
   joined the caller's `backup_name` straight onto the backups dir, and
@@ -379,7 +381,7 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   implement. The suites now mirror the real WebView instead of throwing
   on the first scroll/stop call.
 
-### Corrected
+#### Corrected
 - **Migration failure is not silent.** The audit listed "silent setup failure"
   in `lib.rs`. Verified against the code: `initialize()` failing sets read-only
   and `lib.rs` logs it, and every write then returns a clear error that the
@@ -395,14 +397,14 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   (`native_runtime_available`). `--typst` is a valid flag and fetches exactly
   what the build needs. No change made.
 
-### Changed
+#### Changed
 - **PWA theme colors now match the shipped brand.**
   `public/manifest.webmanifest` still carried the pre-rebrand dark
   `#1B1A15` while `index.html` uses the light paper `#FAF9F6` (light is
   the default mode). Both `background_color` and `theme_color` are now
   `#FAF9F6`, and `test:mobile` asserts the value against `index.html`.
 
-### Fixed (second pass — audit follow-ups)
+#### Fixed (second pass — audit follow-ups)
 - **A failed migration no longer leaves its transaction open.**
   `database.rs` wrapped the migration in `BEGIN`/`COMMIT` and relied on a
   comment claiming SQLite would roll back on failure. It does not: a failed
@@ -467,7 +469,7 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   shows real figures (documents, total words, today, day streak); only the
   unshipped promise went.
 
-### Known-open (release blockers, need a maintainer decision — not code)
+#### Known-open (release blockers, need a maintainer decision — not code)
 - **Updater key rotation will brick self-update for every existing install.**
   Verified from the published signature for
   `Just Write ehis_0.2.1_x64-setup.exe` (timestamp 2026-09-27 09:31 UTC):
@@ -483,6 +485,10 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   back to normal. Requires the old private key — if it was deleted, the only
   remedy is a manual reinstall. Documented in `docs/UPDATES.md`
   ("Rotating the signing key").
+  **Resolved in 0.2.3 (2026-10-24):** shipped as the bridge release —
+  signed with `1C2875FB2CC4040E`, binary carrying `3FF086625EED8646`, so
+  every install in the field can update and trusts the new key from then
+  on. Releases after 0.2.3 sign with `3FF086625EED8646` as usual.
 - **Browser-global dialogs: hardened, runtime behaviour still unverified.**
   `widgetAutostart.ts` no longer burns its one-shot prompt on an unanswered
   `confirm`, and `importFile.ts` reports a locked-PDF failure honestly, so
@@ -493,7 +499,7 @@ and the full `test:source`, `test:themes`, `test:smoke`, `test:e2e`,
   these was never checked on a real build. If they misbehave, move both to the
   dialog plugin or in-app UI.
 
-## Unreleased (UX polish: trust bugs + Capture discoverability + voice, plan filed)
+### UX polish: trust bugs + Capture discoverability + voice, plan filed
 
 Plan: `docs/PLANS/2026-10-09-ux-polish.md` (Phases 1–7; Phases 1–6 are
 DONE). Gates for Phases 1–3: svelte-check 0/0, vite build clean,
@@ -504,7 +510,7 @@ settings-validate all pass. Phase 4 gates all green; the only failure
 unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
 (all 12 items) gates all green.
 
-### Changed
+#### Changed
 - **Inbox is now labeled Capture** (workspace id stays `inbox` — no data
   migration). Sidebar, palette ("Open Capture" / "Quick Capture
   (Capture)"), mobile More menu, Home labels, PropertiesView filter,
@@ -516,7 +522,7 @@ unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
   workspace now). It keeps its untriaged-count badge in the Capture nav
   group alongside Logs. Onboarding default `hiddenIds` is `["canvas"]`.
 
-### Fixed
+#### Fixed
 - **Palette Quick Capture focuses the capture box** instead of creating
   an orphan "Untitled" doc in the inbox (was silently wrong; now matches
   the tray/status-bar behavior via `sendToCapture`).
@@ -612,7 +618,7 @@ unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
   skill-nudge strip along with the sidebar, tab bar and breadcrumbs, so
   it really is editor-only.
 
-### AI chat panel (Phase 5)
+#### AI chat panel (Phase 5)
 - **Chat follows the stream only when you're already at the bottom.**
   Auto-scroll used to yank you down mid-read; it now tracks a
   `stickToBottom` flag and shows a floating "jump to latest" button when
@@ -646,7 +652,7 @@ unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
   over 30 sequential IPC calls (5.10).
 - **New `arrow-down` icon** for the scroll-to-bottom button.
 
-### Reader, Home, StatusBar, auto-actions (Phase 6)
+#### Reader, Home, StatusBar, auto-actions (Phase 6)
 - **Reader gets a table of contents and live progress** (6.1): sections
   (already used for TTS) now power a Contents dropdown with click-to-jump
   and a live "% read" chip. Keyboard scrolling added (arrows, Page Up/Down,
@@ -681,14 +687,14 @@ unrelated to these changes. Phase 5 keeps the same suite green. Phase 6
   "Based on your activity in Novel Studio"), has a dismiss button, and the
   section has a refresh button to regenerate suggestions.
 
-## Unreleased (sidecar slice 4: zero TCP ports + single-flight ensure)
+### sidecar slice 4: zero TCP ports + single-flight ensure
 
 Continuation of the user-approved sidecar lifecycle redesign (2026-10-09).
 Verified: `cargo check` clean, `cargo test --lib` 132 passed (1 ignored),
 svelte-check 0/0, all three prebuilt exes rebuilt (`build_sidecars.py`) and
 smoke-tested over real pipes, no TCP listeners on 8090–8093.
 
-### Changed
+#### Changed
 - **No sidecar binds a TCP port anymore.** STT/TTS/memory speak
   newline-delimited JSON over their own stdin/stdout pipes
   (`IpcSidecar`, `src-tauri/src/ipc.rs`): request `{"id","method","params"}`
@@ -758,18 +764,18 @@ smoke-tested over real pipes, no TCP listeners on 8090–8093.
   reading/focus-mode selectors, MarkdownViewer border rule). Word count
   stays in the StatusBar.
 
-### Fixed
+#### Fixed
 - **`stop_reaps_child` flake under parallel test load.** `terminate_child`
   (`procutil.rs`) now treats "taskkill failed but child already exited" as
   success — Windows taskkill races (exit 255/128) when the process dies
   between spawn and taskkill's PID lookup. Previously this surfaced as a
   spurious `Err` in `ManagedSidecar::stop`.
 
-### Added
+#### Added
 - `IpcSidecar` + `SockClient` unit tests (`ipc.rs`): request-without-start
   errors, dechunk reassembly.
 
-### Removed
+#### Removed
 - **PIN / app-lock subsystem (full scope, user-directed 2026-10-09).** The
   app-launch PIN gate and per-document locking are gone. Frontend: deleted
   `lock.ts` + `LockScreen.svelte`; dropped every lock branch from `App.svelte`,
@@ -789,13 +795,13 @@ smoke-tested over real pipes, no TCP listeners on 8090–8093.
   Verified: `cargo test --lib` 132 passed, `svelte-check` 0/0, e2e/memory
   stdio block green.
 
-## Unreleased (sidecar slice 4, part G: spawn fix)
+### sidecar slice 4, part G: spawn fix
 
 First slice of the user-approved sidecar lifecycle redesign (2026-10-09):
 kill the "start every sidecar" dead end, kill console flashes. Verified
 `cargo check` clean, `cargo test --lib` 134 passed (3 new), `svelte-check` 0/0.
 
-### Fixed
+#### Fixed
 - **Every dev-side sidecar start failed closed.** The frontend resolved the
   sidecars dir as `<resourceDir>/sidecars`, but in dev runs Tauri never
   copies sidecars there — the path didn't exist, so `require_sidecar_paths`
@@ -818,13 +824,13 @@ kill the "start every sidecar" dead end, kill console flashes. Verified
   netstat/tasklist port-reclaim sites left as-is — that whole path is
   deleted by the upcoming no-port transport swap.
 
-## Unreleased (audit pass: UTF-8 panics, vault confinement, locked-doc leak)
+### audit pass: UTF-8 panics, vault confinement, locked-doc leak
 
 Found by a four-lens repo audit; each critical claim re-verified against source
 before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` exit 0).
 **The Rust changes in this section are not yet compiled or tested** â€” see Verification.
 
-### Fixed
+#### Fixed
 - **Panic on any non-ASCII title.** `sanitize_filename` guarded with `result.len() > 64`
   (bytes) then called `String::truncate(64)`, which panics when byte 64 lands inside a
   multi-byte character. 22 CJK chars is 66 bytes, so a Novel Studio / Projects / Script
@@ -867,12 +873,12 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   so `api.appBootReady()` resolved `false` and the gate burned its entire 8 s budget on
   every preview load. Mirrored to `true` (no Rust `setup` to race in the preview).
 
-### Removed
+#### Removed
 - `src/lib/components/SyncManager.svelte` â€” 275 lines, compiled into every bundle, never
   mounted, and absent from `BODY.md`. The exact "built but silently unwired" failure
   Body-anatomy exists to catch.
 
-### Fixed (credential exfiltration + arbitrary read)
+#### Fixed (credential exfiltration + arbitrary read)
 - **`provider_probe` was a renderer-directed exfiltration primitive.** The endpoint *and*
   the API key both came from the renderer, and the code explicitly declined private-IP
   gating. Since `secret_get("apiKey")` returns the stored key, a compromised webview could
@@ -893,7 +899,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   There was no legitimate caller that supplied a path (`nativeLaunch.ts` always fed it the
   backend's own pending file), so the parameter is gone rather than merely validated.
 
-### Fixed (sidecar authentication)
+#### Fixed (sidecar authentication)
 - **STT, TTS and LLM loopback sidecars had no authentication at all.** Only the memory
   sidecar minted a per-launch token (`JWE_MEMORY_TOKEN` / `X-JWE-Memory-Token`); the other
   three accepted any caller. Loopback is not a trust boundary â€” any process running as any
@@ -918,7 +924,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   endpoint (`localhost:11434`, `RETIRED_MAIN_ENDPOINT` in `settingsValidate.ts`) is
   deliberately *not* re-allowed.
 
-### Changed
+#### Changed
 - **CodeMirror removed from the startup critical path: 1065 KB â†’ 349 KB (-67%),
   16 chunks â†’ 8.** `App.svelte` statically imported `EditorPane`, and because a
   static import's whole dependency closure must resolve before the importing
@@ -938,7 +944,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   `ghost`, `editorFocus`), which load on first use. `test:smoke` shell-interactive
   time at 1280 px improved from ~572 ms to ~518 ms.
 
-### Fixed (correctness + performance, round 2)
+#### Fixed (correctness + performance, round 2)
 - **`fs_read_file` had no size cap** while `fs_write_file`, `attachment_save` and
   `open_external_file` all refused anything over 25 MB â€” so one path could force an arbitrarily
   large allocation inside the vault. The limit is now a named `MAX_TEXT_BYTES` constant shared
@@ -967,7 +973,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
     divergence; they are identical (2000 / 60000 / 5). The parity test now asserts that rather
     than leaving it as folklore â€” verified, not assumed.
 
-### Performance
+#### Performance
 - **`VACUUM INTO` no longer holds the app's only DB connection.** `backup_create` copied the
   whole database while holding the single connection's mutex, stalling every concurrent
   command (autosave, search, RAG) for the duration â€” and it ran on the boot path. It now runs on
@@ -988,7 +994,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   10), each walking the b-tree again, with the connection mutex held throughout. Now a single
   `IN (â€¦)` statement with the per-hit distance re-attached; ordering and scoring unchanged.
 
-### Tests
+#### Tests
 - `tests/backend-parity.mjs` (`npm run test:parity`) â€” pins the TypeScript mirror to the
   **Rust** contract (Rust owns publishing/export) across `slugify`, `markdownToText`, the embed
   step, pass ordering, display-text selection and the PIN constants. Falsifiable: it fails
@@ -1030,7 +1036,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   `ai_generate_stream` is an enumerated, comment-justified exemption (streaming cannot be
   mirrored into localStorage), not an open-ended allowance.
 
-### Verification
+#### Verification
 - `npm run check`: 0 errors, 0 warnings. `npm run test:source`: exit 0.
 - `npm run test:smoke` (1280 / 390 / 390-dirty): all PASS, **0 console errors and
   0 warnings** in every viewport. `npm run test:e2e`: all checks passed, exit 0
@@ -1070,7 +1076,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
      traversing input is pinned separately (`..-..-..-x`) as the only shape that reaches
      the `parts.len() >= 3` directory join.
 
-### Known-open (from the same audit, not yet addressed)
+#### Known-open (from the same audit, not yet addressed)
 - `doc_store.rs` is ~4500 lines; `database.rs`, `models.rs` and `lib.rs` still have **no**
     tests of their own. 21 of 280 `api` methods have no callers, each dragging ~4 parallel
     list entries with it (`scriptTimeline*` is a fully-wired dead feature). `BODY.md`
@@ -1091,9 +1097,9 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
     Settings → About describes something the app deliberately avoids, and pressing the button
     stalls concurrent work.
 
-## Unreleased (desktop shell: ghost window, boot race, ACL parity)
+### desktop shell: ghost window, boot race, ACL parity
 
-### Fixed
+#### Fixed
 - **Ghost window â€” service worker bricked the embedded shell.** `public/sw.js` used a
   hardcoded cache name (`just-write-ehis-v2`) that was never bumped, and its `fetch`
   handler was cache-first for same-origin GETs including the HTML document. After an
@@ -1136,7 +1142,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   `font-src` now allows `data:`. The browser build has no CSP, which is why
   `npm run test:smoke`'s zero-console-error bar never caught it.
 
-### Added
+#### Added
 - `tests/ghost-window-guard.mjs` (`npm run test:ghostwindow`) â€” asserts the desktop
   shell can never register a service worker, that the worker is versioned and
   network-first for documents, and that the Tauri branch unregisters and clears caches.
@@ -1154,7 +1160,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   `base-uri 'self'` so the fix cannot be made by blanket loosening.
 - `app_boot_ready` command plus `api.appBootReady()`, granted to the main window.
 
-### Verification
+#### Verification
 - Confirmed against a running release binary before `src-tauri/target` was cleared:
   main window `visible: true` with title `Just Write ehis`; frontend interactive;
   zero service-worker registrations and zero caches in the desktop shell; TTS `ok` on
@@ -1172,21 +1178,21 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
   a running app. `src-tauri/target` was cleared at the user's request, so both await the
   next build.
 
-## Unreleased (2026-09-25: settings, native models, and PIN repair)
+### 2026-09-25: settings, native models, and PIN repair
 
-### Changed
+#### Changed
 - Editor typography is shared from first paint through CodeMirror prose and Script editing, with bundled mono fonts and validated numeric settings.
 - STT/TTS/LLM health now reflects process readiness, lazy TTS model load, real LLM completion, bounded polling, cleanup after failure, and Settings runtime tests.
 - Release builds preflight model assets and package native STT/TTS/memory runtimes with PyInstaller; Rust prefers packaged executables, rejects untrusted renderer-supplied roots, and restricts development fallback interpreters to PATH command names.
 - App/document locking defaults off, requires confirmed PIN setup, fails closed on unknown keychain state, gates the main and widget shells, rejects empty-PIN verification, and adds session backoff/removal paths. AI memory loopback calls use a per-launch token.
 
-### Verification
+#### Verification
 - `npm run check`, `npm run test:source`, `npm run test:assets`, `npm run test:resolve`, `npm run test:widget`, `npm run test:widget-proof`, and `npm run test:e2e` pass.
 - `npm run test:onboard` reports an explicit `SKIP` until a fresh frontend bundle exists; no frontend, PyInstaller, Tauri, or installer build was run.
 
-## Unreleased (Area 8: export fidelity + pandoc bundle)
+### Area 8: export fidelity + pandoc bundle
 
-### Changed
+#### Changed
 - **Shared export preprocess** (convert.rs, used by convert_run + compile_run): `![[embeds]]` inlined (missing/locked â†’ note), `[[links]]` â†’ display text (standalone files, documented), frontmatter YAML block + title default, `.attachments/` staged into the pandoc tempdir with `--resource-path` (built-in HTML keeps `<img>` + vault note)
 - **Compile join**: per-doc `# Title` + content demoted one level (no collisions), `---` separators, 5M-char cap refusing with zip-of-chapters guidance
 - **Pandoc decision: bundle** (signed off). 3.11 measured 41.8 MB download / **233.6 MB exe** â€” budget ~90â€“120 MB installer, not 30â€“50; binary git-ignored with fetch docs, `externalBin` registered, `convert_status.bundled` distinguishes sidecar vs PATH
@@ -1194,13 +1200,13 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **batchExport**: 4-way `mapLimit` (same shape as chapter batches), progress, cancel, streamed DEFLATE zip, attachments bundled via binary-safe `attachment_read` (dedupe helper exported + tested)
 - **Publish: Rust wins** â€” TS twin deleted (regex markdown, raw customJs). Rust now honors customCss/customJs (breakout-neutralized), inlines images as data URIs (2 MB cap, counted), single-file scope documented
 
-### Tests
+#### Tests
 - `cargo test convert_`: join/demote, slugify, frontmatter, wikilinks, embeds, attachments, preprocess order, bundled detection (8 passed)
 - `tests/export-batch.mjs` (12): dedupe, bounded concurrency, 20-tab unique zip + bundled attachments, no-pandoc friendly failure, cancel
 
-## Unreleased (Area 7: Reader structure + controls)
+### Area 7: Reader structure + controls
 
-### Changed
+#### Changed
 - **Reading controls**: one compact row (serif/sans/mono, AÂ± 12â€“24 with reset-to-base, narrow/comfortable/wide, app/light/sepia/dark) persisted per-Reader (`readerFont/readerSize/readerMeasure/readerTheme`, size 16 default reproduces today's look)
 - **Rendering honesty**: stored bodies render through the shared escape-first markdownâ†’HTML path (headings/lists/quotes are real structure now, not literal `#`); bookparse emits `#`/`- `/`| ` structure and `![alt](dropped-image)` markers; only that exact target renders a captioned placeholder (transclude/export behavior unchanged); transclude islands pass through untouched
 - **Position that survives reflow**: heading-id + intra-section ratio anchors in frontmatter (ratio persisted as before for back-compat), restored after `document.fonts.ready`; library cards gain % progress bars + cover slot (EPUB art saved via attachment on import, kind badge when empty)
@@ -1208,14 +1214,14 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **ONE ReaderProse** component (typography/theme/measure + native content-visibility windowing + progressive 12+8 section append). MarkdownViewer stays CodeMirror: it is an editable raw-file surface with save â€” converging it would delete editing. EditorPane reading mode untouched for the same reason
 - Mobile: toolbar + controls wrap at 480px, content padding scales
 
-### Tests
+#### Tests
 - `tests/reader-sections.mjs` (24): splitting/islands, TTS strip, chunk bounds, anchor math, markdown structure, image-target scoping
 - `tests/reader-surface.mjs` (15): seeded book â†’ sections/cards/progress/cover-slot, controls live-switch, read-aloud entry
 - `tests/audio-stop.mjs` (6): stop-mid-decode resolves with no tail, live stop halts source, normal path intact
 
-## Unreleased (Area 6: voice sidecar lifecycle)
+### Area 6: voice sidecar lifecycle
 
-### Changed
+#### Changed
 - **One managed child owner**: `ManagedSidecar{port}` in sidecar.rs serves all 5 managers â€” dead handles reaped + respawned (never early-Ok on a corpse), stop() is kill()+wait() (no zombies), Drop kills best-effort so children die with the app, stale port holders reclaimed (orphan sidecar killed + restarted, foreign holders fail closed with a typed error)
 - **No indefinite hangs**: every sidecar reqwest client carries a timeout (30s default, 180s transcribe/synthesize/LLM); empty LLM/memory content is a real error, not `""`
 - **Startup without races**: one `ensureSidecar()` + `pollUntilHealthy()` (500ms/15s, "Starting Moonshineâ€¦ Ns" progress) replaces the fixed 500ms/1s sleeps in STT/TTS/LLM/memory; LLM cold load awaits readiness so ghost can't cloud-fallback on first run; Mic/TTS buttons gate on model_loaded only after a probe (never disabled cold) with the fetch hint wired
@@ -1223,13 +1229,13 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **TTS stop actually stops**: live source handle with stop()+disconnect() + mid-decode generation guard (decode caveat documented); ReadAloudButton gains a real loading state; MicButton offers one-tap browser dictation on sidecar failure (explicit tap = consent, never auto-switch â€” panel holds no position either way)
 - **Mobile/voice**: 44px mic/TTS targets under 480px; Web Speech errors surface one-line reasons (not-allowed/no-speech/network)
 
-### Tests
+#### Tests
 - `cargo test managed_`: invalid spawn, foreign-port fail-closed, dead-handle respawn, stop-reaps (4 passed)
 - `tests/sidecar-validate.mjs` (18), `tests/ensure-poll.mjs` (9: flaky-health boot, cap, short-circuit, failure), `tests/sidecar-resolve.py` (16 against the real server code)
 
-## Unreleased (Area 5: AI core dedupe + hardening)
+### Area 5: AI core dedupe + hardening
 
-### Changed
+#### Changed
 - **Slot duplication deleted**: one `resolveSlot()` in commands.rs (was Ã—3 endpoint/model pairs), one `post_chat_completions()` for ai_generate/structurize, one `guardRate()` + shared `friendlyEndpointError()` via `src/lib/aiRequest.ts` (was Ã—3 copies each in AiPanel), providerTest.ts confirmed as the single `/models` probe (Settings + panel mount)
 - **Silent failures fixed**: ai_generate/structurize check HTTP status like the stream path (401/403 key, 429 rate, 408 timeout) with one 429/503 retry + backoff, never `""` on empty choices; ghost failures record to a `ghostStatus` store (surfaced in the panel's Ghost tab) instead of warnâ†’null; RAG/memory shortfalls show a one-line notice in the context chip; structurize remote-fallback warns with reason; `sidecar_start("")` is a typed error at the Rust boundary
 - **Ghost disambiguated**: GhostPanelâ†’DocForkPanel, GhostBadgeâ†’ForkBadge (fork UI, not autocomplete); Ghost tab is live (enable toggle, small-slot probe with latency, last-suggestion status, routing note); routing enforced â€” ghost reads local :8093 if enabled else small slot, callers pass workspace only
@@ -1237,14 +1243,14 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **Panel UX**: privacy lock badge on private workspaces; Replace always confirms (Insert-instead one click away); write-back bar keyboard/touch reachable (was hover-only) and hidden on Error/Locked messages; writeBack is a FIFO queue (rapid clicks no longer drop events); Thinkingâ€¦ shows elapsed/total per path timeouts; mobile header wraps â‰¤480px, sheet 88vh, action bars visible on touch
 - **Small model as first-class**: `smallModelContextLength` (llama-server ctx, applies on restart) + `useSmallAsMain` route chat/Composer/Structurize at lfm2.5-350m, with Settings controls
 
-### Tests
+#### Tests
 - `cargo test ai_slot`: resolveSlot defaults/blanks/explicit + status map (4 passed)
 - `tests/ai-request-unit.mjs` (19), `tests/writeback-queue.mjs` (8), `tests/ai-error-probe.mjs` (dead-endpoint reject friendly + structurize local fallback)
 - e2e anchors updated to the new contracts (slot routing, fork rename, confirm, badge, countdown, ctx setting, Rust hardening)
 
-## Unreleased (Area 4: brutalist + glass as real themes)
+### Area 4: brutalist + glass as real themes
 
-### Changed
+#### Changed
 - **Brutalist is its own palette now** (was byte-identical to dark): hazard theme â€” near-black concrete `#100F0D`, safety-amber `#FFB000` accent, 0 radius + hard ink shadows via tokens (not overrides), amber selection/focus, per-theme CodeMirror hazard editor
 - **Glass glows**: luminous mint accent `#A9E8C6`, `rgba(143,199,169,0.3)` selection, `--accent-glow` on active nav/tabs/primary buttons, frosted blur extended to palette/modals/dialogs, swollen radius scale via tokens, translucent mint CodeMirror editor
 - **Token gaps closed**: `--surface-elevated`, `--accent-on`, `--accent-semantic-yellow` defined in all 4 themes + system fallback; fallback gains `--ws-inbox/files/properties`; `--danger` aliased to `--error`; light `--ink-muted` darkened to `#5F5C50` for 4.5:1 small-text contrast
@@ -1252,12 +1258,12 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **Kept fixed deliberately** (verified, not overlooked): ConflictBanner amber (fixed bg carries contrast in every theme â€” tokenizing would break it), recording-red/TTS-blue whites (4.5+/5.2:1 on fixed brand bgs), PDF page white (document fidelity), canvas card hues + NodeMap dots (user/data identity colors), streak heat cells (GitHub-style convention)
 - Decision: keep all 4 themes (signed off); no in-repo "3 themes" text exists (external spec holds that)
 
-### Tests
+#### Tests
 - `tests/theme-sweep.mjs` extended (50 checks): per-theme token contract, brutalist/glass distinctness, WCAG contrast text-on-bg + on-accent-on-accent â‰¥ 4.5:1 (all pass with margin), editor-palette parity with app.css, mounts under all 4 themes
 
-## Unreleased (Area 3: app-shell navigation)
+### Area 3: app-shell navigation
 
-### Changed
+#### Changed
 - **One grouping source**: `src/lib/workspaceGroups.ts` (Create/Capture/Organize/Explore) now drives both the desktop sidebar headers and the mobile More menu â€” they can't drift apart again. Sidebar keeps its drag-reorder, recency auto-sort, pinned Home, and inbox/canvas/files hide-list; only the group definition moved
 - **Mobile More menu grouped**: flat 15-icon grid replaced by Create/Capture/Organize/Explore/Tools sections; Craft/Stats/Skills duplicate entries removed (single Settings â€” all three were Settings tabs); mobile nav visits now feed recency like desktop
 - **Home promoted to top** (signed off: Home only): persistent Home button at the start of the BreadcrumbBar; sidebar keeps its pinned Home
@@ -1265,25 +1271,25 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - Removed stale `"craft"` from `lockCoveredWorkspaces` (redirects to Settings on the same tick, never a live workspace)
 - Desktop TabBar + BreadcrumbBar stay separate (signed off); typing-focus auto-collapse already handles the crowded-while-writing case
 
-### Tests
+#### Tests
 - `tests/shell-nav.mjs` (`npm run test:shell`, 18 checks): desktop + mobile dual boot â€” unified sections, no duplicates, palette still surfaces Inbox/Canvas/Files, mobile reachability, no StatusBar on phones, promoted-Home navigation
 - `tests/theme-sweep.mjs` (`npm run test:themes`, 12 checks): shell mounts error-free under all 4 themes (dark, light, brutalist, glass)
 
-## Unreleased (Area 2: lazy shell + Novel Studio surface)
+### Area 2: lazy shell + Novel Studio surface
 
-### Bug Fixes
+#### Bug Fixes
 - **Lazy workspaces could go blank forever in silence**: `LazyWorkspace` swallowed load errors (empty `.catch`) and a never-settling chunk stayed on "Loadingâ€¦" permanently. Loads now go through `src/lib/lazyLoad.ts` (`loadWithTimeout`, 9s): rejections and hangs reach a retryable failed state showing the reason, log `[LazyWorkspace] failed to load <label>: â€¦`, and offer a Retry button that re-invokes the loader. All 14 lazy call sites labeled; `main.ts` logs `vite:preloadError` app-wide. Code-splitting itself untouched
 - **Novel Studio had no reachable writing surface**: new projects landed on an empty beat board (editor needs a selected scene). `createProject` now bootstraps Act 1 â†’ Sequence 1 â†’ Scene 1 (scenes only render inside a sequence) and opens it immediately; empty projects show an unmissable "Start writing" affordance doing the same
 - **Novel import dropped you on the board**: `handleImportFile` now selects the first imported scene so you land in the editor on chapter 1
 
-### Tests
+#### Tests
 - `tests/lazy-load-probe.mjs` (`npm run test:lazy`): documents the jsdom stylesheet-link mechanism per workspace (informational by design)
 - `tests/lazy-load-failure.mjs` (`npm run test:lazyfail`): rejection/hang/success contract of the loader (9 checks)
 - `tests/novel-surface.mjs` (`npm run test:novel`): proves the failure path through the real component (failed state + Retry + labeled log); board happy-path phases run wherever chunks actually resolve and are joined by new e2e static anchors
 
-## Unreleased (Just Write core editor)
+### Just Write core editor
 
-### Bug Fixes
+#### Bug Fixes
 - **Autosave snap-back**: the doc-open effect rebuilt the editor on every `$currentDoc` assignment, including the autosave metadata refresh ~500ms after each pause â€” typed text visibly reverted to stale store content. The editor now rebuilds only on a new doc id (`openDocId` guard); regression-covered by `tests/write-probe.mjs` (instance-survival + live-content checks)
 - **Undo history wipe on settings changes**: theme/font/autocorrect/dictionary edits (and typewriter/focus toggles) destroyed and recreated the `EditorView`, resetting CodeMirror `history()`. All four now live in `Compartment`s reconfigured in place via `reconfigureAppearance()`
 - **Autocorrect never fired**: the shared plugin dispatched synchronously inside `ViewPlugin.update`, which CodeMirror forbids â€” every Layer 1/2 fix crashed (`Calls to EditorView.update are not allowed while an update is in progress`) and was dropped. Fixes are now scheduled via `queueMicrotask` and re-validated against the live doc before applying
@@ -1292,7 +1298,7 @@ before fixing. Frontend changes are verified (`svelte-check` 0/0, `test:source` 
 - **File watcher never fired**: the `notify` watcher was dropped at the end of `setup_file_watcher`; now intentionally leaked for app lifetime (`std::mem::forget`)
 - Removed stale "never wired" comment above the (actually wired) `searchKeymap`; Ctrl+F panel opening is now probe-tested
 
-### Tests
+#### Tests
 - `tests/write-probe.mjs` (`npm run test:write`): real `EditorView.dispatch` typing â€” existing-doc render/type/persist, tab switching without cross-contamination, split-pane independence, live autocorrect, Ctrl+F panel (25 checks)
 - `tests/ghost-widget.mjs` (`npm run test:ghost`): inline widget render/follow/replace/clear (11 checks)
 - `tests/autocorrect-unit.mjs` (`npm run test:autocorrect`): rule-table spot checks + custom-dict veto (16 checks)

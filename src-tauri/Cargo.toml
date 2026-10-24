@@ -1,6 +1,6 @@
 [package]
 name = "just-write-ehis"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 authors = ["simply-ehis"]
 description = "Just Write ehis — a personal super app for writing and everything around writing"

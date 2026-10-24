@@ -12,11 +12,12 @@ OUTPUT = ROOT / "bin"
 VENV = ROOT / ".runtime-build-venv"
 REQUIRED_ASSETS = (
     ROOT / "models" / "moonshine-base-Q8_0.gguf",
-    ROOT / "models" / "phonon" / "model.q8.gguf",
-    ROOT / "models" / "phonon" / "config.json",
-    ROOT / "models" / "phonon" / "tokenizer.json",
-    ROOT / "models" / "phonon" / "default-voice.safetensors",
-    ROOT / "models" / "phonon" / "voices.jsonl",
+    # Dir name == model registry key (see modelRegistry.ts / fetch_sidecars.py).
+    ROOT / "models" / "phonon-31m-en" / "model.q8.gguf",
+    ROOT / "models" / "phonon-31m-en" / "config.json",
+    ROOT / "models" / "phonon-31m-en" / "tokenizer.json",
+    ROOT / "models" / "phonon-31m-en" / "default-voice.safetensors",
+    ROOT / "models" / "phonon-31m-en" / "voices.jsonl",
     ROOT / "models" / "llama-server.exe",
     ROOT / "models" / "llama.dll",
     ROOT / "models" / "llama-server-impl.dll",
@@ -34,7 +35,7 @@ def validate_assets() -> None:
     if os.name != "nt":
         raise SystemExit("Native sidecars currently support Windows packaging only.")
     missing = [str(path) for path in REQUIRED_ASSETS if not path.exists()]
-    phonon_dir = ROOT / "models" / "phonon"
+    phonon_dir = ROOT / "models" / "phonon-31m-en"
     if not (phonon_dir / "voices.jsonl").is_file():
         missing.append(str(phonon_dir / "voices.jsonl"))
     voices_dir = phonon_dir / "voices"

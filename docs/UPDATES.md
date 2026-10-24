@@ -4,7 +4,7 @@ READ-WHEN: enabling updates, cutting a release, debugging update failures
 KEY-FILES: src-tauri/tauri.conf.json (plugins.updater), src/lib/updates.ts, Settings → About → App Updates
 INVARIANTS: signing cannot be disabled; UI reports "not configured" until setup is done; Android uses store tracks
 GOTCHAS: private key via env only (.env files don't work); keep tauri.conf + Cargo versions in sync; private repo ⇒ private releases ⇒ updater 404s (see section above)
-UPDATED: 2026-09-26
+UPDATED: 2026-10-24
 
 # UPDATES.md — App self-updates (Tauri updater)
 
@@ -20,7 +20,8 @@ with the site.
 ## One-time setup (maintainer)
 
 1. **Signing keypair** — currently `3FF086625EED8646` (rotated 2026-09-29 with
-   a fresh password). **This rotation is not safe for existing installs yet.**
+   a fresh password). **The rotation completed with the v0.2.3 bridge
+   release (2026-10-24)** — see "Rotating the signing key" below.
    The key that actually signed the published v0.2.1 installer is
    `1C2875FB2CC4040E` (verified from the release signature:
    `Just Write ehis_0.2.1_x64-setup.exe`, timestamp 2026-09-27 09:31 UTC) —
@@ -58,6 +59,11 @@ with the site.
    Gotcha: the `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` var must be present
    and correct — an absent/empty one makes tauri-cli stop for an
    interactive password prompt and hang headless builds forever.
+   Gotcha (2026-10-24): the script hardcodes the old
+   `C:\Users\ehis\source\repos\just-write-ehis\` path, which no longer
+   exists (repo now lives under `Downloads`) — update the script's two
+   paths, or set both vars inline from the repo-root key files as the
+   0.2.3 build did.
 
 ## Rotating the signing key (bridge release)
 
@@ -78,12 +84,16 @@ Signing the bridge with `NEW` is the failure mode to avoid: the old install
 base rejects it, and there is no in-app recovery — users must uninstall and
 reinstall by hand.
 
-Current state (as of 2026-10-13): `pubkey` is already `NEW`
-(`3FF086625EED8646`) but the installed base trusts `OLD`
-(`1C2875FB2CC4040E`). The next release must therefore be **signed with
-`1C2875FB2CC4040E`** to act as the bridge. If that private key is lost, no
-existing install can ever self-update again and the only remedy is a manual
-reinstall.
+Current state (as of 2026-10-24): the rotation is **complete**. `pubkey`
+is `NEW` (`3FF086625EED8646`). v0.2.2 (2026-10-16) was mistakenly signed
+with `NEW` instead of the bridge key, so v0.2.1 installs rejected that
+update; the bridge then shipped as **v0.2.3 (2026-10-24)**, signed with
+`OLD` (`1C2875FB2CC4040E`), letting every install in the field update and
+carry `NEW` forward. Every release after v0.2.3 signs with
+`3FF086625EED8646` (repo-root `just-write-ehis.key`) as usual. Keep the
+`OLD` private key — `~/.tauri/just-write-ehis-superseded-2026-09-29.key`
+plus its `.key.password` — until the installed base is known to be past
+v0.2.3; only then is it safe to delete.
 
 ## Per-release flow
 
