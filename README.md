@@ -11,10 +11,10 @@ A personal super app for **writing and everything around writing** — docs, fic
 - **AI Generation Controls** — Cancel button for in-flight generations, 3-second configurable cooldown between sends (`aiRateLimitCooldown` setting), request timeouts (90s chat / 120s stream / 180s structurize).
 - **Error Handling Polish** — Friendly error messages (401→API key, 429→rate limited, 408→timeout, network→can't reach server), retry button after failed generation, toast notifications for AI failures.
 - **Toast System** — Click-to-dismiss, explicit close button, max 3 visible (queues rest), error toasts persist until dismissed.
-- **Local Runtime Integrity** — STT, TTS, AI memory, and the bundled LLM use real readiness checks and native-first release runtimes; Settings can run STT, TTS, and LLM test requests.
+- **Local Runtime Integrity** — STT, TTS, AI memory, and the local LLM (bring-your-own GGUF) use real readiness checks and native-first release runtimes; Settings can run STT, TTS, and LLM test requests.
 - **Privacy** — API keys use the OS keychain; writing files are plaintext until encrypted-vault support is implemented.
 - **XSS Fix** — HTML sanitization via `ammonia` crate for published output (replaced incomplete custom escape).
-- **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
+- **Ghost Autocomplete with Local LLM** — When `llmEnabled` is on and a GGUF has been added to `Documents/Just Write ehis/models`, ghost suggestions use the local LFM 2.5-350M model via `ensureLlm()` lazy start.
 - **Auto Story Memory** — Successful scene saves queue local-only mention extraction; unmatched names wait in the Story Bible suggestion queue, while appearance links and contradiction badges stay informational.
 - **Settings** — `aiRateLimitCooldown` (ms, default 3000), `blankModeDefault` now initializes AI panel state and persists toggle.
 - **Default STT Model** — the bundled `moonshine-base-Q8_0.gguf` is selected when `sttModel` is empty; the legacy `moonshine-base` value remains compatible.
@@ -50,9 +50,11 @@ The desktop shell additionally needs Rust + `npm run tauri build`
 ## Install (Windows)
 
 The release artifact is `Just Write ehis_<version>_x64-setup.exe`. It bundles
-the local model assets plus native STT, TTS, and AI-memory runtimes, so a
-normal installation does not require Python or model downloads at runtime.
-Exact size varies with the fetched llama.cpp runtime assets.
+the STT/TTS voice models plus their native runtimes, AI memory and the
+llama.cpp runner, so a normal installation can dictate and read aloud with
+no Python install and no extra downloads. The local chat LLM model is
+**not** bundled: drop any `.gguf` into `Documents/Just Write ehis/models`
+and pick it in Settings → AI & Providers.
 
 > **Windows Defender SmartScreen warning is normal and expected.** The app has
 > no paid code-signing certificate, so Windows shows a blue

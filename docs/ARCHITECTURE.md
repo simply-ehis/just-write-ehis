@@ -117,8 +117,11 @@ skipped because the native model is unavailable there.
 ## Local model flow
 
 Settings/runtime button → `stores/audio.ts` → Tauri command → `sidecar.rs`
-→ packaged native runtime (or Python source fallback) → model assets under
-`sidecars/models/`. STT health means the model loaded; TTS health means the
+→ packaged native runtime (or Python source fallback) → STT/TTS model
+assets under `sidecars/models/` (bundled). The LLM runner
+`llama-server.exe` is bundled in the same place but loads its weights from
+`Documents/Just Write ehis/models` — the chat model itself is never
+bundled. STT health means the model loaded; TTS health means the
 bundle and runtime are usable before its intentional lazy synthesis; LLM
 health means llama.cpp is serving, and the Settings check then performs a
 real completion. Windows `tauri.windows.conf.json` runs `build_sidecars.py` first.

@@ -49,8 +49,9 @@ autocomplete; auto-suppressed for private workspaces).
 
 ## Auto Story Memory
 
-After a successful save pause in Write or Novel Studio, the bundled local
-small model checks the changed scene for characters, locations, objects, and
+After a successful save pause in Write or Novel Studio, the local
+small model (if you have added one in Settings → AI & Providers) checks the
+changed scene for characters, locations, objects, and
 stated traits. Existing fact keys are matched first; new names appear in the
 Novel Studio Story Bible as suggested entries. Confirm an entry to make it
 canonical, or reject it. Confirmed entities show their quoted appearances,

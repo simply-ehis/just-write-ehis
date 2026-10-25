@@ -4,7 +4,7 @@ READ-WHEN: AI answers badly, swapping STT/TTS/LLM models, adding a new slot
 KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/build_sidecars.py
 INVARIANTS: small slot = ghost/light tasks; main slot = chat/composer/structurize; voice swaps apply on next sidecar start
 GOTCHAS: release builds package Python runtimes and weights; source runs need a PATH Python command plus requirements; TTS is ready before its lazy first synthesis; model swaps require a sidecar restart
-UPDATED: 2026-10-20
+UPDATED: 2026-10-25
 
 # MODELS.md — picks per job (researched Sept 2026)
 
@@ -17,18 +17,24 @@ UPDATED: 2026-10-20
 | STT | MicButton dictation | `sttModel` path → `stt_server.py argv[2]` |
 | TTS | Read-aloud | `ttsModel` dir → `tts_server.py argv[2]` (called per sentence from the render-ahead job in `tts_render.rs`; the sidecar itself never plays audio) |
 
-For the local LLM, place a `.gguf` file directly in the app data `models`
-folder, refresh the list in Settings → AI, and select its filename. The app
-loads the file as-is; it does not quantize or convert it. Remote providers
-still use an endpoint and model id. Restart the sidecar after changing a
-model.
+For the local LLM, place a `.gguf` file directly in the models folder
+(`Documents/Just Write ehis/models` on Windows), refresh the list in
+Settings → AI, and select its filename. **No chat model ships with the
+app** — only STT/TTS/voice weights are bundled. The app loads the file
+as-is; it does not quantize or convert it. Remote providers still use an
+endpoint and model id. Restart the sidecar after changing a model.
+Files left in the older app-data `models` folder are moved into
+Documents on first use, so an upgrade keeps the model you already had.
 Web exception: the browser build uses built-in speech recognition/synthesis,
 so STT/TTS model fields only affect the desktop sidecars.
 
 ## Desktop runtime packaging
 
-The Windows release is self-contained for STT, TTS, AI memory, and the bundled
-LLM. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
+The Windows release is self-contained for STT, TTS and AI memory: their
+runtimes and weights are packaged. The LLM ships the *runner*
+(`llama-server.exe` + runtime DLLs) but deliberately **no model** — the
+local LLM is bring-your-own-GGUF from `Documents/Just Write
+ehis/models`. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
 desktop build; that script creates `sidecars/bin/{stt,tts,memory}-server.exe`
 with PyInstaller. The Rust sidecar managers prefer those executables and pass
 `JWE_SIDECARS_DIR` so the packaged servers resolve the external model files
@@ -44,9 +50,13 @@ Python installation after a release build.
 
 ## Model selection contract
 
-- Local LLMs are discovered from `.gguf` files directly inside the fixed app
-  data `models` folder. Settings stores the selected filename; the backend
-  resolves it inside that folder or the bundled resources folder.
+- Local LLMs are discovered from `.gguf` files directly inside the fixed
+  `Documents/Just Write ehis/models` folder. Nothing is bundled: an empty
+  folder means no local model, and the runner says so instead of falling
+  back to the STT weights. Settings stores the selected filename; the
+  backend resolves it inside that folder (or the bundled resources folder,
+  which only ever holds STT/TTS/LLM-*runtime* files). Absolute paths saved
+  from the old app-data folder resolve to the same filename in Documents.
 - The local runner passes GGUFs through unchanged. Its runtime flags are
   Flash Attention on, K/V cache `q8_0`, and one server slot.
 - Remote slots use an OpenAI-compatible endpoint and model id. Settings → AI
@@ -61,8 +71,8 @@ title/tag suggestions, craft-metric notes. All want instruction-following
 Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
 1. **Local model endpoint** — default. The small-model sidecar serves it over
-   a per-session AF_UNIX socket (zero config, no key). Add a GGUF to the app
-   data models folder and choose it in Settings;
+   a per-session AF_UNIX socket (zero config, no key). Add a GGUF to
+   `Documents/Just Write ehis/models` and choose it in Settings;
    the frontend's `is_local_llm_sentinel` matches the legacy
    `http://127.0.0.1:8093/v1` / `http://localhost:8093/v1` values and
    routes those to the socket transparently.
@@ -78,7 +88,7 @@ Picks (endpoint + model name — OpenAI, Google, Anthropic, or Custom):
 
 Remote providers speak `{base}/chat/completions` with a Bearer key and are
 verified by `{base}/models`. The local model is started through its private
-socket and must be a GGUF selected from the app data models folder.
+socket and must be a GGUF selected from the models folder.
 
 ## Main LLM (main slot)
 
@@ -170,7 +180,7 @@ This downloads:
 ## Testing a slot
 
 Settings → AI & Providers exposes **Test STT**, **Test TTS**, and **Test
-bundled LLM**. STT performs a real model load, TTS generates a short test
+local model**. STT performs a real model load, TTS generates a short test
 waveform (its model intentionally lazy-loads on first synthesis), and the
 LLM check performs a real completion after health verification. Run these
 after changing a model path or upgrading a local runtime.
