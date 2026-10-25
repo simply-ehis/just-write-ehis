@@ -20,12 +20,36 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The Cargo workspace lives in src-tauri/ — without this, rust-cache
+      # runs `cargo metadata` at the repo root, finds no Cargo.toml, errors
+      # and saves nothing, so every release rebuilds from scratch.
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
 
       - run: npm ci
 
+      # Every asset build_sidecars.py preflights must be fetched: the STT
+      # GGUF, the Phonon voice bundle and the llama.cpp runner. The earlier
+      # `--typst`-only fetch made the preflight fail ("Missing release
+      # assets"), which is why tag pushes died at beforeBuildCommand.
       - name: Fetch bundled binaries
-        run: python src-tauri/sidecars/fetch_sidecars.py --typst
+        run: python src-tauri/sidecars/fetch_sidecars.py --stt --phonon --llm --typst
+
+      # A tag whose name does not match the configured version would publish
+      # a release (and latest.json) labelled wrongly; fail before building.
+      - name: Tag matches app version
+        shell: pwsh
+        run: |
+          $conf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $expected = "v$($conf.version)"
+          if ($env:TAG -ne $expected) {
+            Write-Error "Tag $env:TAG does not match tauri.conf.json version $($conf.version) — expected $expected"
+            exit 1
+          }
+          Write-Host "Tag $env:TAG matches version $($conf.version)"
+        env:
+          TAG: ${{ github.ref_name }}
 
       - name: Build installer + updater artifacts
         uses: tauri-apps/tauri-action@v0

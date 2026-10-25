@@ -98,9 +98,13 @@ TYPST_BIN_FILE = f"typst-{TYPST_TRIPLE}" + (".exe" if os.name == "nt" else "")
 TYPST_BIN_PATH = BINARIES_DIR / TYPST_BIN_FILE
 
 SHA256 = {
-    "stt_gguf": "",
+    # Fresh-download verified 2026-10-25 against both pinned URLs: these
+    # pins are what let CI fetch the assets itself instead of requiring the
+    # maintainer's pre-fetched copies. `llm_gguf` stays empty — user GGUFs
+    # are never fetched or bundled.
+    "stt_gguf": "7f0027dfd857d310b63a85ef57cadf183da712cc374f85a648f8bc18aaa2efc8",
     "tts_bundle": "",
-    "llm_server": "",
+    "llm_server": "fa7c949c4b75871b9719ac3f401c30813aec860f8fba9c06dfb3b98318ac2155",
     "llm_gguf": "",
     "typst_cli": "19ce3551153c2fe7ee9fa2f95208310c8f4d3209fedb699e0333faf8913f6736",
     "phonon_31m_q8": "a7d9aad2cd6dc66473f24a08bc6d2939030ef4d751ef82349361fbef3272dbae",
@@ -375,9 +379,10 @@ def _extract_zip(archive: Path, dest_dir: Path) -> None:
 def fetch_llm() -> None:
     """Fetch llama.cpp server binary only (no GGUF).
 
-    The LLM model (GGUF) is NOT bundled. It lives in the fixed app-data
-    models folder which the app auto-discovers at runtime. Users place
-    their own .gguf there.
+    The LLM model (GGUF) is NOT bundled. Users put their own .gguf in the
+    app's models folder — `Documents/Just Write ehis/models` — which the
+    app auto-discovers at runtime (files left in the old app-data folder
+    are migrated there).
     """
     # 1) llama.cpp server release (contains llama-server.exe + DLLs)
     server_archive = MODELS_DIR / "llama-server.zip"
@@ -406,7 +411,7 @@ def fetch_llm() -> None:
     # otherwise ride into the app bundle (~150MB of duplicates).
     shutil.rmtree(LLM_SERVER_DIR, ignore_errors=True)
 
-    print("[LLM] Done (server only — GGUF lives in the app-data models folder).", flush=True)
+    print("[LLM] Done (server only — user GGUFs go in Documents/Just Write ehis/models).", flush=True)
 
 
 def fetch_typst() -> None:
@@ -470,7 +475,7 @@ def main() -> None:
     ap.add_argument("--stt", action="store_true", help="Fetch STT (Moonshine GGUF)")
     ap.add_argument("--tts", action="store_true", help="Fetch TTS (Kokoro v1.0 bundle — deprecated, use --phonon)")
     ap.add_argument("--phonon", action="store_true", help="Fetch TTS (Gradium Phonon 31M English)")
-    ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server only — GGUF lives in the app-data models folder)")
+    ap.add_argument("--llm", action="store_true", help="Fetch LLM (llama.cpp server only — user GGUFs go in Documents/Just Write ehis/models)")
     ap.add_argument("--typst", action="store_true", help=f"Fetch the pinned Typst {TYPST_VERSION} CLI (PDF export)")
     args = ap.parse_args()
 

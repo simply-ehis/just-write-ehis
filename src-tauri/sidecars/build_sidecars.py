@@ -22,8 +22,12 @@ REQUIRED_ASSETS = (
     ROOT / "models" / "llama.dll",
     ROOT / "models" / "llama-server-impl.dll",
     ROOT / "models" / "ggml.dll",
-    ROOT / "models" / "ggml-cpu.dll",
-    ROOT / "models" / "lfm2.5-350m-q4_k_m.gguf",
+    # No `ggml-cpu.dll`: llama.cpp b11047 (the pinned LLM_SERVER_URL) ships
+    # ggml-base.dll + per-arch `ggml-cpu-*.dll` instead. Requiring the old
+    # monolithic name only passed on machines that still carried a stale
+    # copy from a pre-b11047 layout, and failed every fresh fetch in CI.
+    # No chat GGUF either: the small model is bring-your-own and is never
+    # bundled (see docs/MODELS.md) — nothing in the installer needs it.
 )
 
 
