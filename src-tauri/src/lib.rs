@@ -135,13 +135,10 @@ pub fn run() {
             app.manage(sidecar::SttManager::new());
             app.manage(sidecar::TtsManager::new());
             app.manage(std::sync::Arc::new(tts_render::RenderRegistry::default()));
-            let user_models_dir = app_dir.join("models");
-            std::fs::create_dir_all(&user_models_dir).map_err(|e| {
-                format!(
-                    "Failed to create local models directory {:?}: {}",
-                    user_models_dir, e
-                )
-            })?;
+            // Local LLM weights live in `Documents/Just Write ehis/models`
+            // (shared with `scan_small_models`); the helper creates the
+            // folder and relocates anything left in the legacy app-data one.
+            let user_models_dir = commands::local_models_dir(app.handle())?;
             app.manage(sidecar::LlmManager::new(
                 app.path().resource_dir().ok(),
                 user_models_dir,

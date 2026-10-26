@@ -25,7 +25,20 @@
  * tests/window-state-unit.mjs does.
  */
 
-/** Give up waiting after this long and boot anyway. */
+/**
+ * Give up waiting after this long and boot anyway.
+ *
+ * This is a *cap*, not a delay: `waitForBackend` returns the instant
+ * `app_boot_ready` answers true, so a generous budget costs a healthy boot
+ * nothing. It only decides how long a genuinely slow `setup` gets before we
+ * fail open — and failing open is not free: the boot steps below run once
+ * with no retry, so a premature timeout leaves the file watcher, the Home
+ * dashboard, status-bar stats, the inbox banner, the streak nudge and the
+ * companion widget dead for the whole session. Cutting this to 1500 to make
+ * boot "faster" therefore cannot make a working boot faster (it already
+ * returns early) and can only turn a slow-but-working boot into a fast,
+ * broken one. Keep it generous; speed up `setup` instead.
+ */
 export const BOOT_GATE_TIMEOUT_MS = 8000;
 
 /** Delay between polls. Short, because setup is normally sub-second. */

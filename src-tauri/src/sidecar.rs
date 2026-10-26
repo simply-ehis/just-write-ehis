@@ -843,7 +843,8 @@ pub struct LlmManager {
     /// Packaged resource root, captured at startup so a backend-initiated
     /// start resolves sidecars exactly like the renderer's `llm_start`.
     resource_dir: Option<std::path::PathBuf>,
-    /// Fixed app-data model folder shared with `scan_small_models`.
+    /// Canonical local-model folder shared with `scan_small_models`
+    /// (`Documents/Just Write ehis/models`).
     user_models_dir: std::path::PathBuf,
     /// What the renderer last asked to run. `ensure_ready` reuses it so a
     /// fallback start picks the configured model/ctx, not the defaults.

@@ -1,7 +1,7 @@
-//! EPUB 3 writer: `Doc` â†’ a `.epub` zip, in-process.
+//! EPUB 3 writer: `Doc` → a `.epub` zip, in-process.
 //!
 //! Layout follows the EPUB 3.3 spec minimum a reader needs:
-//!   mimetype            (stored, uncompressed, first entry â€” required)
+//!   mimetype            (stored, uncompressed, first entry — required)
 //!   META-INF/container.xml
 //!   EPUB/package.opf    (metadata + manifest + spine)
 //!   EPUB/nav.xhtml      (EPUB 3 nav doc)
@@ -72,7 +72,7 @@ fn spans_to_xhtml(spans: &[Span]) -> String {
                 out.push_str("<span class=\"image-alt\">[image: ");
                 out.push_str(&xml_escape(alt));
                 if !src.is_empty() {
-                    out.push_str(&format!(" â€” {}", xml_escape(src)));
+                    out.push_str(&format!(" — {}", xml_escape(src)));
                 }
                 out.push_str("]</span>");
             }
@@ -146,7 +146,7 @@ fn xhtml_doc(title: &str, body: &str) -> String {
 const CSS: &str = "body{font-family:Georgia,'Times New Roman',serif;line-height:1.6;margin:1em;}\nh1,h2,h3,h4{line-height:1.25;}\npre{white-space:pre-wrap;word-wrap:break-word;background:#f4f4f4;padding:.6em;}\ncode{font-family:Consolas,monospace;}\nblockquote{margin-left:1em;padding-left:1em;border-left:3px solid #ccc;}\n.image-alt{font-style:italic;color:#555;}\n";
 
 /// Split top-level headings into chapters. With no headings the whole
-/// document is a single chapter â€” an EPUB must have at least one spine item.
+/// document is a single chapter — an EPUB must have at least one spine item.
 fn split_chapters(doc: &Doc) -> Vec<(String, Vec<Block>)> {
     let mut chapters: Vec<(String, Vec<Block>)> = Vec::new();
     let mut current_title = doc.title.clone();

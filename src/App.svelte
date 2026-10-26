@@ -18,9 +18,9 @@
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   // EditorPane, Logs, JustWrite and Inbox are code-split via LazyWorkspace
-  // below rather than imported here. All four reach CodeMirror â€” EditorPane
+  // below rather than imported here. All four reach CodeMirror — EditorPane
   // directly, Logs via its own EditorPane instance, JustWrite via ghostWidget,
-  // Inbox via DocDetail â€” and CodeMirror is a ~595 KB chunk. Statically
+  // Inbox via DocDetail — and CodeMirror is a ~595 KB chunk. Statically
   // importing ANY one of them kept the whole lot on the critical path, so
   // ~1.07 MB had to download and parse before mount() could run the BootLoader
   // and the progress UI could paint. Code-splitting one of them is not enough;
@@ -100,7 +100,7 @@ import { waitForBackendReady } from "$lib/bootGate";
 
   /**
    * Restore the pre-restart tab strip (single global list, saved under the
-   * "global" key â€” the UI model is one strip, not per-workspace strips).
+   * "global" key — the UI model is one strip, not per-workspace strips).
    * Docs deleted since last session are dropped silently.
    */
   async function restoreTabs() {
@@ -170,7 +170,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       /* storage unavailable: keep booting */
     }
   }
-  /** Report navigation-start â†’ interactive-shell milliseconds once. */
+  /** Report navigation-start → interactive-shell milliseconds once. */
   let bootReported = false;
   function reportBootMs(): void {
     if (bootReported) return;
@@ -194,7 +194,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       // The timeout must be distinguishable from a legitimate `null` result.
       // Commands returning `Result<(), String>` (e.g. setup_file_watcher)
       // serialise their Ok payload to null, so testing `result === null`
-      // reported them as timed-out even though they had already succeeded â€”
+      // reported them as timed-out even though they had already succeeded —
       // a false warning plus a bogus entry in the slow-steps diagnostic.
       const raced = await Promise.race([
         fn().then((value) => ({ timedOut: false as const, value })),
@@ -203,9 +203,9 @@ import { waitForBackendReady } from "$lib/bootGate";
         }),
       ]);
       if (raced.timedOut) {
-        // fn() is still pending â€” stop waiting, keep booting.
+        // fn() is still pending — stop waiting, keep booting.
         bootSlowSteps.push(step);
-        console.warn(`Boot step "${step}" timed out after ${ms}ms â€” continuing without it.`);
+        console.warn(`Boot step "${step}" timed out after ${ms}ms — continuing without it.`);
         return null;
       }
       return raced.value;
@@ -217,7 +217,7 @@ import { waitForBackendReady } from "$lib/bootGate";
     }
   }
 
-  // Tab persist failure would silently lose the strip on next launch â€”
+  // Tab persist failure would silently lose the strip on next launch —
   // warn once per session instead of every 800ms.
   let tabPersistWarned = false;
   $effect(() => {
@@ -237,7 +237,7 @@ import { waitForBackendReady } from "$lib/bootGate";
           warnOnce("Tabs persist", e);
           if (!tabPersistWarned) {
             tabPersistWarned = true;
-            showToast("Tabs â€” couldn't save tab strip: reopened tabs may be lost on restart", "warning");
+            showToast("Tabs — couldn't save tab strip: reopened tabs may be lost on restart", "warning");
           }
         });
       }, 800);
@@ -290,7 +290,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("jwe-cycle-tab", { detail: { backward: e.shiftKey } }));
     } else if (mod && (e.key === "t" || e.key === "T")) {
-      // In-editor Ctrl+T stays the spec Â§4.1 timestamp (CodeMirror handles
+      // In-editor Ctrl+T stays the spec §4.1 timestamp (CodeMirror handles
       // and preventDefaults it before this window listener runs); outside
       // an editor it opens a new tab in this workspace.
       if (e.defaultPrevented) return;
@@ -301,7 +301,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       window.dispatchEvent(new CustomEvent("jwe-close-active-tab"));
     } else if (mod && (e.key === "=" || e.key === "+")) {
       // Zoom: Ctrl+= / Ctrl++ enlarges, Ctrl+- shrinks, Ctrl+0 resets.
-      // Step of 1 within the schema clamp (10â€“32); editor and reader text
+      // Step of 1 within the schema clamp (10–32); editor and reader text
       // both follow (readerSize is the reader's own persisted size).
       e.preventDefault();
       $settings = { ...$settings, fontSize: Math.min(32, $settings.fontSize + 1), readerSize: Math.min(32, $settings.readerSize + 1) };
@@ -358,7 +358,7 @@ import { waitForBackendReady } from "$lib/bootGate";
     if (!id || id === $currentDoc?.id) {
       // Nothing remembered for this workspace: land on its own empty
       // state instead of keeping the previous workspace's document on
-      // screen â€” that leak is how daily logs showed up inside Write.
+      // screen — that leak is how daily logs showed up inside Write.
       if (!id && $currentDoc) $currentDoc = null;
       return;
     }
@@ -392,13 +392,13 @@ import { waitForBackendReady } from "$lib/bootGate";
   /** Weekly triage nudge, streak nudge, and scheduled auto-backup. */
   async function runStartupMaintenance() {
     // Loud ACL probe first: a misconfigured window manifest denies every
-    // command, and each check below fails quietly on its own â€” so verify
+    // command, and each check below fails quietly on its own — so verify
     // one cheap command and banner loudly instead of looking broken.
     try {
       await api.getVaultPath();
     } catch (e) {
       if (isAclDenied(e)) {
-        showBanner("App permissions are misconfigured â€” commands are blocked. Rebuild the desktop app after fixing the window ACL.", "error");
+        showBanner("App permissions are misconfigured — commands are blocked. Rebuild the desktop app after fixing the window ACL.", "error");
         return;
       }
     }
@@ -415,7 +415,7 @@ import { waitForBackendReady } from "$lib/bootGate";
           if (stale.length > 0) {
             const oldest = Math.round((now - Math.min(...stale.map((d) => +new Date(d.created_at)))) / DAY_MS);
             showBanner(
-              `${stale.length} capture${stale.length === 1 ? "" : "s"} waiting triage (oldest ${oldest}d) â€” open Capture to clear it.`,
+              `${stale.length} capture${stale.length === 1 ? "" : "s"} waiting triage (oldest ${oldest}d) — open Capture to clear it.`,
               "info",
               { label: "Open Capture", run: () => { $currentWorkspace = "inbox"; } }
             );
@@ -434,7 +434,7 @@ import { waitForBackendReady } from "$lib/bootGate";
         if (current > 0) {
           const days = await api.dashboardWritingDays();
           if (!days.includes(today)) {
-            showToast(`Day ${current + 1} starts with a sentence â€” your ${current}-day streak is waiting.`, "info", 6000);
+            showToast(`Day ${current + 1} starts with a sentence — your ${current}-day streak is waiting.`, "info", 6000);
             $settings = { ...$settings, lastStreakShown: new Date().toISOString() };
           }
         }
@@ -443,12 +443,12 @@ import { waitForBackendReady } from "$lib/bootGate";
       }
     }
 
-    // Automatic backup per Vaults â†’ Backup Frequency (desktop shell only:
+    // Automatic backup per Vaults → Backup Frequency (desktop shell only:
     // in the browser preview a backup is a file download, never silent).
     //
     // Fired WITHOUT await: `backup_create` copies the whole database, and
     // awaiting it here held the boot sequence (and, before the Rust fix, the
-    // app's only DB connection) for the duration â€” every later step, including
+    // app's only DB connection) for the duration — every later step, including
     // the tab restore that decides which document the user lands on, waited
     // behind a file copy. The backup still runs; it just no longer gates boot.
     if (!isBrowserPreview() && $settings.backupFrequency !== "never") {
@@ -475,11 +475,11 @@ import { waitForBackendReady } from "$lib/bootGate";
     // open (pagehide below marks clean exits for the next launch).
     markBootStart();
     window.addEventListener('pagehide', markCleanExit);
-    // Autostart warm boot (OS login): never pop a window â€” restore
+    // Autostart warm boot (OS login): never pop a window — restore
     // geometry and warm every cache hidden, until the user opens the app
     // (tray, dock, or a second launch via single-instance).
     // Fail-open by design: the flag resolves false on timeout/error, so a
-    // hung backend can delay the re-hide by seconds at most â€” never trap
+    // hung backend can delay the re-hide by seconds at most — never trap
     // an invisible window, never stall boot past this race.
     const autostarted: Promise<boolean> = Promise.race([
       (async () => {
@@ -493,7 +493,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
     ]);
     // Reveal unconditionally once geometry lands; an autostart boot hides
-    // again the moment its flag resolves (local IPC â€” milliseconds, and
+    // again the moment its flag resolves (local IPC — milliseconds, and
     // invisible at login anyway).
     const revealMainWindow = () => {
       void showMainWindow().then(() => {
@@ -515,17 +515,17 @@ import { waitForBackendReady } from "$lib/bootGate";
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('editor-typing', handleEditorTyping);
     window.addEventListener('mousemove', handleMouseNearTop);
-    // Re-entry: Settings â†’ General and the command palette dispatch this.
+    // Re-entry: Settings → General and the command palette dispatch this.
     const replayOnboarding = () => { showOnboarding = true; };
     window.addEventListener('replay-onboarding', replayOnboarding);
 
-    // Async init (fire and forget) â€” with an absolute failsafe: the
+    // Async init (fire and forget) — with an absolute failsafe: the
     // splash screen must never trap the user, even if every step hangs.
     const bootFailsafe = setTimeout(() => {
       if (!ready) {
-        console.warn("Boot failsafe fired â€” showing the shell anyway.");
+        console.warn("Boot failsafe fired — showing the shell anyway.");
         try {
-          showBanner("Startup took too long â€” some services may still be starting.", "warning");
+          showBanner("Startup took too long — some services may still be starting.", "warning");
         } catch {
           /* banners unavailable: shell still shows */
         }
@@ -537,7 +537,7 @@ import { waitForBackendReady } from "$lib/bootGate";
     (async () => {
     try {
       // Every step below needs the Rust backend to be fully managed, and the
-      // webview starts loading before setup() finishes â€” so wait for the boot
+      // webview starts loading before setup() finishes — so wait for the boot
       // gate first. Without it these calls lose a race they cannot retry,
       // which silently killed the file watcher, Home dashboard, status-bar
       // stats, inbox banner and streak nudge. The companion window races the
@@ -545,7 +545,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       if (!isBrowserPreview()) {
         markBootStep("backend-ready");
         if (!(await waitForBackendReady())) {
-          console.warn("Backend never reported ready â€” booting anyway.");
+          console.warn("Backend never reported ready — booting anyway.");
         }
       }
       // File watching only exists under the Tauri shell; the browser
@@ -577,7 +577,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       }
 
       // Onboarding: explicit versioned flag. Veterans (pre-flag settings
-      // with real usage) are migrated silently â€” never re-prompt them.
+      // with real usage) are migrated silently — never re-prompt them.
       // Freshness comes from the init-time snapshot: trackFeature() runs
       // on mount and would otherwise make every fresh boot look "used".
       if (!$settings.hasOnboarded) {
@@ -592,12 +592,12 @@ import { waitForBackendReady } from "$lib/bootGate";
 
       // Re-entry is wired in the onMount body above (replay-onboarding).
 
-      // Silent update check (desktop shell only, opt-out in Settings â†’ About)
+      // Silent update check (desktop shell only, opt-out in Settings → About)
       if (!isBrowserPreview() && $settings.autoCheckUpdates) {
         checkForUpdate()
           .then((update) => {
             if (update) {
-              showBanner(`Update ${update.version} available â€” open Settings â†’ About to install.`, "info");
+              showBanner(`Update ${update.version} available — open Settings → About to install.`, "info");
             }
           })
           .catch(() => {
@@ -610,10 +610,10 @@ import { waitForBackendReady } from "$lib/bootGate";
     // an idle moment so they never contend first paint or the tab restore.
     const runPostBoot = () => {
       // Reminders + automatic backup live here so the toggles in
-      // Settings â†’ Capture and Vaults actually do something.
+      // Settings → Capture and Vaults actually do something.
       runStartupMaintenance().catch(() => {});
 
-      // Activity decay (powers smart-tab ranking): at most once a day â€”
+      // Activity decay (powers smart-tab ranking): at most once a day —
       // the engine damps stale docs 5% per run, so every launch would over-decay.
       try {
         const todayKey = new Date().toISOString().slice(0, 10);
@@ -657,7 +657,7 @@ import { waitForBackendReady } from "$lib/bootGate";
     }
 
       // Landing workspace (onboarding choice, default "home"): applies
-      // only when nothing restores over it â€” open tabs and launch
+      // only when nothing restores over it — open tabs and launch
       // intents below both win. Unknown ids fall back to home so a stale
       // landing (e.g. "map" before the v6 migration) never lands on an
       // unrouted workspace.
@@ -670,7 +670,7 @@ import { waitForBackendReady } from "$lib/bootGate";
 
       // PWA entry points (share target, shortcuts, notification taps) win
       // over the restore: a launch intent is an explicit user action.
-      // SW â†’ app message bridge for shares while already open.
+      // SW → app message bridge for shares while already open.
        setupLaunchBridge();
        try {
          await bootStep("launch-params", 8000, () => consumeLaunchParams());
@@ -686,10 +686,10 @@ import { waitForBackendReady } from "$lib/bootGate";
       } catch (e) {
         // A `finally` alone would clear the failsafe while skipping the
         // ready/reveal above, leaving the BootLoader up and the window hidden
-        // â€” the exact ghost-window failure this gate exists to prevent.
+        // — the exact ghost-window failure this gate exists to prevent.
         console.warn("Boot sequence aborted:", e);
         try {
-          showBanner("Startup hit an error â€” some features may be unavailable.", "warning");
+          showBanner("Startup hit an error — some features may be unavailable.", "warning");
         } catch {
           /* banners unavailable: shell still shows */
         }
@@ -754,7 +754,7 @@ import { waitForBackendReady } from "$lib/bootGate";
           onclick={() => ($sidebarOpen = true)}
           title="Show sidebar (Ctrl+B)"
           aria-label="Show sidebar"
-        >â˜°</button>
+        >☰</button>
       {/if}
       {#if !$showSettings}
         <TabBar />
@@ -765,7 +765,7 @@ import { waitForBackendReady } from "$lib/bootGate";
       <div class="content-pane" data-workspace={$currentWorkspace}>
         {#if isBrowserPreview()}
           <div class="preview-banner" title="Browser preview stores docs in localStorage. The desktop app uses the full Rust backend with files on disk.">
-            Browser preview â€” docs persist to localStorage
+            Browser preview — docs persist to localStorage
           </div>
         {/if}
         <ConflictBanner />

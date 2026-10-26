@@ -77,7 +77,13 @@
       (function () {
         if (!('serviceWorker' in navigator)) return;
         var inTauri = !!(window.isTauri || (window.__TAURI_INTERNALS__));
-        if (inTauri) {
+        // Vite's dev server serves mutable /src/*.ts modules instead of the
+        // content-hashed /assets/ chunks this worker is designed around, so
+        // the stale-while-revalidate branch keeps answering from cache and a
+        // module edited on disk boots an older copy (seen as "does not
+        // provide an export named ..."). Heal it exactly like Tauri above.
+        var viteDev = !!document.querySelector('script[src*="/@vite/client"]');
+        if (inTauri || viteDev) {
           navigator.serviceWorker.getRegistrations().then(function (regs) {
             regs.forEach(function (reg) { reg.unregister(); });
           }).catch(function () { /* nothing to heal */ });

@@ -3454,24 +3454,80 @@ pub fn llm_stop(llm: State<'_, sidecar::LlmManager>) -> Result<(), String> {
     llm.stop()
 }
 
-/// Fixed folder for unbundled small-model GGUFs. The path is derived from
-/// the app data dir and cannot be changed by the user. The folder is
-/// created eagerly on boot and re-created on routine checks if deleted.
-/// Only .gguf files directly inside are auto-discovered as small models.
-#[tauri::command]
-pub fn small_models_dir(app: tauri::AppHandle) -> Result<String, String> {
-    let dir = app
+/// Fixed folder for user-supplied local LLM GGUFs: `Documents/Just Write
+/// ehis/models`. It is visible and writable without digging through
+/// AppData, and survives a reinstall. Created eagerly on boot and
+/// re-created on routine checks if deleted. Only .gguf files directly
+/// inside are auto-discovered as small models.
+///
+/// Anything already sitting in the legacy app-data `models` folder is
+/// moved across on first use, so an upgrade keeps the model the user
+/// already had.
+pub fn local_models_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let legacy = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Cannot resolve app data dir: {e}"))?
         .join("models");
+    let dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("Cannot resolve Documents dir: {e}"))?
+        .join("Just Write ehis")
+        .join("models");
     std::fs::create_dir_all(&dir).map_err(|e| {
         format!(
             "Failed to create small-models folder {:?}: {}",
-            dir, e
+            dir,
+            e
         )
     })?;
-    Ok(dir.to_string_lossy().to_string())
+    migrate_legacy_models(&legacy, &dir);
+    Ok(dir)
+}
+
+/// One-time relocation of `*.gguf` out of the pre-relocation app-data
+/// folder. Best effort: a file that cannot be moved (locked, name clash)
+/// stays put rather than failing the caller.
+fn migrate_legacy_models(legacy: &std::path::Path, dest: &std::path::Path) {
+    if legacy == dest || !legacy.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(legacy) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let is_gguf = path
+            .extension()
+            .map(|ext| ext.eq_ignore_ascii_case("gguf"))
+            .unwrap_or(false);
+        if !is_gguf {
+            continue;
+        }
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let target = dest.join(name);
+        if target.exists() {
+            continue;
+        }
+        // Documents and AppData usually share a volume; fall back to a
+        // copy when they do not (roaming profiles, redirected folders).
+        if std::fs::rename(&path, &target).is_err()
+            && std::fs::copy(&path, &target).is_ok()
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+#[tauri::command]
+pub fn small_models_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(local_models_dir(&app)?.to_string_lossy().into_owned())
 }
 
 /// Auto-discover small-model GGUFs in the fixed models folder.
