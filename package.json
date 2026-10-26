@@ -86,7 +86,8 @@
     "test:parity": "node tests/backend-parity.mjs",
     "test:csp": "node tests/csp-desktop.mjs",
     "test:support": "node tests/support-unit.mjs",
-    "test:source": "npm run test:settings && npm run test:ensure && npm run test:ghostrouting && npm run test:aclerrors && npm run test:aclparity && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:sidecarauth && npm run test:secretscrub && npm run test:glassperf && npm run test:memoryfiles && npm run test:writeback && npm run test:window && npm run test:bootgate && npm run test:ghostwindow && npm run test:pathguard && npm run test:parity && npm run test:csp && npm run test:support && npm run test:no-torch"
+    "test:source": "npm run test:settings && npm run test:ensure && npm run test:ghostrouting && npm run test:aclerrors && npm run test:aclparity && npm run test:providerprobe && npm run test:dailynote && npm run test:stamp && npm run test:sessionhealth && npm run test:sidecar && npm run test:sidecarauth && npm run test:secretscrub && npm run test:glassperf && npm run test:memoryfiles && npm run test:writeback && npm run test:window && npm run test:bootgate && npm run test:ghostwindow && npm run test:pathguard && npm run test:parity && npm run test:csp && npm run test:support && npm run test:no-torch",
+    "deploy": "cf deploy"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
@@ -119,17 +120,19 @@
     "pdfjs-dist": "^6.3.289"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@cloudflare/vite-plugin": "^2.0.0-beta.v.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@tauri-apps/cli": "2.11.4",
     "@types/d3-dispatch": "^3.0.7",
     "@types/d3-force": "^3.0.10",
     "@types/d3-quadtree": "^3.0.6",
     "@types/d3-timer": "^3.0.2",
+    "cf": "^1.0.0-beta.21",
     "esbuild": "^0.25.12",
     "jsdom": "^30.1.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.6.0",
-    "vite": "^6.0.0"
+    "vite": "^7.3.7"
   }
 }

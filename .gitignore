@@ -51,3 +51,14 @@ Thumbs.db
 
 # Top-level sidecar/phonon build output (678 MB of binaries — never commit)
 /sidecars/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+
+# Cloudflare build output written by @cloudflare/vite-plugin (regenerated
+# by every `npx vite build` / `cf deploy` — never committed)
+.cloudflare/
