@@ -62,3 +62,6 @@ Thumbs.db
 # Cloudflare build output written by @cloudflare/vite-plugin (regenerated
 # by every `npx vite build` / `cf deploy` — never committed)
 .cloudflare/
+
+# Staged Pages deployment (landing page + app under /app/)
+.pages-deploy/

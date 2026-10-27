@@ -11,8 +11,23 @@ import { resolve } from "path";
 // exports TAURI_PLATFORM / TAURI_ENV_PLATFORM into the build command.
 const isTauriBuild = !!(process.env.TAURI_PLATFORM || process.env.TAURI_ENV_PLATFORM);
 
-export default defineConfig({
-  plugins: isTauriBuild ? [svelte()] : [svelte(), cloudflare()],
+/**
+ * The Cloudflare plugin owns the build output, so only one caller can have
+ * it: the Worker deploy (`cf deploy` / plain `vite build`). Tauri needs a
+ * plain `dist/`, and the `pages` build is staged into a directory that
+ * wrangler uploads to the Pages project — neither can use it.
+ */
+function useCloudflarePlugin(mode: string): boolean {
+  return !isTauriBuild && mode !== "pages";
+}
+
+export default defineConfig(({ mode }) => ({
+  // The web app shares just-write-ehis.pages.dev with the marketing page,
+  // which owns the site root. A `pages`-mode build is served from /app/,
+  // so every generated URL (entry chunk, static assets, service-worker
+  // scope) has to carry that prefix. Tauri and the Worker build stay at "/".
+  base: mode === "pages" ? "/app/" : "/",
+  plugins: useCloudflarePlugin(mode) ? [svelte(), cloudflare()] : [svelte()],
   resolve: {
     alias: {
       "$lib": resolve(__dirname, "src/lib"),
@@ -39,4 +54,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

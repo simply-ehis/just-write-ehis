@@ -47,16 +47,23 @@ self.addEventListener('activate', (event) => {
  * longer exists. Hashed build assets are content-addressed, so cache-first is
  * safe and correct for them.
  */
+// The app is not always served from the origin root — on the marketing site
+// it lives under /app/, while Tauri and the Worker build stay at "/". The
+// worker's own URL is inside the scope, so it names the base every time:
+// `/app/sw.js` -> `/app/`, `/sw.js` -> `/`.
+const BASE_PATH = new URL('./', self.location).pathname;
+const ASSETS_PATH = `${BASE_PATH}assets/`;
+
 function isDocumentRequest(request) {
   return (
     (request.mode === 'navigate' ||
       (request.headers.get('accept') || '').includes('text/html')) &&
-    !new URL(request.url).pathname.startsWith('/assets/')
+    !new URL(request.url).pathname.startsWith(ASSETS_PATH)
   );
 }
 
 function isHashedAsset(url) {
-  return url.pathname.startsWith('/assets/');
+  return url.pathname.startsWith(ASSETS_PATH);
 }
 
 // Fetch: documents network-first, hashed assets cache-first, rest stale-while-revalidate
