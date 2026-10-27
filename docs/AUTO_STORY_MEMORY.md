@@ -30,9 +30,16 @@ Extraction uses the selected project and saved scene content. The former documen
 - `npm run check`: 0 errors and 0 warnings.
 - `npm run build`: passed; only existing Vite chunk/dynamic-import warnings.
 - `npm run test:e2e`: all checks passed, including 162 API command sites covered by browser-backend cases.
-- Local LFM probe: bundled `llama-server.exe` returned a response over `127.0.0.1:18093`; no external endpoint was used.
+- Local LFM probe: a locally fetched `llama-server.exe` returned a response over `127.0.0.1:18093`; no external endpoint was used.
 - Regression test: `memory_requires_confirmation_and_recomputes_only_the_changed_scene` proves unmatched names do not create facts, scene evidence is retained across another scene's recompute, and locked sources fail the gate.
 
 ## Recording status
 
-`artifacts/auto-story-memory-preview.webm` and `artifacts/auto-story-memory-preview.png` show the real Story Bible UI flow: writing a scene, confirming a suggested entity, opening the second scene, and displaying the contradiction badge with linked scene values. This supplemental browser-preview recording seeds localStorage because browser preview intentionally reports native local-model extraction as skipped; it does not claim to prove Tauri model inference. Native desktop recording remains a manual verification step.
+A supplemental browser-preview recording of the real Story Bible UI flow
+(writing a scene, confirming a suggested entity, opening the second scene, and
+displaying the contradiction badge with linked scene values) was captured with
+the 2026-10-21 verification pass; the recording itself was retired with the
+repository trash cleanup. It seeded localStorage because browser preview
+intentionally reports native local-model extraction as skipped; it does not
+claim to prove Tauri model inference. Native desktop recording remains a
+manual verification step.

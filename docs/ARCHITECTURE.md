@@ -119,7 +119,8 @@ skipped because the native model is unavailable there.
 Settings/runtime button → `stores/audio.ts` → Tauri command → `sidecar.rs`
 → packaged native runtime (or Python source fallback) → STT/TTS model
 assets under `sidecars/models/` (bundled). The LLM runner
-`llama-server.exe` is bundled in the same place but loads its weights from
+`llama-server.exe` is **not** bundled: local completion needs
+`fetch_sidecars.py --llm`, and its weights always come from
 `Documents/Just Write ehis/models` — the chat model itself is never
 bundled. STT health means the model loaded; TTS health means the
 bundle and runtime are usable before its intentional lazy synthesis; LLM

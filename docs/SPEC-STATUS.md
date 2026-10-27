@@ -1,7 +1,7 @@
 PURPOSE: canonical-spec amendment → implementation status, with deviations on record
 OWNS: the mapping between spec text and shipped behavior
 READ-WHEN: spec work starts; scope arguments; "is X done?" questions
-KEY-FILES: message.md and the Overhaul Master Plan (request scope), BUILD_CHECKLIST.md (legacy gates), TODOS.md (open work)
+KEY-FILES: canonical-spec-v1.11.md (request scope), BUILD_CHECKLIST.md (legacy gates), TODOS.md (open work)
 INVARIANTS: statuses here must match code; deviations need a dated note, never silent drift
 GOTCHAS: "done" means wired in BOTH backends + UI + e2e/self-test; native packaging and Rust runtime remain unverified until an explicitly authorized Tauri build
 UPDATED: 2026-09-25
@@ -26,7 +26,8 @@ UPDATED: 2026-09-25
 
 ## Overhaul phase audit (2026-10-21)
 
-This is a source audit, not a claim that every request in `message.md` has shipped. Phase 8 is deferred; the user requested a completion check first.
+This is a source audit, not a claim that every request in the original scope
+notes has shipped. Phase 8 is deferred; the user requested a completion check first.
 
 | Phase | Status | Evidence / remaining gap |
 |---|---|---|

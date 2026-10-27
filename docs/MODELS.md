@@ -31,10 +31,12 @@ so STT/TTS model fields only affect the desktop sidecars.
 ## Desktop runtime packaging
 
 The Windows release is self-contained for STT, TTS and AI memory: their
-runtimes and weights are packaged. The LLM ships the *runner*
-(`llama-server.exe` + runtime DLLs) but deliberately **no model** — the
-local LLM is bring-your-own-GGUF from `Documents/Just Write
-ehis/models`. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
+runtimes and weights are packaged. The LLM is **not bundled at all** — no
+runner (`llama-server.exe` / ggml DLLs) and no weights ship in the installer.
+Local completion is opt-in: fetch the runner with `fetch_sidecars.py --llm`
+and drop a GGUF into `Documents/Just Write
+ehis/models`; without it the local slot reports unavailable instead of
+failing the build. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
 desktop build; that script creates `sidecars/bin/{stt,tts,memory}-server.exe`
 with PyInstaller. The Rust sidecar managers prefer those executables and pass
 `JWE_SIDECARS_DIR` so the packaged servers resolve the external model files
@@ -54,9 +56,8 @@ Python installation after a release build.
   `Documents/Just Write ehis/models` folder. Nothing is bundled: an empty
   folder means no local model, and the runner says so instead of falling
   back to the STT weights. Settings stores the selected filename; the
-  backend resolves it inside that folder (or the bundled resources folder,
-  which only ever holds STT/TTS/LLM-*runtime* files). Absolute paths saved
-  from the old app-data folder resolve to the same filename in Documents.
+  backend resolves it inside that folder. The bundled resources folder only
+  ever holds STT/TTS weights and the AI-memory runtime.
 - The local runner passes GGUFs through unchanged. Its runtime flags are
   Flash Attention on, K/V cache `q8_0`, and one server slot.
 - Remote slots use an OpenAI-compatible endpoint and model id. Settings → AI

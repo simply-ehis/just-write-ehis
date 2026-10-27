@@ -11,10 +11,8 @@
   e2e-browser exit 0, memory-files ALL PASS. Fixed 2 real bugs (dark
   editor tokens in `editorTheme.ts`; save-path RAG re-chunk regression
   in `doc_store.rs`), 2 parity/coverage gaps (browser-backend
-  `small_models_dir`/`scan_small_models` cases), and 7 stale test pins.
-  Full accounting: `DELIVERY-REPORT-2026-10-21.md`.
-- [ ] **Read-aloud v2** — plan at
-  `artifacts/tts-read-aloud-2026-10-21/TTS-READ-ALOUD-plan.md`:
+  `small_models_dir`/`scan_small_models` cases), and  7 stale test pins. Full accounting folded into `CHANGELOG.md`.
+- [ ] **Read-aloud v2** — follow-ups:
   1. **Phonon swap — DONE (owner reopened + committed 2026-10-23;
      verified end-to-end, see CHANGELOG)**: `phonon-server.exe` is the
      live TTS engine; `tts_server.py` remains only as an unbundled

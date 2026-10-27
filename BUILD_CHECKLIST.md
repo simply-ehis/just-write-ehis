@@ -166,7 +166,7 @@ reproduced before being fixed.
 - [x] Story Bible appearances, scene jumps, contradiction badges, and CodeMirror fact-key hover lookup
 - [x] Regression coverage for parser repair/rejection, attribute grounding, suggestion gating and rejection tombstones, contradiction values, delta isolation, empty-scene clearing, atomic confirmation, and locked reads
 - [x] `cargo test` 31 passed, `npm run check` clean, `npm run build` passed, `npm run test:e2e` passed
-- [x] Supplemental browser preview recording in `artifacts/auto-story-memory-preview.webm`
+- [x] Supplemental browser preview recording captured for the Story Bible flow
 - [ ] Native Tauri/WebView screen recording remains manual; preview recording is explicitly seeded because native LFM extraction is unavailable in browser preview
 
 ## Settings, local models, and PIN repair (2026-09-25, source-only)

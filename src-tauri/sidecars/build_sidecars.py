@@ -18,16 +18,11 @@ REQUIRED_ASSETS = (
     ROOT / "models" / "phonon-31m-en" / "tokenizer.json",
     ROOT / "models" / "phonon-31m-en" / "default-voice.safetensors",
     ROOT / "models" / "phonon-31m-en" / "voices.jsonl",
-    ROOT / "models" / "llama-server.exe",
-    ROOT / "models" / "llama.dll",
-    ROOT / "models" / "llama-server-impl.dll",
-    ROOT / "models" / "ggml.dll",
-    # No `ggml-cpu.dll`: llama.cpp b11047 (the pinned LLM_SERVER_URL) ships
-    # ggml-base.dll + per-arch `ggml-cpu-*.dll` instead. Requiring the old
-    # monolithic name only passed on machines that still carried a stale
-    # copy from a pre-b11047 layout, and failed every fresh fetch in CI.
-    # No chat GGUF either: the small model is bring-your-own and is never
-    # bundled (see docs/MODELS.md) — nothing in the installer needs it.
+    # The LLM is deliberately NOT bundled: no llama.cpp runner, no ggml DLLs
+    # and no chat GGUF ship in the installer. Local completion is
+    # bring-your-own (fetch_sidecars.py --llm plus a GGUF in
+    # Documents/Just Write ehis/models, see docs/MODELS.md); everyone else
+    # uses an HTTP provider from Settings -> AI & Providers.
 )
 
 
@@ -49,7 +44,7 @@ def validate_assets() -> None:
         raise SystemExit(
             "Missing release assets: "
             + ", ".join(missing)
-            + ". Run fetch_sidecars.py --stt --phonon --llm, then retry."
+            + ". Run fetch_sidecars.py --stt --phonon --typst, then retry."
         )
 
 

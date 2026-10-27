@@ -97,4 +97,4 @@ docs/                the docs you are reading (start at docs/ARCHITECTURE.md)
 - `docs/HARNESS.md` — vendored AI-memory code + privacy behavior
 - `docs/WINDOWS-INTEGRATION.md` — Windows associations, launch handoff, autostart, and native verification status
 - `TODOS.md` — remaining work · `CHANGELOG.md` — session history
-- `BODY.md` / `IMPACT_MAP.md` / `BUILD_CHECKLIST.md` — anatomy, impact, gates
+- `BUILD_CHECKLIST.md` — release gates
