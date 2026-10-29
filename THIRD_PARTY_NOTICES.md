@@ -78,11 +78,19 @@ longer applies to distributed artefacts.
 
 ## Runtime sidecars
 
-The STT, TTS, memory and LLM sidecars fetch their own upstream components
-(llama.cpp, ptts/xn, Moonshine, Gradium Phonon) at install time rather than
-being bundled. Their licences apply to those downloaded artefacts, not to this
-repository. See `src-tauri/sidecars/requirements.txt` and the upstream
+The release bundles the STT, TTS and memory runtimes plus the llama.cpp
+runner (`llama-server.exe` + runtime DLLs, MIT). Their upstream components
+(llama.cpp, ptts/xn, Moonshine, Gradium Phonon) are fetched at **build**
+time by `fetch_sidecars.py` (pinned releases); model weights are never
+bundled — LLM GGUFs are user-provided. Licences apply to those distributed
+artefacts; see `src-tauri/sidecars/requirements.txt` and the upstream
 projects for details.
+
+### llama.cpp (LLM runner)
+
+`llama-server.exe` + ggml/llama runtime DLLs — MIT, from
+`ggml-org/llama.cpp` releases (pinned in `fetch_sidecars.py`). No model
+weights ship with it.
 
 ### Phonon (TTS)
 

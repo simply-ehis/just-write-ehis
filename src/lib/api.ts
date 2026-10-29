@@ -678,7 +678,7 @@ export const api = {
       error,
     });
     try {
-      const res = await safeInvoke<{ models: string[] }>("provider_probe", { endpoint, api_key: apiKey });
+      const res = await safeInvoke<{ models: string[] }>("provider_probe", { endpoint, apiKey });
       const models = capModels(res.models ?? []);
       return {
         ok: true,
@@ -917,9 +917,9 @@ export const api = {
   ttsStreamStart: (text: string, voice: string) =>
     safeInvoke<[number, number]>("tts_stream_start", { text, voice }),
   ttsStreamChunk: (streamId: number) =>
-    safeInvoke<[Uint8Array, number] | null>("tts_stream_chunk", { stream_id: streamId }),
+    safeInvoke<[Uint8Array, number] | null>("tts_stream_chunk", { streamId }),
   ttsStreamStop: (streamId: number) =>
-    safeInvoke<void>("tts_stream_stop", { stream_id: streamId }),
+    safeInvoke<void>("tts_stream_stop", { streamId }),
 
   // ── TTS render-ahead: pages + sample-accurate timeline ─────────
   ttsRenderStart: (segments: TtsRenderSegment[], params: TtsRenderParams) =>

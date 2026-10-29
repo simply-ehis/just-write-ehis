@@ -4,7 +4,7 @@ READ-WHEN: AI answers badly, swapping STT/TTS/LLM models, adding a new slot
 KEY-FILES: Settings → AI & Providers, src/lib/stores/audio.ts, src-tauri/sidecars/{stt,tts}_server.py, src-tauri/sidecars/build_sidecars.py
 INVARIANTS: small slot = ghost/light tasks; main slot = chat/composer/structurize; voice swaps apply on next sidecar start
 GOTCHAS: release builds package Python runtimes and weights; source runs need a PATH Python command plus requirements; TTS is ready before its lazy first synthesis; model swaps require a sidecar restart
-UPDATED: 2026-10-25
+UPDATED: 2026-10-29
 
 # MODELS.md — picks per job (researched Sept 2026)
 
@@ -30,13 +30,12 @@ so STT/TTS model fields only affect the desktop sidecars.
 
 ## Desktop runtime packaging
 
-The Windows release is self-contained for STT, TTS and AI memory: their
-runtimes and weights are packaged. The LLM is **not bundled at all** — no
-runner (`llama-server.exe` / ggml DLLs) and no weights ship in the installer.
-Local completion is opt-in: fetch the runner with `fetch_sidecars.py --llm`
-and drop a GGUF into `Documents/Just Write
-ehis/models`; without it the local slot reports unavailable instead of
-failing the build. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
+The Windows release is self-contained for STT, TTS, AI memory and the
+local LLM runner: their runtimes (and the STT/TTS weights) are packaged.
+The LLM **weights** are not bundled — no GGUF ships in the installer.
+Local completion is bring-your-own: drop a GGUF into `Documents/Just Write
+ehis/models`, pick it in Settings → AI; without one the local slot
+reports unavailable instead of failing the build. `tauri.windows.conf.json` runs `build_sidecars.py` before a Windows
 desktop build; that script creates `sidecars/bin/{stt,tts,memory}-server.exe`
 with PyInstaller. The Rust sidecar managers prefer those executables and pass
 `JWE_SIDECARS_DIR` so the packaged servers resolve the external model files

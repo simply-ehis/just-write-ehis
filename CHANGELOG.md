@@ -1,5 +1,29 @@
 ﻿# Changelog
 
+## Unreleased
+
+### Voice + local-model runner fixes
+
+**TTS streaming read-aloud is wired correctly again.** `api.ts` invoked
+`tts_stream_chunk` / `tts_stream_stop` with snake_case `stream_id`; Tauri v2
+maps command args to camelCase on the JS side, so every stream chunk failed
+with `invalid args streamId … missing required key streamId`. Same one-key
+fix for `provider_probe` (`api_key` → `apiKey` — the missing camelCase key
+silently became `None`, so authenticated endpoints were probed
+unauthenticated). Regression pins added to tts-timeline.
+
+**The llama.cpp runner is bundled again.** The earlier "remove bundled LLM"
+pass took out the runner together with the weights; the policy is now
+runner-in, weights-out: the installer ships `llama-server.exe` + its
+runtime DLLs (`tauri.windows.conf.json` resources), `build_sidecars.py`
+preflight requires them, and the release workflow fetches `--llm` again.
+LLM weights stay bring-your-own (a GGUF in `Documents/Just Write
+ehis/models`); MODELS.md, ARCHITECTURE.md, models/README.md and
+third-party notices follow.
+
+Tests: tts-timeline wiring pins (3 new), `test:assets` preflight now
+enforces the runner, source suite, svelte-check, vite build.
+
 ## 0.2.3 (2026-10-24)
 
 ### Phonon model name — directory mapping

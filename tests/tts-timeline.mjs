@@ -200,6 +200,12 @@ const norm = (s) => s.replace(/\s+/g, " ").trim();
   check("Ctrl+Shift+Arrow nudges the speed setting", btnSrc.includes("onSpeedKey") && btnSrc.includes('"ArrowUp"') && btnSrc.includes("ttsSpeed = next"));
   check("speed changes push to the live render job", btnSrc.includes("ttsRenderSetSpeed(currentRenderId"));
   check("api binds tts_render_set_speed", apiSrc.includes('"tts_render_set_speed"'));
+  // Tauri v2 maps command args to camelCase keys on the JS side; a
+  // snake_case key errors with "missing required key streamId". Pin the
+  // invoke payloads so this regression can't return silently.
+  check("api passes streamId (camelCase) to tts_stream_chunk", apiSrc.includes('("tts_stream_chunk", { streamId })'));
+  check("api passes streamId (camelCase) to tts_stream_stop", apiSrc.includes('("tts_stream_stop", { streamId })'));
+  check("api passes apiKey (camelCase) to provider_probe", apiSrc.includes('"provider_probe", { endpoint, apiKey })'));
   check("renderer stretches every segment (WSOLA)", renderSrc.includes("wsola_stretch(&pcm, shared.current_speed())"));
   check("synthesis runs at native rate 1.0", renderSrc.replace(/\s+/g, " ").includes("1.0, &params.lang_code,"));
   check("set_speed command defined", cmdSrc.includes("pub fn tts_render_set_speed"));

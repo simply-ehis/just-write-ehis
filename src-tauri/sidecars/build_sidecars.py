@@ -18,11 +18,15 @@ REQUIRED_ASSETS = (
     ROOT / "models" / "phonon-31m-en" / "tokenizer.json",
     ROOT / "models" / "phonon-31m-en" / "default-voice.safetensors",
     ROOT / "models" / "phonon-31m-en" / "voices.jsonl",
-    # The LLM is deliberately NOT bundled: no llama.cpp runner, no ggml DLLs
-    # and no chat GGUF ship in the installer. Local completion is
-    # bring-your-own (fetch_sidecars.py --llm plus a GGUF in
+    # The llama.cpp runner IS bundled (llama-server.exe + its runtime DLLs,
+    # fetched by fetch_sidecars.py --llm); the LLM weights are not — no GGUF
+    # ships in the installer. Local completion is bring-your-own (a GGUF in
     # Documents/Just Write ehis/models, see docs/MODELS.md); everyone else
     # uses an HTTP provider from Settings -> AI & Providers.
+    ROOT / "models" / "llama-server.exe",
+    ROOT / "models" / "llama-server-impl.dll",
+    ROOT / "models" / "llama.dll",
+    ROOT / "models" / "ggml.dll",
 )
 
 
@@ -44,7 +48,7 @@ def validate_assets() -> None:
         raise SystemExit(
             "Missing release assets: "
             + ", ".join(missing)
-            + ". Run fetch_sidecars.py --stt --phonon --typst, then retry."
+            + ". Run fetch_sidecars.py --stt --phonon --llm --typst, then retry."
         )
 
 
